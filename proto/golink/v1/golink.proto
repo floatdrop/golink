@@ -5,8 +5,6 @@ syntax = "proto3";
 
 package golink.v1;
 
-import "google/protobuf/any.proto";
-
 option go_package = "github.com/floatdrop/golink/proto/golink/v1;golinkv1";
 
 // Node is registered by a node on the application's gRPC server.
@@ -33,20 +31,52 @@ message PID {
   uint64 id = 3;
 }
 
+// Envelope is one interaction between two processes. Its processes are
+// named by incarnation and id alone: the sender is on the node that opened
+// the link, the target on the node that accepted it, so neither node name
+// travels with each envelope. It is one flat message so that decoding one
+// allocates little.
 message Envelope {
-  oneof kind {
-    Hello hello = 1;
-    Send send = 2;
-    Call call = 3;
-    Reply reply = 4;
-    Monitor monitor = 5;
-    Demonitor demonitor = 6;
-    Down down = 7;
-    Exit exit = 8;
-  }
+  Kind kind = 1;
+  // The process on the sending node; id 0 is the node itself.
+  uint64 from_incarnation = 2;
+  uint64 from_id = 3;
+  // The process on the receiving node, unless to_name addresses it by name.
+  uint64 to_incarnation = 4;
+  uint64 to_id = 5;
+  string to_name = 6;
+  // A call's id, echoed by its reply, or a monitor's id, echoed by its down.
+  uint64 ref = 7;
+  // A reply's status.
+  Status status = 8;
+  // A reply's error, or the reason of a down or an exit.
+  string reason = 9;
+  // The body of a send, a call or a reply: its message type's full name and
+  // its encoding.
+  string body_type = 10;
+  bytes body = 11;
+  Hello hello = 12;
   // Propagated context: trace headers, tenant, deadline. Never interpreted by
   // golink itself.
   map<string, string> metadata = 15;
+}
+
+enum Kind {
+  KIND_UNSPECIFIED = 0;
+  // The first envelope on a stream, sent by the server.
+  KIND_HELLO = 1;
+  // An asynchronous message.
+  KIND_SEND = 2;
+  // A request that expects a KIND_REPLY with the same ref.
+  KIND_CALL = 3;
+  KIND_REPLY = 4;
+  // Asks the target's node to send KIND_DOWN when the target exits.
+  KIND_MONITOR = 5;
+  KIND_DEMONITOR = 6;
+  // Tells the target that the sender exited.
+  KIND_DOWN = 7;
+  // Asks the target to terminate.
+  KIND_EXIT = 8;
 }
 
 // Hello is the first envelope on a stream, sent by the server. It names the
@@ -57,36 +87,10 @@ message Hello {
   uint32 version = 3;
 }
 
-// Send is an asynchronous message. Exactly one of to / to_name is set.
-message Send {
-  PID from = 1;
-  PID to = 2;
-  string to_name = 3;
-  google.protobuf.Any body = 4;
-}
-
-// Call is a request that expects a Reply carrying the same ref.
-message Call {
-  PID from = 1;
-  PID to = 2;
-  string to_name = 3;
-  uint64 ref = 4;
-  google.protobuf.Any body = 5;
-}
-
-message Reply {
-  PID from = 1;
-  PID to = 2;
-  uint64 ref = 3;
-  Status status = 4;
-  string error = 5;
-  google.protobuf.Any body = 6;
-}
-
 enum Status {
   STATUS_UNSPECIFIED = 0;
   STATUS_OK = 1;
-  // The handler returned an error; `error` carries its text.
+  // The handler returned an error; reason carries its text.
   STATUS_ERROR = 2;
   // No such process, or it exited before answering.
   STATUS_NOPROC = 3;
@@ -94,34 +98,3 @@ enum Status {
   STATUS_TYPE = 4;
 }
 
-// Monitor asks the target's node to send Down when the target exits.
-// ref is unique per watcher node.
-message Monitor {
-  PID from = 1;
-  PID to = 2;
-  string to_name = 3;
-  uint64 ref = 4;
-}
-
-message Demonitor {
-  PID from = 1;
-  PID to = 2;
-  string to_name = 3;
-  uint64 ref = 4;
-}
-
-// Down tells `to` that `from` exited. ref is the one given in Monitor.
-message Down {
-  PID from = 1;
-  PID to = 2;
-  uint64 ref = 3;
-  string reason = 4;
-}
-
-// Exit asks the target to terminate.
-message Exit {
-  PID from = 1;
-  PID to = 2;
-  string to_name = 3;
-  string reason = 4;
-}

@@ -14,7 +14,8 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 
 	golinkv1 "github.com/floatdrop/golink/proto/golink/v1"
 )
@@ -518,14 +519,12 @@ func (n *Node) send(from PID, sender *proc, to dest, body proto.Message, md Meta
 		n.deliver(from, pid, name, body, md, 0)
 		return nil
 	}
-	a, err := anypb.New(body)
-	if err != nil {
-		return fmt.Errorf("golink: encode: %w", err)
+	env := wire(golinkv1.Kind_KIND_SEND, from, pid, name)
+	env.Metadata = md
+	if err := encodeBody(env, body); err != nil {
+		return err
 	}
-	return n.route(pid.Node, &golinkv1.Envelope{
-		Kind:     &golinkv1.Envelope_Send{Send: &golinkv1.Send{From: pidTo(from), To: pidTo(pid), ToName: name, Body: a}},
-		Metadata: md,
-	})
+	return n.route(pid.Node, env)
 }
 
 func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to dest, req proto.Message, md Metadata) (_ proto.Message, err error) {
@@ -557,15 +556,12 @@ func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to dest, req 
 		}
 		n.deliver(from, pid, name, req, md, ref)
 	} else {
-		a, err := anypb.New(req)
-		if err != nil {
-			return nil, fmt.Errorf("golink: encode: %w", err)
+		env := wire(golinkv1.Kind_KIND_CALL, from, pid, name)
+		env.Ref, env.Metadata = ref, md
+		if err := encodeBody(env, req); err != nil {
+			return nil, err
 		}
-		err = n.route(pid.Node, &golinkv1.Envelope{
-			Kind:     &golinkv1.Envelope_Call{Call: &golinkv1.Call{From: pidTo(from), To: pidTo(pid), ToName: name, Ref: ref, Body: a}},
-			Metadata: md,
-		})
-		if err != nil {
+		if err := n.route(pid.Node, env); err != nil {
 			return nil, err
 		}
 	}
@@ -582,16 +578,14 @@ func (n *Node) reply(from, to PID, ref uint64, body proto.Message, status golink
 		n.deliverReply(ref, body, status, errText)
 		return nil
 	}
-	var a *anypb.Any
+	env := wire(golinkv1.Kind_KIND_REPLY, from, to, "")
+	env.Ref, env.Status, env.Reason = ref, status, errText
 	if body != nil {
-		var err error
-		if a, err = anypb.New(body); err != nil {
-			return fmt.Errorf("golink: encode reply: %w", err)
+		if err := encodeBody(env, body); err != nil {
+			return err
 		}
 	}
-	return n.route(to.Node, &golinkv1.Envelope{Kind: &golinkv1.Envelope_Reply{Reply: &golinkv1.Reply{
-		From: pidTo(from), To: pidTo(to), Ref: ref, Status: status, Error: errText, Body: a,
-	}}})
+	return n.route(to.Node, env)
 }
 
 func (n *Node) monitor(from PID, to Target, ref uint64) error {
@@ -600,9 +594,9 @@ func (n *Node) monitor(from PID, to Target, ref uint64) error {
 		n.deliverMonitor(from, pid, name, ref)
 		return nil
 	}
-	return n.route(pid.Node, &golinkv1.Envelope{Kind: &golinkv1.Envelope_Monitor{Monitor: &golinkv1.Monitor{
-		From: pidTo(from), To: pidTo(pid), ToName: name, Ref: ref,
-	}}})
+	env := wire(golinkv1.Kind_KIND_MONITOR, from, pid, name)
+	env.Ref = ref
+	return n.route(pid.Node, env)
 }
 
 func (n *Node) demonitor(from PID, to Target, ref uint64) error {
@@ -611,9 +605,9 @@ func (n *Node) demonitor(from PID, to Target, ref uint64) error {
 		n.deliverDemonitor(from, pid, name, ref)
 		return nil
 	}
-	return n.route(pid.Node, &golinkv1.Envelope{Kind: &golinkv1.Envelope_Demonitor{Demonitor: &golinkv1.Demonitor{
-		From: pidTo(from), To: pidTo(pid), ToName: name, Ref: ref,
-	}}})
+	env := wire(golinkv1.Kind_KIND_DEMONITOR, from, pid, name)
+	env.Ref = ref
+	return n.route(pid.Node, env)
 }
 
 func (n *Node) down(from, to PID, ref uint64, reason string) error {
@@ -621,9 +615,9 @@ func (n *Node) down(from, to PID, ref uint64, reason string) error {
 		n.deliverDown(from, to, ref, reason)
 		return nil
 	}
-	return n.route(to.Node, &golinkv1.Envelope{Kind: &golinkv1.Envelope_Down{Down: &golinkv1.Down{
-		From: pidTo(from), To: pidTo(to), Ref: ref, Reason: reason,
-	}}})
+	env := wire(golinkv1.Kind_KIND_DOWN, from, to, "")
+	env.Ref, env.Reason = ref, reason
+	return n.route(to.Node, env)
 }
 
 func (n *Node) exit(from PID, to Target, reason string) error {
@@ -632,9 +626,9 @@ func (n *Node) exit(from PID, to Target, reason string) error {
 		n.deliverExit(pid, name, reason)
 		return nil
 	}
-	return n.route(pid.Node, &golinkv1.Envelope{Kind: &golinkv1.Envelope_Exit{Exit: &golinkv1.Exit{
-		From: pidTo(from), To: pidTo(pid), ToName: name, Reason: reason,
-	}}})
+	env := wire(golinkv1.Kind_KIND_EXIT, from, pid, name)
+	env.Reason = reason
+	return n.route(pid.Node, env)
 }
 
 // route queues env on the link to node, dialing it if needed.
@@ -741,43 +735,47 @@ func (n *Node) deadLetter(from, to PID, body proto.Message, reason string) {
 	n.log.Debug("dead letter", "from", from, "to", to, "reason", reason, "type", typeName(body))
 }
 
-// dispatch handles an envelope that arrived on an inbound link.
-func (n *Node) dispatch(env *golinkv1.Envelope) {
-	switch k := env.Kind.(type) {
-	case *golinkv1.Envelope_Send:
-		body, err := decode(k.Send.Body)
+// dispatch handles an envelope that arrived on the inbound link from peer:
+// its sender is a process of peer, its target one of this node.
+func (n *Node) dispatch(peer string, env *golinkv1.Envelope) {
+	from := PID{Node: peer, Incarnation: env.GetFromIncarnation(), ID: env.GetFromId()}
+	to := PID{Node: n.id.Name, Incarnation: env.GetToIncarnation(), ID: env.GetToId()}
+	name, ref := env.GetToName(), env.GetRef()
+	switch env.GetKind() {
+	case golinkv1.Kind_KIND_SEND:
+		body, err := decodeBody(env)
 		if err != nil {
 			n.log.Warn("undecodable message", "err", err)
-			n.deadLetter(pidFrom(k.Send.From), pidFrom(k.Send.To), nil, ReasonType)
+			n.deadLetter(from, to, nil, ReasonType)
 			return
 		}
-		n.deliver(pidFrom(k.Send.From), pidFrom(k.Send.To), k.Send.ToName, body, env.Metadata, 0)
-	case *golinkv1.Envelope_Call:
-		body, err := decode(k.Call.Body)
+		n.deliver(from, to, name, body, env.GetMetadata(), 0)
+	case golinkv1.Kind_KIND_CALL:
+		body, err := decodeBody(env)
 		if err != nil {
 			n.log.Warn("undecodable call", "err", err)
-			_ = n.reply(pidFrom(k.Call.To), pidFrom(k.Call.From), k.Call.Ref, nil, golinkv1.Status_STATUS_TYPE, "")
+			_ = n.reply(to, from, ref, nil, golinkv1.Status_STATUS_TYPE, "")
 			return
 		}
-		n.deliver(pidFrom(k.Call.From), pidFrom(k.Call.To), k.Call.ToName, body, env.Metadata, k.Call.Ref)
-	case *golinkv1.Envelope_Reply:
+		n.deliver(from, to, name, body, env.GetMetadata(), ref)
+	case golinkv1.Kind_KIND_REPLY:
 		var body proto.Message
-		if k.Reply.Body != nil {
+		if env.GetBodyType() != "" {
 			var err error
-			if body, err = decode(k.Reply.Body); err != nil {
-				n.deliverReply(k.Reply.Ref, nil, golinkv1.Status_STATUS_TYPE, "")
+			if body, err = decodeBody(env); err != nil {
+				n.deliverReply(ref, nil, golinkv1.Status_STATUS_TYPE, "")
 				return
 			}
 		}
-		n.deliverReply(k.Reply.Ref, body, k.Reply.Status, k.Reply.Error)
-	case *golinkv1.Envelope_Monitor:
-		n.deliverMonitor(pidFrom(k.Monitor.From), pidFrom(k.Monitor.To), k.Monitor.ToName, k.Monitor.Ref)
-	case *golinkv1.Envelope_Demonitor:
-		n.deliverDemonitor(pidFrom(k.Demonitor.From), pidFrom(k.Demonitor.To), k.Demonitor.ToName, k.Demonitor.Ref)
-	case *golinkv1.Envelope_Down:
-		n.deliverDown(pidFrom(k.Down.From), pidFrom(k.Down.To), k.Down.Ref, k.Down.Reason)
-	case *golinkv1.Envelope_Exit:
-		n.deliverExit(pidFrom(k.Exit.To), k.Exit.ToName, k.Exit.Reason)
+		n.deliverReply(ref, body, env.GetStatus(), env.GetReason())
+	case golinkv1.Kind_KIND_MONITOR:
+		n.deliverMonitor(from, to, name, ref)
+	case golinkv1.Kind_KIND_DEMONITOR:
+		n.deliverDemonitor(from, to, name, ref)
+	case golinkv1.Kind_KIND_DOWN:
+		n.deliverDown(from, to, ref, env.GetReason())
+	case golinkv1.Kind_KIND_EXIT:
+		n.deliverExit(to, name, env.GetReason())
 	}
 }
 
@@ -815,24 +813,40 @@ func (n *Node) nodeDown(peer string, err error) {
 	n.log.Debug("node down", "peer", peer, "err", err)
 }
 
-// ---------- proto helpers ----------
+// ---------- wire helpers ----------
 
-func pidTo(p PID) *golinkv1.PID {
-	return &golinkv1.PID{Node: p.Node, Incarnation: p.Incarnation, Id: p.ID}
-}
-
-func pidFrom(p *golinkv1.PID) PID {
-	if p == nil {
-		return PID{}
+// wire starts an envelope from a process of this node to one of the node it
+// is sent to; the node names are the link's, not the envelope's.
+func wire(kind golinkv1.Kind, from, to PID, name string) *golinkv1.Envelope {
+	return &golinkv1.Envelope{
+		Kind:            kind,
+		FromIncarnation: from.Incarnation, FromId: from.ID,
+		ToIncarnation: to.Incarnation, ToId: to.ID, ToName: name,
 	}
-	return PID{Node: p.Node, Incarnation: p.Incarnation, ID: p.Id}
 }
 
-func decode(a *anypb.Any) (proto.Message, error) {
-	if a == nil {
+func encodeBody(env *golinkv1.Envelope, m proto.Message) error {
+	b, err := proto.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("golink: encode: %w", err)
+	}
+	env.BodyType, env.Body = typeName(m), b
+	return nil
+}
+
+func decodeBody(env *golinkv1.Envelope) (proto.Message, error) {
+	if env.GetBodyType() == "" {
 		return nil, errors.New("golink: empty body")
 	}
-	return a.UnmarshalNew()
+	mt, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(env.GetBodyType()))
+	if err != nil {
+		return nil, err
+	}
+	m := mt.New().Interface()
+	if err := proto.Unmarshal(env.GetBody(), m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 func typeName(m proto.Message) string {

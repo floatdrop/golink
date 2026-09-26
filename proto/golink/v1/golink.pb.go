@@ -13,7 +13,6 @@ package golinkv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	anypb "google.golang.org/protobuf/types/known/anypb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -26,12 +25,85 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type Kind int32
+
+const (
+	Kind_KIND_UNSPECIFIED Kind = 0
+	// The first envelope on a stream, sent by the server.
+	Kind_KIND_HELLO Kind = 1
+	// An asynchronous message.
+	Kind_KIND_SEND Kind = 2
+	// A request that expects a KIND_REPLY with the same ref.
+	Kind_KIND_CALL  Kind = 3
+	Kind_KIND_REPLY Kind = 4
+	// Asks the target's node to send KIND_DOWN when the target exits.
+	Kind_KIND_MONITOR   Kind = 5
+	Kind_KIND_DEMONITOR Kind = 6
+	// Tells the target that the sender exited.
+	Kind_KIND_DOWN Kind = 7
+	// Asks the target to terminate.
+	Kind_KIND_EXIT Kind = 8
+)
+
+// Enum value maps for Kind.
+var (
+	Kind_name = map[int32]string{
+		0: "KIND_UNSPECIFIED",
+		1: "KIND_HELLO",
+		2: "KIND_SEND",
+		3: "KIND_CALL",
+		4: "KIND_REPLY",
+		5: "KIND_MONITOR",
+		6: "KIND_DEMONITOR",
+		7: "KIND_DOWN",
+		8: "KIND_EXIT",
+	}
+	Kind_value = map[string]int32{
+		"KIND_UNSPECIFIED": 0,
+		"KIND_HELLO":       1,
+		"KIND_SEND":        2,
+		"KIND_CALL":        3,
+		"KIND_REPLY":       4,
+		"KIND_MONITOR":     5,
+		"KIND_DEMONITOR":   6,
+		"KIND_DOWN":        7,
+		"KIND_EXIT":        8,
+	}
+)
+
+func (x Kind) Enum() *Kind {
+	p := new(Kind)
+	*p = x
+	return p
+}
+
+func (x Kind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Kind) Descriptor() protoreflect.EnumDescriptor {
+	return file_golink_v1_golink_proto_enumTypes[0].Descriptor()
+}
+
+func (Kind) Type() protoreflect.EnumType {
+	return &file_golink_v1_golink_proto_enumTypes[0]
+}
+
+func (x Kind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Kind.Descriptor instead.
+func (Kind) EnumDescriptor() ([]byte, []int) {
+	return file_golink_v1_golink_proto_rawDescGZIP(), []int{0}
+}
+
 type Status int32
 
 const (
 	Status_STATUS_UNSPECIFIED Status = 0
 	Status_STATUS_OK          Status = 1
-	// The handler returned an error; `error` carries its text.
+	// The handler returned an error; reason carries its text.
 	Status_STATUS_ERROR Status = 2
 	// No such process, or it exited before answering.
 	Status_STATUS_NOPROC Status = 3
@@ -68,11 +140,11 @@ func (x Status) String() string {
 }
 
 func (Status) Descriptor() protoreflect.EnumDescriptor {
-	return file_golink_v1_golink_proto_enumTypes[0].Descriptor()
+	return file_golink_v1_golink_proto_enumTypes[1].Descriptor()
 }
 
 func (Status) Type() protoreflect.EnumType {
-	return &file_golink_v1_golink_proto_enumTypes[0]
+	return &file_golink_v1_golink_proto_enumTypes[1]
 }
 
 func (x Status) Number() protoreflect.EnumNumber {
@@ -81,7 +153,7 @@ func (x Status) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Status.Descriptor instead.
 func (Status) EnumDescriptor() ([]byte, []int) {
-	return file_golink_v1_golink_proto_rawDescGZIP(), []int{0}
+	return file_golink_v1_golink_proto_rawDescGZIP(), []int{1}
 }
 
 // Frame is what a link writes at once: every envelope queued since its last
@@ -193,19 +265,32 @@ func (x *PID) GetId() uint64 {
 	return 0
 }
 
+// Envelope is one interaction between two processes. Its processes are
+// named by incarnation and id alone: the sender is on the node that opened
+// the link, the target on the node that accepted it, so neither node name
+// travels with each envelope. It is one flat message so that decoding one
+// allocates little.
 type Envelope struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Types that are valid to be assigned to Kind:
-	//
-	//	*Envelope_Hello
-	//	*Envelope_Send
-	//	*Envelope_Call
-	//	*Envelope_Reply
-	//	*Envelope_Monitor
-	//	*Envelope_Demonitor
-	//	*Envelope_Down
-	//	*Envelope_Exit
-	Kind isEnvelope_Kind `protobuf_oneof:"kind"`
+	Kind  Kind                   `protobuf:"varint,1,opt,name=kind,proto3,enum=golink.v1.Kind" json:"kind,omitempty"`
+	// The process on the sending node; id 0 is the node itself.
+	FromIncarnation uint64 `protobuf:"varint,2,opt,name=from_incarnation,json=fromIncarnation,proto3" json:"from_incarnation,omitempty"`
+	FromId          uint64 `protobuf:"varint,3,opt,name=from_id,json=fromId,proto3" json:"from_id,omitempty"`
+	// The process on the receiving node, unless to_name addresses it by name.
+	ToIncarnation uint64 `protobuf:"varint,4,opt,name=to_incarnation,json=toIncarnation,proto3" json:"to_incarnation,omitempty"`
+	ToId          uint64 `protobuf:"varint,5,opt,name=to_id,json=toId,proto3" json:"to_id,omitempty"`
+	ToName        string `protobuf:"bytes,6,opt,name=to_name,json=toName,proto3" json:"to_name,omitempty"`
+	// A call's id, echoed by its reply, or a monitor's id, echoed by its down.
+	Ref uint64 `protobuf:"varint,7,opt,name=ref,proto3" json:"ref,omitempty"`
+	// A reply's status.
+	Status Status `protobuf:"varint,8,opt,name=status,proto3,enum=golink.v1.Status" json:"status,omitempty"`
+	// A reply's error, or the reason of a down or an exit.
+	Reason string `protobuf:"bytes,9,opt,name=reason,proto3" json:"reason,omitempty"`
+	// The body of a send, a call or a reply: its message type's full name and
+	// its encoding.
+	BodyType string `protobuf:"bytes,10,opt,name=body_type,json=bodyType,proto3" json:"body_type,omitempty"`
+	Body     []byte `protobuf:"bytes,11,opt,name=body,proto3" json:"body,omitempty"`
+	Hello    *Hello `protobuf:"bytes,12,opt,name=hello,proto3" json:"hello,omitempty"`
 	// Propagated context: trace headers, tenant, deadline. Never interpreted by
 	// golink itself.
 	Metadata      map[string]string `protobuf:"bytes,15,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
@@ -243,81 +328,86 @@ func (*Envelope) Descriptor() ([]byte, []int) {
 	return file_golink_v1_golink_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *Envelope) GetKind() isEnvelope_Kind {
+func (x *Envelope) GetKind() Kind {
 	if x != nil {
 		return x.Kind
+	}
+	return Kind_KIND_UNSPECIFIED
+}
+
+func (x *Envelope) GetFromIncarnation() uint64 {
+	if x != nil {
+		return x.FromIncarnation
+	}
+	return 0
+}
+
+func (x *Envelope) GetFromId() uint64 {
+	if x != nil {
+		return x.FromId
+	}
+	return 0
+}
+
+func (x *Envelope) GetToIncarnation() uint64 {
+	if x != nil {
+		return x.ToIncarnation
+	}
+	return 0
+}
+
+func (x *Envelope) GetToId() uint64 {
+	if x != nil {
+		return x.ToId
+	}
+	return 0
+}
+
+func (x *Envelope) GetToName() string {
+	if x != nil {
+		return x.ToName
+	}
+	return ""
+}
+
+func (x *Envelope) GetRef() uint64 {
+	if x != nil {
+		return x.Ref
+	}
+	return 0
+}
+
+func (x *Envelope) GetStatus() Status {
+	if x != nil {
+		return x.Status
+	}
+	return Status_STATUS_UNSPECIFIED
+}
+
+func (x *Envelope) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *Envelope) GetBodyType() string {
+	if x != nil {
+		return x.BodyType
+	}
+	return ""
+}
+
+func (x *Envelope) GetBody() []byte {
+	if x != nil {
+		return x.Body
 	}
 	return nil
 }
 
 func (x *Envelope) GetHello() *Hello {
 	if x != nil {
-		if x, ok := x.Kind.(*Envelope_Hello); ok {
-			return x.Hello
-		}
-	}
-	return nil
-}
-
-func (x *Envelope) GetSend() *Send {
-	if x != nil {
-		if x, ok := x.Kind.(*Envelope_Send); ok {
-			return x.Send
-		}
-	}
-	return nil
-}
-
-func (x *Envelope) GetCall() *Call {
-	if x != nil {
-		if x, ok := x.Kind.(*Envelope_Call); ok {
-			return x.Call
-		}
-	}
-	return nil
-}
-
-func (x *Envelope) GetReply() *Reply {
-	if x != nil {
-		if x, ok := x.Kind.(*Envelope_Reply); ok {
-			return x.Reply
-		}
-	}
-	return nil
-}
-
-func (x *Envelope) GetMonitor() *Monitor {
-	if x != nil {
-		if x, ok := x.Kind.(*Envelope_Monitor); ok {
-			return x.Monitor
-		}
-	}
-	return nil
-}
-
-func (x *Envelope) GetDemonitor() *Demonitor {
-	if x != nil {
-		if x, ok := x.Kind.(*Envelope_Demonitor); ok {
-			return x.Demonitor
-		}
-	}
-	return nil
-}
-
-func (x *Envelope) GetDown() *Down {
-	if x != nil {
-		if x, ok := x.Kind.(*Envelope_Down); ok {
-			return x.Down
-		}
-	}
-	return nil
-}
-
-func (x *Envelope) GetExit() *Exit {
-	if x != nil {
-		if x, ok := x.Kind.(*Envelope_Exit); ok {
-			return x.Exit
-		}
+		return x.Hello
 	}
 	return nil
 }
@@ -328,58 +418,6 @@ func (x *Envelope) GetMetadata() map[string]string {
 	}
 	return nil
 }
-
-type isEnvelope_Kind interface {
-	isEnvelope_Kind()
-}
-
-type Envelope_Hello struct {
-	Hello *Hello `protobuf:"bytes,1,opt,name=hello,proto3,oneof"`
-}
-
-type Envelope_Send struct {
-	Send *Send `protobuf:"bytes,2,opt,name=send,proto3,oneof"`
-}
-
-type Envelope_Call struct {
-	Call *Call `protobuf:"bytes,3,opt,name=call,proto3,oneof"`
-}
-
-type Envelope_Reply struct {
-	Reply *Reply `protobuf:"bytes,4,opt,name=reply,proto3,oneof"`
-}
-
-type Envelope_Monitor struct {
-	Monitor *Monitor `protobuf:"bytes,5,opt,name=monitor,proto3,oneof"`
-}
-
-type Envelope_Demonitor struct {
-	Demonitor *Demonitor `protobuf:"bytes,6,opt,name=demonitor,proto3,oneof"`
-}
-
-type Envelope_Down struct {
-	Down *Down `protobuf:"bytes,7,opt,name=down,proto3,oneof"`
-}
-
-type Envelope_Exit struct {
-	Exit *Exit `protobuf:"bytes,8,opt,name=exit,proto3,oneof"`
-}
-
-func (*Envelope_Hello) isEnvelope_Kind() {}
-
-func (*Envelope_Send) isEnvelope_Kind() {}
-
-func (*Envelope_Call) isEnvelope_Kind() {}
-
-func (*Envelope_Reply) isEnvelope_Kind() {}
-
-func (*Envelope_Monitor) isEnvelope_Kind() {}
-
-func (*Envelope_Demonitor) isEnvelope_Kind() {}
-
-func (*Envelope_Down) isEnvelope_Kind() {}
-
-func (*Envelope_Exit) isEnvelope_Kind() {}
 
 // Hello is the first envelope on a stream, sent by the server. It names the
 // node the client actually reached.
@@ -443,579 +481,51 @@ func (x *Hello) GetVersion() uint32 {
 	return 0
 }
 
-// Send is an asynchronous message. Exactly one of to / to_name is set.
-type Send struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	From          *PID                   `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
-	To            *PID                   `protobuf:"bytes,2,opt,name=to,proto3" json:"to,omitempty"`
-	ToName        string                 `protobuf:"bytes,3,opt,name=to_name,json=toName,proto3" json:"to_name,omitempty"`
-	Body          *anypb.Any             `protobuf:"bytes,4,opt,name=body,proto3" json:"body,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Send) Reset() {
-	*x = Send{}
-	mi := &file_golink_v1_golink_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Send) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Send) ProtoMessage() {}
-
-func (x *Send) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_v1_golink_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Send.ProtoReflect.Descriptor instead.
-func (*Send) Descriptor() ([]byte, []int) {
-	return file_golink_v1_golink_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *Send) GetFrom() *PID {
-	if x != nil {
-		return x.From
-	}
-	return nil
-}
-
-func (x *Send) GetTo() *PID {
-	if x != nil {
-		return x.To
-	}
-	return nil
-}
-
-func (x *Send) GetToName() string {
-	if x != nil {
-		return x.ToName
-	}
-	return ""
-}
-
-func (x *Send) GetBody() *anypb.Any {
-	if x != nil {
-		return x.Body
-	}
-	return nil
-}
-
-// Call is a request that expects a Reply carrying the same ref.
-type Call struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	From          *PID                   `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
-	To            *PID                   `protobuf:"bytes,2,opt,name=to,proto3" json:"to,omitempty"`
-	ToName        string                 `protobuf:"bytes,3,opt,name=to_name,json=toName,proto3" json:"to_name,omitempty"`
-	Ref           uint64                 `protobuf:"varint,4,opt,name=ref,proto3" json:"ref,omitempty"`
-	Body          *anypb.Any             `protobuf:"bytes,5,opt,name=body,proto3" json:"body,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Call) Reset() {
-	*x = Call{}
-	mi := &file_golink_v1_golink_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Call) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Call) ProtoMessage() {}
-
-func (x *Call) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_v1_golink_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Call.ProtoReflect.Descriptor instead.
-func (*Call) Descriptor() ([]byte, []int) {
-	return file_golink_v1_golink_proto_rawDescGZIP(), []int{5}
-}
-
-func (x *Call) GetFrom() *PID {
-	if x != nil {
-		return x.From
-	}
-	return nil
-}
-
-func (x *Call) GetTo() *PID {
-	if x != nil {
-		return x.To
-	}
-	return nil
-}
-
-func (x *Call) GetToName() string {
-	if x != nil {
-		return x.ToName
-	}
-	return ""
-}
-
-func (x *Call) GetRef() uint64 {
-	if x != nil {
-		return x.Ref
-	}
-	return 0
-}
-
-func (x *Call) GetBody() *anypb.Any {
-	if x != nil {
-		return x.Body
-	}
-	return nil
-}
-
-type Reply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	From          *PID                   `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
-	To            *PID                   `protobuf:"bytes,2,opt,name=to,proto3" json:"to,omitempty"`
-	Ref           uint64                 `protobuf:"varint,3,opt,name=ref,proto3" json:"ref,omitempty"`
-	Status        Status                 `protobuf:"varint,4,opt,name=status,proto3,enum=golink.v1.Status" json:"status,omitempty"`
-	Error         string                 `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
-	Body          *anypb.Any             `protobuf:"bytes,6,opt,name=body,proto3" json:"body,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Reply) Reset() {
-	*x = Reply{}
-	mi := &file_golink_v1_golink_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Reply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Reply) ProtoMessage() {}
-
-func (x *Reply) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_v1_golink_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Reply.ProtoReflect.Descriptor instead.
-func (*Reply) Descriptor() ([]byte, []int) {
-	return file_golink_v1_golink_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *Reply) GetFrom() *PID {
-	if x != nil {
-		return x.From
-	}
-	return nil
-}
-
-func (x *Reply) GetTo() *PID {
-	if x != nil {
-		return x.To
-	}
-	return nil
-}
-
-func (x *Reply) GetRef() uint64 {
-	if x != nil {
-		return x.Ref
-	}
-	return 0
-}
-
-func (x *Reply) GetStatus() Status {
-	if x != nil {
-		return x.Status
-	}
-	return Status_STATUS_UNSPECIFIED
-}
-
-func (x *Reply) GetError() string {
-	if x != nil {
-		return x.Error
-	}
-	return ""
-}
-
-func (x *Reply) GetBody() *anypb.Any {
-	if x != nil {
-		return x.Body
-	}
-	return nil
-}
-
-// Monitor asks the target's node to send Down when the target exits.
-// ref is unique per watcher node.
-type Monitor struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	From          *PID                   `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
-	To            *PID                   `protobuf:"bytes,2,opt,name=to,proto3" json:"to,omitempty"`
-	ToName        string                 `protobuf:"bytes,3,opt,name=to_name,json=toName,proto3" json:"to_name,omitempty"`
-	Ref           uint64                 `protobuf:"varint,4,opt,name=ref,proto3" json:"ref,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Monitor) Reset() {
-	*x = Monitor{}
-	mi := &file_golink_v1_golink_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Monitor) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Monitor) ProtoMessage() {}
-
-func (x *Monitor) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_v1_golink_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Monitor.ProtoReflect.Descriptor instead.
-func (*Monitor) Descriptor() ([]byte, []int) {
-	return file_golink_v1_golink_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *Monitor) GetFrom() *PID {
-	if x != nil {
-		return x.From
-	}
-	return nil
-}
-
-func (x *Monitor) GetTo() *PID {
-	if x != nil {
-		return x.To
-	}
-	return nil
-}
-
-func (x *Monitor) GetToName() string {
-	if x != nil {
-		return x.ToName
-	}
-	return ""
-}
-
-func (x *Monitor) GetRef() uint64 {
-	if x != nil {
-		return x.Ref
-	}
-	return 0
-}
-
-type Demonitor struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	From          *PID                   `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
-	To            *PID                   `protobuf:"bytes,2,opt,name=to,proto3" json:"to,omitempty"`
-	ToName        string                 `protobuf:"bytes,3,opt,name=to_name,json=toName,proto3" json:"to_name,omitempty"`
-	Ref           uint64                 `protobuf:"varint,4,opt,name=ref,proto3" json:"ref,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Demonitor) Reset() {
-	*x = Demonitor{}
-	mi := &file_golink_v1_golink_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Demonitor) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Demonitor) ProtoMessage() {}
-
-func (x *Demonitor) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_v1_golink_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Demonitor.ProtoReflect.Descriptor instead.
-func (*Demonitor) Descriptor() ([]byte, []int) {
-	return file_golink_v1_golink_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *Demonitor) GetFrom() *PID {
-	if x != nil {
-		return x.From
-	}
-	return nil
-}
-
-func (x *Demonitor) GetTo() *PID {
-	if x != nil {
-		return x.To
-	}
-	return nil
-}
-
-func (x *Demonitor) GetToName() string {
-	if x != nil {
-		return x.ToName
-	}
-	return ""
-}
-
-func (x *Demonitor) GetRef() uint64 {
-	if x != nil {
-		return x.Ref
-	}
-	return 0
-}
-
-// Down tells `to` that `from` exited. ref is the one given in Monitor.
-type Down struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	From          *PID                   `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
-	To            *PID                   `protobuf:"bytes,2,opt,name=to,proto3" json:"to,omitempty"`
-	Ref           uint64                 `protobuf:"varint,3,opt,name=ref,proto3" json:"ref,omitempty"`
-	Reason        string                 `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Down) Reset() {
-	*x = Down{}
-	mi := &file_golink_v1_golink_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Down) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Down) ProtoMessage() {}
-
-func (x *Down) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_v1_golink_proto_msgTypes[9]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Down.ProtoReflect.Descriptor instead.
-func (*Down) Descriptor() ([]byte, []int) {
-	return file_golink_v1_golink_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *Down) GetFrom() *PID {
-	if x != nil {
-		return x.From
-	}
-	return nil
-}
-
-func (x *Down) GetTo() *PID {
-	if x != nil {
-		return x.To
-	}
-	return nil
-}
-
-func (x *Down) GetRef() uint64 {
-	if x != nil {
-		return x.Ref
-	}
-	return 0
-}
-
-func (x *Down) GetReason() string {
-	if x != nil {
-		return x.Reason
-	}
-	return ""
-}
-
-// Exit asks the target to terminate.
-type Exit struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	From          *PID                   `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
-	To            *PID                   `protobuf:"bytes,2,opt,name=to,proto3" json:"to,omitempty"`
-	ToName        string                 `protobuf:"bytes,3,opt,name=to_name,json=toName,proto3" json:"to_name,omitempty"`
-	Reason        string                 `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Exit) Reset() {
-	*x = Exit{}
-	mi := &file_golink_v1_golink_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Exit) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Exit) ProtoMessage() {}
-
-func (x *Exit) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_v1_golink_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Exit.ProtoReflect.Descriptor instead.
-func (*Exit) Descriptor() ([]byte, []int) {
-	return file_golink_v1_golink_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *Exit) GetFrom() *PID {
-	if x != nil {
-		return x.From
-	}
-	return nil
-}
-
-func (x *Exit) GetTo() *PID {
-	if x != nil {
-		return x.To
-	}
-	return nil
-}
-
-func (x *Exit) GetToName() string {
-	if x != nil {
-		return x.ToName
-	}
-	return ""
-}
-
-func (x *Exit) GetReason() string {
-	if x != nil {
-		return x.Reason
-	}
-	return ""
-}
-
 var File_golink_v1_golink_proto protoreflect.FileDescriptor
 
 const file_golink_v1_golink_proto_rawDesc = "" +
 	"\n" +
-	"\x16golink/v1/golink.proto\x12\tgolink.v1\x1a\x19google/protobuf/any.proto\":\n" +
+	"\x16golink/v1/golink.proto\x12\tgolink.v1\":\n" +
 	"\x05Frame\x121\n" +
 	"\tenvelopes\x18\x01 \x03(\v2\x13.golink.v1.EnvelopeR\tenvelopes\"K\n" +
 	"\x03PID\x12\x12\n" +
 	"\x04node\x18\x01 \x01(\tR\x04node\x12 \n" +
 	"\vincarnation\x18\x02 \x01(\x04R\vincarnation\x12\x0e\n" +
-	"\x02id\x18\x03 \x01(\x04R\x02id\"\xe4\x03\n" +
-	"\bEnvelope\x12(\n" +
-	"\x05hello\x18\x01 \x01(\v2\x10.golink.v1.HelloH\x00R\x05hello\x12%\n" +
-	"\x04send\x18\x02 \x01(\v2\x0f.golink.v1.SendH\x00R\x04send\x12%\n" +
-	"\x04call\x18\x03 \x01(\v2\x0f.golink.v1.CallH\x00R\x04call\x12(\n" +
-	"\x05reply\x18\x04 \x01(\v2\x10.golink.v1.ReplyH\x00R\x05reply\x12.\n" +
-	"\amonitor\x18\x05 \x01(\v2\x12.golink.v1.MonitorH\x00R\amonitor\x124\n" +
-	"\tdemonitor\x18\x06 \x01(\v2\x14.golink.v1.DemonitorH\x00R\tdemonitor\x12%\n" +
-	"\x04down\x18\a \x01(\v2\x0f.golink.v1.DownH\x00R\x04down\x12%\n" +
-	"\x04exit\x18\b \x01(\v2\x0f.golink.v1.ExitH\x00R\x04exit\x12=\n" +
+	"\x02id\x18\x03 \x01(\x04R\x02id\"\xf2\x03\n" +
+	"\bEnvelope\x12#\n" +
+	"\x04kind\x18\x01 \x01(\x0e2\x0f.golink.v1.KindR\x04kind\x12)\n" +
+	"\x10from_incarnation\x18\x02 \x01(\x04R\x0ffromIncarnation\x12\x17\n" +
+	"\afrom_id\x18\x03 \x01(\x04R\x06fromId\x12%\n" +
+	"\x0eto_incarnation\x18\x04 \x01(\x04R\rtoIncarnation\x12\x13\n" +
+	"\x05to_id\x18\x05 \x01(\x04R\x04toId\x12\x17\n" +
+	"\ato_name\x18\x06 \x01(\tR\x06toName\x12\x10\n" +
+	"\x03ref\x18\a \x01(\x04R\x03ref\x12)\n" +
+	"\x06status\x18\b \x01(\x0e2\x11.golink.v1.StatusR\x06status\x12\x16\n" +
+	"\x06reason\x18\t \x01(\tR\x06reason\x12\x1b\n" +
+	"\tbody_type\x18\n" +
+	" \x01(\tR\bbodyType\x12\x12\n" +
+	"\x04body\x18\v \x01(\fR\x04body\x12&\n" +
+	"\x05hello\x18\f \x01(\v2\x10.golink.v1.HelloR\x05hello\x12=\n" +
 	"\bmetadata\x18\x0f \x03(\v2!.golink.v1.Envelope.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\x06\n" +
-	"\x04kind\"W\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"W\n" +
 	"\x05Hello\x12\x12\n" +
 	"\x04node\x18\x01 \x01(\tR\x04node\x12 \n" +
 	"\vincarnation\x18\x02 \x01(\x04R\vincarnation\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\rR\aversion\"\x8d\x01\n" +
-	"\x04Send\x12\"\n" +
-	"\x04from\x18\x01 \x01(\v2\x0e.golink.v1.PIDR\x04from\x12\x1e\n" +
-	"\x02to\x18\x02 \x01(\v2\x0e.golink.v1.PIDR\x02to\x12\x17\n" +
-	"\ato_name\x18\x03 \x01(\tR\x06toName\x12(\n" +
-	"\x04body\x18\x04 \x01(\v2\x14.google.protobuf.AnyR\x04body\"\x9f\x01\n" +
-	"\x04Call\x12\"\n" +
-	"\x04from\x18\x01 \x01(\v2\x0e.golink.v1.PIDR\x04from\x12\x1e\n" +
-	"\x02to\x18\x02 \x01(\v2\x0e.golink.v1.PIDR\x02to\x12\x17\n" +
-	"\ato_name\x18\x03 \x01(\tR\x06toName\x12\x10\n" +
-	"\x03ref\x18\x04 \x01(\x04R\x03ref\x12(\n" +
-	"\x04body\x18\x05 \x01(\v2\x14.google.protobuf.AnyR\x04body\"\xc8\x01\n" +
-	"\x05Reply\x12\"\n" +
-	"\x04from\x18\x01 \x01(\v2\x0e.golink.v1.PIDR\x04from\x12\x1e\n" +
-	"\x02to\x18\x02 \x01(\v2\x0e.golink.v1.PIDR\x02to\x12\x10\n" +
-	"\x03ref\x18\x03 \x01(\x04R\x03ref\x12)\n" +
-	"\x06status\x18\x04 \x01(\x0e2\x11.golink.v1.StatusR\x06status\x12\x14\n" +
-	"\x05error\x18\x05 \x01(\tR\x05error\x12(\n" +
-	"\x04body\x18\x06 \x01(\v2\x14.google.protobuf.AnyR\x04body\"x\n" +
-	"\aMonitor\x12\"\n" +
-	"\x04from\x18\x01 \x01(\v2\x0e.golink.v1.PIDR\x04from\x12\x1e\n" +
-	"\x02to\x18\x02 \x01(\v2\x0e.golink.v1.PIDR\x02to\x12\x17\n" +
-	"\ato_name\x18\x03 \x01(\tR\x06toName\x12\x10\n" +
-	"\x03ref\x18\x04 \x01(\x04R\x03ref\"z\n" +
-	"\tDemonitor\x12\"\n" +
-	"\x04from\x18\x01 \x01(\v2\x0e.golink.v1.PIDR\x04from\x12\x1e\n" +
-	"\x02to\x18\x02 \x01(\v2\x0e.golink.v1.PIDR\x02to\x12\x17\n" +
-	"\ato_name\x18\x03 \x01(\tR\x06toName\x12\x10\n" +
-	"\x03ref\x18\x04 \x01(\x04R\x03ref\"t\n" +
-	"\x04Down\x12\"\n" +
-	"\x04from\x18\x01 \x01(\v2\x0e.golink.v1.PIDR\x04from\x12\x1e\n" +
-	"\x02to\x18\x02 \x01(\v2\x0e.golink.v1.PIDR\x02to\x12\x10\n" +
-	"\x03ref\x18\x03 \x01(\x04R\x03ref\x12\x16\n" +
-	"\x06reason\x18\x04 \x01(\tR\x06reason\"{\n" +
-	"\x04Exit\x12\"\n" +
-	"\x04from\x18\x01 \x01(\v2\x0e.golink.v1.PIDR\x04from\x12\x1e\n" +
-	"\x02to\x18\x02 \x01(\v2\x0e.golink.v1.PIDR\x02to\x12\x17\n" +
-	"\ato_name\x18\x03 \x01(\tR\x06toName\x12\x16\n" +
-	"\x06reason\x18\x04 \x01(\tR\x06reason*e\n" +
+	"\aversion\x18\x03 \x01(\rR\aversion*\x9e\x01\n" +
+	"\x04Kind\x12\x14\n" +
+	"\x10KIND_UNSPECIFIED\x10\x00\x12\x0e\n" +
+	"\n" +
+	"KIND_HELLO\x10\x01\x12\r\n" +
+	"\tKIND_SEND\x10\x02\x12\r\n" +
+	"\tKIND_CALL\x10\x03\x12\x0e\n" +
+	"\n" +
+	"KIND_REPLY\x10\x04\x12\x10\n" +
+	"\fKIND_MONITOR\x10\x05\x12\x12\n" +
+	"\x0eKIND_DEMONITOR\x10\x06\x12\r\n" +
+	"\tKIND_DOWN\x10\a\x12\r\n" +
+	"\tKIND_EXIT\x10\b*e\n" +
 	"\x06Status\x12\x16\n" +
 	"\x12STATUS_UNSPECIFIED\x10\x00\x12\r\n" +
 	"\tSTATUS_OK\x10\x01\x12\x10\n" +
@@ -1037,60 +547,30 @@ func file_golink_v1_golink_proto_rawDescGZIP() []byte {
 	return file_golink_v1_golink_proto_rawDescData
 }
 
-var file_golink_v1_golink_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_golink_v1_golink_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_golink_v1_golink_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_golink_v1_golink_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_golink_v1_golink_proto_goTypes = []any{
-	(Status)(0),       // 0: golink.v1.Status
-	(*Frame)(nil),     // 1: golink.v1.Frame
-	(*PID)(nil),       // 2: golink.v1.PID
-	(*Envelope)(nil),  // 3: golink.v1.Envelope
-	(*Hello)(nil),     // 4: golink.v1.Hello
-	(*Send)(nil),      // 5: golink.v1.Send
-	(*Call)(nil),      // 6: golink.v1.Call
-	(*Reply)(nil),     // 7: golink.v1.Reply
-	(*Monitor)(nil),   // 8: golink.v1.Monitor
-	(*Demonitor)(nil), // 9: golink.v1.Demonitor
-	(*Down)(nil),      // 10: golink.v1.Down
-	(*Exit)(nil),      // 11: golink.v1.Exit
-	nil,               // 12: golink.v1.Envelope.MetadataEntry
-	(*anypb.Any)(nil), // 13: google.protobuf.Any
+	(Kind)(0),        // 0: golink.v1.Kind
+	(Status)(0),      // 1: golink.v1.Status
+	(*Frame)(nil),    // 2: golink.v1.Frame
+	(*PID)(nil),      // 3: golink.v1.PID
+	(*Envelope)(nil), // 4: golink.v1.Envelope
+	(*Hello)(nil),    // 5: golink.v1.Hello
+	nil,              // 6: golink.v1.Envelope.MetadataEntry
 }
 var file_golink_v1_golink_proto_depIdxs = []int32{
-	3,  // 0: golink.v1.Frame.envelopes:type_name -> golink.v1.Envelope
-	4,  // 1: golink.v1.Envelope.hello:type_name -> golink.v1.Hello
-	5,  // 2: golink.v1.Envelope.send:type_name -> golink.v1.Send
-	6,  // 3: golink.v1.Envelope.call:type_name -> golink.v1.Call
-	7,  // 4: golink.v1.Envelope.reply:type_name -> golink.v1.Reply
-	8,  // 5: golink.v1.Envelope.monitor:type_name -> golink.v1.Monitor
-	9,  // 6: golink.v1.Envelope.demonitor:type_name -> golink.v1.Demonitor
-	10, // 7: golink.v1.Envelope.down:type_name -> golink.v1.Down
-	11, // 8: golink.v1.Envelope.exit:type_name -> golink.v1.Exit
-	12, // 9: golink.v1.Envelope.metadata:type_name -> golink.v1.Envelope.MetadataEntry
-	2,  // 10: golink.v1.Send.from:type_name -> golink.v1.PID
-	2,  // 11: golink.v1.Send.to:type_name -> golink.v1.PID
-	13, // 12: golink.v1.Send.body:type_name -> google.protobuf.Any
-	2,  // 13: golink.v1.Call.from:type_name -> golink.v1.PID
-	2,  // 14: golink.v1.Call.to:type_name -> golink.v1.PID
-	13, // 15: golink.v1.Call.body:type_name -> google.protobuf.Any
-	2,  // 16: golink.v1.Reply.from:type_name -> golink.v1.PID
-	2,  // 17: golink.v1.Reply.to:type_name -> golink.v1.PID
-	0,  // 18: golink.v1.Reply.status:type_name -> golink.v1.Status
-	13, // 19: golink.v1.Reply.body:type_name -> google.protobuf.Any
-	2,  // 20: golink.v1.Monitor.from:type_name -> golink.v1.PID
-	2,  // 21: golink.v1.Monitor.to:type_name -> golink.v1.PID
-	2,  // 22: golink.v1.Demonitor.from:type_name -> golink.v1.PID
-	2,  // 23: golink.v1.Demonitor.to:type_name -> golink.v1.PID
-	2,  // 24: golink.v1.Down.from:type_name -> golink.v1.PID
-	2,  // 25: golink.v1.Down.to:type_name -> golink.v1.PID
-	2,  // 26: golink.v1.Exit.from:type_name -> golink.v1.PID
-	2,  // 27: golink.v1.Exit.to:type_name -> golink.v1.PID
-	1,  // 28: golink.v1.Node.Link:input_type -> golink.v1.Frame
-	1,  // 29: golink.v1.Node.Link:output_type -> golink.v1.Frame
-	29, // [29:30] is the sub-list for method output_type
-	28, // [28:29] is the sub-list for method input_type
-	28, // [28:28] is the sub-list for extension type_name
-	28, // [28:28] is the sub-list for extension extendee
-	0,  // [0:28] is the sub-list for field type_name
+	4, // 0: golink.v1.Frame.envelopes:type_name -> golink.v1.Envelope
+	0, // 1: golink.v1.Envelope.kind:type_name -> golink.v1.Kind
+	1, // 2: golink.v1.Envelope.status:type_name -> golink.v1.Status
+	5, // 3: golink.v1.Envelope.hello:type_name -> golink.v1.Hello
+	6, // 4: golink.v1.Envelope.metadata:type_name -> golink.v1.Envelope.MetadataEntry
+	2, // 5: golink.v1.Node.Link:input_type -> golink.v1.Frame
+	2, // 6: golink.v1.Node.Link:output_type -> golink.v1.Frame
+	6, // [6:7] is the sub-list for method output_type
+	5, // [5:6] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_golink_v1_golink_proto_init() }
@@ -1098,23 +578,13 @@ func file_golink_v1_golink_proto_init() {
 	if File_golink_v1_golink_proto != nil {
 		return
 	}
-	file_golink_v1_golink_proto_msgTypes[2].OneofWrappers = []any{
-		(*Envelope_Hello)(nil),
-		(*Envelope_Send)(nil),
-		(*Envelope_Call)(nil),
-		(*Envelope_Reply)(nil),
-		(*Envelope_Monitor)(nil),
-		(*Envelope_Demonitor)(nil),
-		(*Envelope_Down)(nil),
-		(*Envelope_Exit)(nil),
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_golink_v1_golink_proto_rawDesc), len(file_golink_v1_golink_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   12,
+			NumEnums:      2,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

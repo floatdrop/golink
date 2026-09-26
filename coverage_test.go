@@ -432,7 +432,7 @@ func nodeAgainst(t *testing.T, peer *fakePeer, dialTimeout time.Duration) *golin
 func TestHandshakeFailures(t *testing.T) {
 	frame := func(envs ...*golinkv1.Envelope) *golinkv1.Frame { return &golinkv1.Frame{Envelopes: envs} }
 	hello := func(node string, version uint32) *golinkv1.Frame {
-		return frame(&golinkv1.Envelope{Kind: &golinkv1.Envelope_Hello{Hello: &golinkv1.Hello{Node: node, Incarnation: 1, Version: version}}})
+		return frame(&golinkv1.Envelope{Kind: golinkv1.Kind_KIND_HELLO, Hello: &golinkv1.Hello{Node: node, Incarnation: 1, Version: version}})
 	}
 	cases := []struct {
 		name string
@@ -440,7 +440,7 @@ func TestHandshakeFailures(t *testing.T) {
 		want string
 	}{
 		{"server error", &fakePeer{err: status.Error(codes.PermissionDenied, "no")}, "PermissionDenied"},
-		{"not a hello", &fakePeer{hello: frame(&golinkv1.Envelope{Kind: &golinkv1.Envelope_Exit{Exit: &golinkv1.Exit{}}})}, "expected Hello"},
+		{"not a hello", &fakePeer{hello: frame(&golinkv1.Envelope{Kind: golinkv1.Kind_KIND_EXIT})}, "expected Hello"},
 		{"empty frame", &fakePeer{hello: frame()}, "expected Hello"},
 		{"wrong version", &fakePeer{hello: hello("b", 99)}, "protocol 99"},
 		{"wrong node", &fakePeer{hello: hello("c", 1)}, `reached "c"`},

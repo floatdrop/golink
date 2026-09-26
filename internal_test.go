@@ -13,7 +13,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/floatdrop/golink/internal/testpb"
 	golinkv1 "github.com/floatdrop/golink/proto/golink/v1"
@@ -76,11 +75,15 @@ func TestQueue(t *testing.T) {
 }
 
 func TestProtoHelpers(t *testing.T) {
-	if !pidFrom(nil).IsZero() || typeName(nil) != "" {
+	if typeName(nil) != "" {
 		t.Fatal("nil helpers")
 	}
-	if _, err := decode(nil); err == nil {
-		t.Fatal("decode nil")
+	if _, err := decodeBody(&golinkv1.Envelope{}); err == nil {
+		t.Fatal("decode without a body")
+	}
+	// A body whose type is known but whose bytes are not that type.
+	if _, err := decodeBody(&golinkv1.Envelope{BodyType: "golink.test.v1.Ping", Body: []byte{0xff}}); err == nil {
+		t.Fatal("decoded garbage")
 	}
 	if first(metadata.MD{}, "k") != "" {
 		t.Fatal("first")
@@ -107,11 +110,12 @@ func newTestNode(t *testing.T, name string) *Node {
 func TestDispatchMalformed(t *testing.T) {
 	n := newTestNode(t, "a")
 	me := n.PID()
-	bogus := &anypb.Any{TypeUrl: "type.googleapis.com/no.such.Type", Value: []byte{1}}
-	to := pidTo(PID{Node: "a", Incarnation: 1, ID: 1})
-	from := pidTo(PID{Node: "b", Incarnation: 1, ID: 1})
-	n.dispatch(&golinkv1.Envelope{Kind: &golinkv1.Envelope_Send{Send: &golinkv1.Send{From: from, To: to, Body: bogus}}})
-	n.dispatch(&golinkv1.Envelope{Kind: &golinkv1.Envelope_Call{Call: &golinkv1.Call{From: from, To: to, Ref: 1, Body: bogus}}})
+	unknown := func(kind golinkv1.Kind, ref uint64) *golinkv1.Envelope {
+		return &golinkv1.Envelope{Kind: kind, FromIncarnation: 1, FromId: 1, ToIncarnation: 1, ToId: 1, Ref: ref,
+			BodyType: "no.such.Type", Body: []byte{1}}
+	}
+	n.dispatch("b", unknown(golinkv1.Kind_KIND_SEND, 0))
+	n.dispatch("b", unknown(golinkv1.Kind_KIND_CALL, 1))
 	if n.deadLetters.Load() != 1 {
 		t.Fatalf("dead letters %d", n.deadLetters.Load())
 	}
@@ -119,16 +123,16 @@ func TestDispatchMalformed(t *testing.T) {
 	// one nobody waits for is dropped.
 	pc := &pendingCall{node: "b", ch: make(chan callResult, 1)}
 	n.pending[7] = pc
-	n.dispatch(&golinkv1.Envelope{Kind: &golinkv1.Envelope_Reply{Reply: &golinkv1.Reply{To: pidTo(me), Ref: 7, Status: golinkv1.Status_STATUS_OK, Body: bogus}}})
+	n.dispatch("b", unknown(golinkv1.Kind_KIND_REPLY, 7))
 	if r := <-pc.ch; !errors.Is(r.err, ErrType) {
 		t.Fatalf("%v", r.err)
 	}
-	n.dispatch(&golinkv1.Envelope{Kind: &golinkv1.Envelope_Reply{Reply: &golinkv1.Reply{To: pidTo(me), Ref: 8, Status: golinkv1.Status_STATUS_OK}}})
+	n.dispatch("b", &golinkv1.Envelope{Kind: golinkv1.Kind_KIND_REPLY, Ref: 8, Status: golinkv1.Status_STATUS_OK})
 	// Down for a process that does not exist, and for a ref it never held.
-	n.dispatch(&golinkv1.Envelope{Kind: &golinkv1.Envelope_Down{Down: &golinkv1.Down{From: from, To: to, Ref: 1}}})
+	n.dispatch("b", &golinkv1.Envelope{Kind: golinkv1.Kind_KIND_DOWN, FromIncarnation: 1, FromId: 1, ToIncarnation: 1, ToId: 1, Ref: 1})
 	p := &proc{n: n, pid: PID{Node: "a", Incarnation: 1, ID: 5}, mbox: newQueue[item](true)}
 	n.procs[5] = p
-	n.dispatch(&golinkv1.Envelope{Kind: &golinkv1.Envelope_Down{Down: &golinkv1.Down{From: from, To: pidTo(p.pid), Ref: 1}}})
+	n.dispatch("b", &golinkv1.Envelope{Kind: golinkv1.Kind_KIND_DOWN, FromIncarnation: 1, FromId: 1, ToIncarnation: p.pid.Incarnation, ToId: p.pid.ID, Ref: 1})
 	if p.mbox.len() != 0 {
 		t.Fatal("unknown ref must not deliver")
 	}
@@ -431,14 +435,14 @@ func TestSubscribersEdges(t *testing.T) {
 
 func TestFrameSplitting(t *testing.T) {
 	env := func(body, md int) *golinkv1.Envelope {
-		e := &golinkv1.Envelope{Kind: &golinkv1.Envelope_Send{Send: &golinkv1.Send{Body: &anypb.Any{Value: make([]byte, body)}}}}
+		e := &golinkv1.Envelope{Kind: golinkv1.Kind_KIND_SEND, Body: make([]byte, body)}
 		if md > 0 {
 			e.Metadata = map[string]string{"k": string(make([]byte, md))}
 		}
 		return e
 	}
 	// Small envelopes all fit; their bodies are counted.
-	if n, body := frameOf([]*golinkv1.Envelope{env(10, 0), env(20, 5), {Kind: &golinkv1.Envelope_Monitor{Monitor: &golinkv1.Monitor{}}}}); n != 3 || body != 30 {
+	if n, body := frameOf([]*golinkv1.Envelope{env(10, 0), env(20, 5), {Kind: golinkv1.Kind_KIND_MONITOR}}); n != 3 || body != 30 {
 		t.Fatalf("%d %d", n, body)
 	}
 	// A frame stops before it would pass maxFrame, metadata included.
@@ -453,13 +457,8 @@ func TestFrameSplitting(t *testing.T) {
 	if n, body := frameOf([]*golinkv1.Envelope{env(2*maxFrame, 0), env(1, 0)}); n != 1 || body != 2*maxFrame {
 		t.Fatalf("%d %d", n, body)
 	}
-	for _, e := range []*golinkv1.Envelope{
-		{Kind: &golinkv1.Envelope_Call{Call: &golinkv1.Call{Body: &anypb.Any{Value: []byte("ab")}}}},
-		{Kind: &golinkv1.Envelope_Reply{Reply: &golinkv1.Reply{Body: &anypb.Any{Value: []byte("ab")}}}},
-	} {
-		if bodySize(e) != 2 {
-			t.Fatalf("%v", e)
-		}
+	if bodySize(&golinkv1.Envelope{Kind: golinkv1.Kind_KIND_REPLY, Body: []byte("ab")}) != 2 {
+		t.Fatal("reply body not counted")
 	}
 }
 

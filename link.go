@@ -279,20 +279,20 @@ func handshake(ctx context.Context, peer string, stream grpc.BidiStreamingClient
 		if r.err != nil {
 			return 0, r.err
 		}
-		var h *golinkv1.Envelope_Hello
-		if envs := r.f.GetEnvelopes(); len(envs) == 1 {
-			h, _ = envs[0].Kind.(*golinkv1.Envelope_Hello)
+		var h *golinkv1.Hello
+		if envs := r.f.GetEnvelopes(); len(envs) == 1 && envs[0].GetKind() == golinkv1.Kind_KIND_HELLO {
+			h = envs[0].GetHello()
 		}
 		if h == nil {
 			return 0, errors.New("golink: handshake: expected Hello")
 		}
-		if h.Hello.Version != protoVersion {
-			return 0, fmt.Errorf("golink: handshake: peer speaks protocol %d, this node %d", h.Hello.Version, protoVersion)
+		if h.GetVersion() != protoVersion {
+			return 0, fmt.Errorf("golink: handshake: peer speaks protocol %d, this node %d", h.GetVersion(), protoVersion)
 		}
-		if h.Hello.Node != peer {
-			return 0, fmt.Errorf("golink: handshake: dialed %q but reached %q", peer, h.Hello.Node)
+		if h.GetNode() != peer {
+			return 0, fmt.Errorf("golink: handshake: dialed %q but reached %q", peer, h.GetNode())
 		}
-		return h.Hello.Incarnation, nil
+		return h.GetIncarnation(), nil
 	case <-ctx.Done():
 		return 0, fmt.Errorf("golink: handshake: %w", ctx.Err())
 	}
@@ -336,7 +336,7 @@ func (l *inLink) deliver(n *Node, f *golinkv1.Frame) bool {
 		return false
 	}
 	for _, env := range f.GetEnvelopes() {
-		n.dispatch(env)
+		n.dispatch(l.peer.Name, env)
 	}
 	_, body := frameOf(f.GetEnvelopes())
 	l.messages.Add(uint64(len(f.GetEnvelopes())))
@@ -363,17 +363,7 @@ func frameOf(batch []*golinkv1.Envelope) (n, body int) {
 	return len(batch), body
 }
 
-func bodySize(env *golinkv1.Envelope) int {
-	switch k := env.GetKind().(type) {
-	case *golinkv1.Envelope_Send:
-		return len(k.Send.GetBody().GetValue())
-	case *golinkv1.Envelope_Call:
-		return len(k.Call.GetBody().GetValue())
-	case *golinkv1.Envelope_Reply:
-		return len(k.Reply.GetBody().GetValue())
-	}
-	return 0
-}
+func bodySize(env *golinkv1.Envelope) int { return len(env.GetBody()) }
 
 // Link implements golink.v1.Node.
 func (n *Node) Link(stream grpc.BidiStreamingServer[golinkv1.Frame, golinkv1.Frame]) error {
@@ -394,9 +384,9 @@ func (n *Node) Link(stream grpc.BidiStreamingServer[golinkv1.Frame, golinkv1.Fra
 			return status.Errorf(codes.PermissionDenied, "golink: %v", err)
 		}
 	}
-	if err := stream.Send(&golinkv1.Frame{Envelopes: []*golinkv1.Envelope{{Kind: &golinkv1.Envelope_Hello{Hello: &golinkv1.Hello{
+	if err := stream.Send(&golinkv1.Frame{Envelopes: []*golinkv1.Envelope{{Kind: golinkv1.Kind_KIND_HELLO, Hello: &golinkv1.Hello{
 		Node: n.id.Name, Incarnation: n.id.Incarnation, Version: protoVersion,
-	}}}}}); err != nil {
+	}}}}); err != nil {
 		return err
 	}
 
