@@ -8,7 +8,7 @@ module github.com/floatdrop/golink/etcd
 go 1.27.1
 
 require (
-	github.com/floatdrop/golink v0.0.0
+	github.com/floatdrop/golink v0.0.1
 	go.etcd.io/etcd/client/v3 v3.7.2
 	go.etcd.io/etcd/server/v3 v3.7.2
 	google.golang.org/grpc v1.84.0

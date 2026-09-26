@@ -9,7 +9,7 @@ module github.com/floatdrop/golink/otel
 go 1.27.1
 
 require (
-	github.com/floatdrop/golink v0.0.0
+	github.com/floatdrop/golink v0.0.1
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/metric v1.46.0
 	go.opentelemetry.io/otel/sdk v1.46.0

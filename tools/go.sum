@@ -1,5 +1,5 @@
-github.com/floatdrop/golink v0.0.0 h1:fuc+gA9V2RosvAhBESexJizZwt1qVe0+O1k9qaRiAeo=
-github.com/floatdrop/golink v0.0.0/go.mod h1:m2ZXZ3S5wdyTjlAONywnm8AV3dgzURsSat40kw9qZvw=
+github.com/floatdrop/golink v0.0.1 h1:Lw8E59EoBfGs69CymQkYhRpdtswFs5EJgB44LQPo1zw=
+github.com/floatdrop/golink v0.0.1/go.mod h1:m2ZXZ3S5wdyTjlAONywnm8AV3dgzURsSat40kw9qZvw=
 github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=
 github.com/golang-jwt/jwt/v5 v5.3.1/go.mod h1:fxCRLWMO43lRc8nhHWY6LGqRcf+1gQWArsqaEUEa5bE=
 github.com/golang/protobuf v1.5.4 h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=
