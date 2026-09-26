@@ -244,3 +244,7 @@ BenchmarkRemoteCall-14           10730 ns/op   3380 B/op    71 allocs/op
 BenchmarkRemoteCallParallel-14    3480 ns/op   3355 B/op    66 allocs/op
 BenchmarkRemoteSend-14            1426 ns/op   1552 B/op    27 allocs/op
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).
