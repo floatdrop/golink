@@ -74,6 +74,47 @@ a, err := p.CallTo[*orderspb.Ack](ctx, m.From, &orderspb.Ping{})
 // Node has the same four: Send, SendTo, Call, CallTo.
 ```
 
+## Actors and supervisors
+
+`golink/actor` adds structure on top of processes, using only the public API.
+An actor is a plain struct with its dependencies, which is what a DI
+container builds:
+
+```go
+type Orders struct{ repo *Repo }
+
+func (o *Orders) HandleMessage(p *golink.Process[*orderspb.Order], m golink.Msg[*orderspb.Order]) error { … }
+func (o *Orders) HandleCall(p *golink.Process[*orderspb.Order], m golink.Msg[*orderspb.Order]) (proto.Message, error) { … }
+// optional: HandleDown, Init, Terminate
+
+addr, err := actor.Spawn[*orderspb.Order](node, &Orders{repo: repo})
+```
+
+An error from `HandleCall` goes back to the caller and the actor carries on;
+from `HandleMessage` it ends the actor with that reason. `actor.ErrStop` ends
+it normally, `actor.ErrNoReply` defers a call's answer to a later `p.Reply`.
+
+Supervisors restart what fails, one-for-one, one-for-all or rest-for-one,
+within a restart intensity; a supervisor that gives up exits with
+`max restarts`, and its own supervisor restarts it:
+
+```go
+sup, err := actor.Supervise(node, actor.Spec{
+    Strategy: actor.OneForOne,
+    Children: []actor.ChildSpec{
+        actor.Child[*orderspb.Order]("orders", func() *Orders { return &Orders{repo: repo} }),
+        actor.ChildFunc("mailer", mailer).WithRestart(actor.Transient),
+        actor.ChildSupervisor("billing", billingSpec),
+    },
+})
+```
+
+Each child is registered under its name, so `golink.Named` keeps reaching it
+across restarts, and `Child` builds a fresh handler on every start. Children
+are monitored from before they run (`p.SpawnMonitor`), so no exit is missed.
+A supervisor publishes its children and restart counts through
+`WithInspect`, so the Inspector shows the supervision tree's state.
+
 ## What a process sees
 
 | Call | Returns |
@@ -86,6 +127,8 @@ a, err := p.CallTo[*orderspb.Ack](ctx, m.From, &orderspb.Ping{})
 | `p.Monitor(target)` / `p.Demonitor(ref)` | a `Down` with the ref when the target exits: `normal`, the returned error, `panic: …`, `killed`, `noproc`, `noconnection`, `shutdown` |
 | `p.Exit(target, reason)` | asks another process to exit; its `Receive` returns an `*ExitError` |
 | `p.Log()` | `*slog.Logger` with pid and label; threshold settable at runtime |
+| `p.SendAfter(d, to, m)` | a `*Timer`; cancelled if the process exits first; carries the metadata of when it was scheduled |
+| `p.SpawnMonitor[N](fn, …)` | a child on the same node, monitored before it runs |
 
 Exit reasons and the type check on delivery are the whole error model: a
 message of the wrong type is a dead letter with reason `type` (and `ErrType`
@@ -173,8 +216,8 @@ node, and `c.Conn(name)` dials one.
 
 [docs/DESIGN.md](docs/DESIGN.md) has the wire protocol, the reasons behind
 the choices (and what was rejected), what the observability surface is copied
-from, and the roadmap: `golink/etcd`, supervisors and timers in
-`golink/actor`, a CLI and an MCP server on top of the Inspector.
+from, and the roadmap: `golink/etcd`, a CLI and an MCP server on top of
+the Inspector.
 
 ## Performance
 

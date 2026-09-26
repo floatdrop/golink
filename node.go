@@ -373,12 +373,12 @@ func (n *Node) SendTo(to Target, m proto.Message) error {
 // A reply of another type is ErrType; a handler error is a *RemoteError; a
 // callee that is gone, or exits before answering, is ErrNoProc.
 func (n *Node) Call[R, N proto.Message](ctx context.Context, to Addr[N], req N) (R, error) {
-	return typed[R](n.doCall(ctx, n.PID(), nil, to, req))
+	return typed[R](n.doCall(ctx, n.PID(), nil, to, req, MetadataFrom(ctx)))
 }
 
 // CallTo is Call to an untyped target.
 func (n *Node) CallTo[R proto.Message](ctx context.Context, to Target, req proto.Message) (R, error) {
-	return typed[R](n.doCall(ctx, n.PID(), nil, to, req))
+	return typed[R](n.doCall(ctx, n.PID(), nil, to, req, MetadataFrom(ctx)))
 }
 
 // Exit asks a process anywhere to terminate with reason.
@@ -386,13 +386,9 @@ func (n *Node) Exit(to Target, reason string) error { return n.exit(n.PID(), to,
 
 // ---------- the operations; each has a local and a remote path ----------
 
-// hookSend runs OnSend. The metadata a send carries is what the caller gave
-// (a ctx), over what the sending process inherited from the message it is
-// handling.
+// hookSend runs OnSend. md is final: a process's inherited metadata was
+// merged in by the method that sent (see proc.outgoing).
 func (n *Node) hookSend(from PID, sender *proc, pid PID, name string, body proto.Message, md Metadata, call bool) (Metadata, Done) {
-	if sender != nil {
-		md = sender.outgoing(md)
-	}
 	if n.hooks == nil {
 		return md, nil
 	}
@@ -429,9 +425,9 @@ func (n *Node) send(from PID, sender *proc, to Target, body proto.Message, md Me
 	})
 }
 
-func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to Target, req proto.Message) (_ proto.Message, err error) {
+func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to Target, req proto.Message, md Metadata) (_ proto.Message, err error) {
 	pid, name := to.target()
-	md, done := n.hookSend(from, caller, pid, name, req, MetadataFrom(ctx), true)
+	md, done := n.hookSend(from, caller, pid, name, req, md, true)
 	if done != nil {
 		defer func() { done(err) }()
 	}

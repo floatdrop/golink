@@ -385,18 +385,45 @@ half-day of work once the gRPC service exists.
 Goroutine dumps and heap profiles are `net/http/pprof`; `golink` does not
 duplicate them.
 
-## Helpers (`golink/actor`, v0.2)
+## Helpers (`golink/actor`, done)
 
-Optional, built only on the public core API so users can ignore or replace them:
+Optional, built only on the public core API, so users can ignore or replace
+them. Two primitives went into the core because they need process internals:
 
-- `actor.Run(h Handler)`: the handler loop from the prototype — `HandleMessage`
-  / `HandleCall`, `ErrStop`, optional `Init`/`Terminate`, panics become exit
-  reasons.
-- `actor.Supervise(node, spec)`: one-for-one and one-for-all restart with
-  intensity limits, over `Monitor` and `Spawn` only. Restart count shows in
-  `ProcessInfo` via the parent relationship, not a special field.
-- `p.SendAfter(d, to, msg) (Cancel)`: timers; ergo and Erlang both have them and
-  a `time.AfterFunc` that sends is fifteen lines.
+- `p.SendAfter(d, to, m) *Timer`: owned by the process and cancelled when it
+  exits. The message carries the metadata the process held when it was
+  scheduled, so a timer set while handling one request is not attributed to
+  whichever request is being handled when it fires. For that, inheritance
+  moved from the send internals to the public `Send`/`Call` methods.
+- `p.SpawnMonitor[N](fn, …) (Addr[N], Ref, error)`: Erlang's `spawn_monitor`.
+  The monitor exists before the child runs, so a child that exits at once is
+  reported with its real reason instead of `noproc`. A supervisor that
+  monitored after spawning would misread a transient child's instant normal
+  exit as abnormal and restart it in a loop.
+
+`golink/actor`:
+
+- `actor.Run(h)` / `actor.Spawn(n, h)`: the handler loop. `Handler[M]` has
+  `HandleMessage`; `CallHandler`, `DownHandler`, `Initializer`, `Terminator`
+  are optional interfaces, found by type assertion once. An error from
+  `HandleCall` is the reply and the actor carries on; from `HandleMessage` it
+  is the exit reason. `ErrStop` ends normally (replying first, from a call);
+  `ErrNoReply` defers the answer. `Terminate` also runs on a panic, which then
+  continues so golink reports it.
+- `actor.Supervise(n, Spec)`: one-for-one, one-for-all, rest-for-one;
+  permanent, transient, temporary children; restart intensity (`MaxRestarts`
+  within `Within`, default 3 in 5s). Giving up is exit reason
+  `max restarts`, abnormal, so a parent supervisor restarts the child
+  supervisor: escalation. Children are registered under their names, so
+  addresses survive restarts; `Child` takes a factory so each start gets a
+  fresh handler. Only children that were running come back with their group:
+  a transient child that finished stays finished. Stopping a child is
+  Demonitor, Exit, then waiting on node events (not the mailbox, which is
+  closed once the supervisor itself has been told to exit), bounded by
+  `Spec.Shutdown`; golink cannot kill a goroutine that ignores Exit, so such
+  a child is left behind and logged. A restart that cannot start counts
+  against the intensity, so it ends rather than loops. The supervisor's state
+  is published through `WithInspect`.
 
 ## Later
 
@@ -426,7 +453,7 @@ Optional, built only on the public core API so users can ignore or replace them:
    counters, `Hooks`, `WithInspect`, `golinktest`~~ (done). Tests: ordering, monitors with
    every reason, node down, restart with new incarnation, bad peer identity.
 2. ~~`golink/inspect` service and Go client~~ (done, with `Node.Subscribe`);
-   `golink/actor` helpers.
+   ~~`golink/actor` helpers~~ (done, with `SendAfter` and `SpawnMonitor`).
 3. ~~`golink/otel` (metrics + trace propagation)~~ (done: see otel/README.md),
    `golink/etcd`.
 4. `golinkctl`, `DOT`, MCP server.

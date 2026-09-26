@@ -68,6 +68,7 @@ type proc struct {
 	watchers map[Ref]PID           // who monitors me
 	monitors map[Ref]monitorTarget // whom I monitor
 	open     map[openCall]struct{} // calls taken from the mailbox and not yet answered
+	timers   map[*Timer]struct{}   // SendAfter timers not yet fired
 	names    []string              // guarded by n.mu
 }
 
@@ -140,6 +141,19 @@ func (m Msg[M]) Context(parent context.Context) context.Context {
 // M may be a concrete type (one contract per process), an interface the
 // accepted types implement, or proto.Message for an untyped process.
 func Spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts ...SpawnOption) (Addr[M], error) {
+	a, _, err := spawn(n, fn, opts, nil)
+	return a, err
+}
+
+// SpawnMonitor starts a process on p's node, like Spawn, and monitors it
+// from p before it runs: however soon the child exits, p receives its Down
+// with the real reason, never noproc. It is Erlang's spawn_monitor, and what
+// a supervisor needs.
+func (p *Process[M]) SpawnMonitor[N proto.Message](fn func(*Process[N]) error, opts ...SpawnOption) (Addr[N], Ref, error) {
+	return spawn(p.n, fn, opts, p.proc)
+}
+
+func spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts []SpawnOption, watcher *proc) (Addr[M], Ref, error) {
 	var o spawnOpts
 	for _, opt := range opts {
 		opt(&o)
@@ -167,17 +181,40 @@ func Spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts ...SpawnOp
 	p.log = slog.New(&levelHandler{h: n.log.Handler(), p: p}).With(
 		"pid", p.pid.String(), "label", o.label)
 
+	// The monitor exists before the process does, so its Down cannot be missed.
+	var ref Ref
+	if watcher != nil {
+		ref = Ref{Node: n.id.Name, ID: n.nextRef.Add(1)}
+		watcher.mu.Lock()
+		if watcher.exited {
+			watcher.mu.Unlock()
+			cancel(nil)
+			return Addr[M]{}, Ref{}, ErrNoProc
+		}
+		if watcher.monitors == nil {
+			watcher.monitors = map[Ref]monitorTarget{}
+		}
+		watcher.monitors[ref] = monitorTarget{pid: p.pid}
+		watcher.mu.Unlock()
+		p.watchers = map[Ref]PID{ref: watcher.pid}
+	}
+	fail := func(err error) (Addr[M], Ref, error) {
+		cancel(nil)
+		if watcher != nil {
+			watcher.dropMonitor(ref)
+		}
+		return Addr[M]{}, Ref{}, err
+	}
+
 	n.mu.Lock()
 	if n.stopping {
 		n.mu.Unlock()
-		cancel(nil)
-		return Addr[M]{}, ErrNodeStopped
+		return fail(ErrNodeStopped)
 	}
 	if o.name != "" {
 		if _, taken := n.names[o.name]; taken {
 			n.mu.Unlock()
-			cancel(nil)
-			return Addr[M]{}, ErrNameTaken
+			return fail(ErrNameTaken)
 		}
 		n.names[o.name] = p
 		p.names = append(p.names, o.name)
@@ -195,7 +232,7 @@ func Spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts ...SpawnOp
 	}
 
 	go p.run(func() error { return fn(&Process[M]{p}) })
-	return Addr[M]{pid: p.pid}, nil
+	return Addr[M]{pid: p.pid}, ref, nil
 }
 
 // ---------- Process[M] API ----------
@@ -261,18 +298,18 @@ func toMsg[M proto.Message](it item) Msg[M] {
 
 // Send delivers m to a typed address, local or remote. See Node.Send.
 func (p *Process[M]) Send[N proto.Message](to Addr[N], m N) error {
-	return p.n.send(p.pid, p.proc, to, m, nil)
+	return p.n.send(p.pid, p.proc, to, m, p.outgoing(nil))
 }
 
 // SendContext is Send with the metadata carried by ctx.
 func (p *Process[M]) SendContext[N proto.Message](ctx context.Context, to Addr[N], m N) error {
-	return p.n.send(p.pid, p.proc, to, m, MetadataFrom(ctx))
+	return p.n.send(p.pid, p.proc, to, m, p.outgoing(MetadataFrom(ctx)))
 }
 
 // SendTo delivers msg to an untyped target such as a Msg's From. The
 // target's type is checked on delivery only.
 func (p *proc) SendTo(to Target, msg proto.Message) error {
-	return p.n.send(p.pid, p, to, msg, nil)
+	return p.n.send(p.pid, p, to, msg, p.outgoing(nil))
 }
 
 // Call sends req and waits for the Reply, typed as R:
@@ -282,12 +319,64 @@ func (p *proc) SendTo(to Target, msg proto.Message) error {
 // Replies do not pass through the mailbox, so calling from inside a process
 // never reorders its messages. Errors are as for Node.Call.
 func (p *Process[M]) Call[R, N proto.Message](ctx context.Context, to Addr[N], req N) (R, error) {
-	return typed[R](p.n.doCall(ctx, p.pid, p.proc, to, req))
+	return typed[R](p.n.doCall(ctx, p.pid, p.proc, to, req, p.outgoing(MetadataFrom(ctx))))
 }
 
 // CallTo is Call to an untyped target, such as a Msg's From.
 func (p *Process[M]) CallTo[R proto.Message](ctx context.Context, to Target, req proto.Message) (R, error) {
-	return typed[R](p.n.doCall(ctx, p.pid, p.proc, to, req))
+	return typed[R](p.n.doCall(ctx, p.pid, p.proc, to, req, p.outgoing(MetadataFrom(ctx))))
+}
+
+// SendAfter sends m to a typed address after d, as this process. The timer
+// belongs to the process: it is cancelled if the process exits first. The
+// message carries the metadata the process holds now, when it is scheduled,
+// not whatever it is handling when the timer fires.
+func (p *Process[M]) SendAfter[N proto.Message](d time.Duration, to Addr[N], m N) *Timer {
+	return p.sendAfter(d, to, m)
+}
+
+// Timer is a message scheduled with SendAfter.
+type Timer struct {
+	p *proc
+	t *time.Timer
+}
+
+// Stop cancels the send. It reports whether it did: false if the message
+// was already sent, or the process has exited.
+func (t *Timer) Stop() bool {
+	if t.t == nil {
+		return false
+	}
+	t.p.mu.Lock()
+	_, pending := t.p.timers[t]
+	delete(t.p.timers, t)
+	t.p.mu.Unlock()
+	t.t.Stop()
+	return pending
+}
+
+func (p *proc) sendAfter(d time.Duration, to Target, m proto.Message) *Timer {
+	md := p.outgoing(nil)
+	tm := &Timer{p: p}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.exited {
+		return tm
+	}
+	if p.timers == nil {
+		p.timers = map[*Timer]struct{}{}
+	}
+	p.timers[tm] = struct{}{}
+	tm.t = time.AfterFunc(d, func() {
+		p.mu.Lock()
+		_, pending := p.timers[tm]
+		delete(p.timers, tm)
+		p.mu.Unlock()
+		if pending {
+			_ = p.n.send(p.pid, p, to, m, md)
+		}
+	})
+	return tm
 }
 
 // Reply answers a message for which IsCall is true. It may be called later
@@ -596,9 +685,12 @@ func (p *proc) terminate(reason string) {
 	p.setState(StateExiting)
 	p.mu.Lock()
 	p.exited = true
-	watchers, monitors, open := p.watchers, p.monitors, p.open
-	p.watchers, p.monitors, p.open = nil, nil, nil
+	watchers, monitors, open, timers := p.watchers, p.monitors, p.open, p.timers
+	p.watchers, p.monitors, p.open, p.timers = nil, nil, nil, nil
 	p.mu.Unlock()
+	for tm := range timers {
+		tm.t.Stop()
+	}
 	p.cancel(nil)
 
 	n := p.n
