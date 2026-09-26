@@ -82,8 +82,8 @@ type Name struct { Node, Name string }
 type Ref  struct { Node string; ID uint64 }   // monitor reference
 ```
 
-`Incarnation` is a per-start nonce (or the etcd lease ID when the registrar
-supplies one). A PID from before a node restart is a different process: it gets
+`Incarnation` is a per-start nonce (`Config.Incarnation`, by default the
+start time in nanoseconds). A PID from before a node restart is a different process: it gets
 `Down{noproc}`, never a message delivered to a stranger. Erlang has creation
 numbers for the same reason; Proto.Actor and GoAkt do not, and both have issues
 about stale references after restarts.
