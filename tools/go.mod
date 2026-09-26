@@ -7,7 +7,7 @@ module github.com/floatdrop/golink/tools
 go 1.27.1
 
 require (
-	github.com/floatdrop/golink v0.0.0-20260926175130-2b68ea1abc1e
+	github.com/floatdrop/golink v0.0.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
