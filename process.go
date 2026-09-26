@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"reflect"
 	"runtime/debug"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -246,7 +247,7 @@ func (p *Process[M]) msg(it item) Msg[M] {
 	return m
 }
 
-// Send delivers m to a typed address, local or remote.
+// Send delivers m to a typed address, local or remote. See Node.Send.
 func (p *Process[M]) Send[N proto.Message](to Addr[N], m N) error {
 	return p.n.send(p.pid, p.proc, to, m, nil)
 }
@@ -264,16 +265,17 @@ func (p *proc) SendTo(to Target, msg proto.Message) error {
 
 // Call sends req and waits for the Reply, typed as R:
 //
-//	resp, err := p.Call[*orderspb.Reserved](ctx, addr, &orderspb.OrderMsg{…})
+//	resp, err := p.Call[*orderspb.Reserved](ctx, addr, &orderspb.Order{…})
 //
 // Replies do not pass through the mailbox, so calling from inside a process
-// never reorders its messages.
+// never reorders its messages. Errors are as for Node.Call.
 func (p *Process[M]) Call[R, N proto.Message](ctx context.Context, to Addr[N], req N) (R, error) {
-	return Call[R](ctx, p.proc, to, req)
+	return typed[R](p.n.doCall(ctx, p.pid, p.proc, to, req))
 }
 
-func (p *proc) call(ctx context.Context, to Target, req proto.Message) (proto.Message, error) {
-	return p.n.doCall(ctx, p.pid, p, to, req)
+// CallTo is Call to an untyped target, such as a Msg's From.
+func (p *Process[M]) CallTo[R proto.Message](ctx context.Context, to Target, req proto.Message) (R, error) {
+	return typed[R](p.n.doCall(ctx, p.pid, p.proc, to, req))
 }
 
 // Reply answers a message for which IsCall is true. It may be called later
@@ -378,8 +380,7 @@ func (p *proc) took(it item) item {
 		p.mu.Unlock()
 	}
 	if it.body != nil {
-		t := typeName(it.body)
-		p.lastMsg.Store(&t)
+		p.lastMsg.Store(new(typeName(it.body)))
 	}
 	if p.n.hooks != nil {
 		p.n.hooks.OnReceive(p.pid, it.body, time.Since(it.at))
@@ -419,7 +420,7 @@ func (p *proc) info() ProcessInfo {
 	monitors, watchers := len(p.monitors), len(p.watchers)
 	p.mu.Unlock()
 	p.n.mu.Lock()
-	names := append([]string(nil), p.names...)
+	names := slices.Clone(p.names)
 	p.n.mu.Unlock()
 	info := ProcessInfo{
 		PID:           p.pid,
@@ -458,11 +459,8 @@ func (p *proc) logLevel() slog.Level {
 }
 
 func (p *proc) dropName(name string) {
-	for i, nm := range p.names {
-		if nm == name {
-			p.names = append(p.names[:i], p.names[i+1:]...)
-			return
-		}
+	if i := slices.Index(p.names, name); i >= 0 {
+		p.names = slices.Delete(p.names, i, i+1)
 	}
 }
 
@@ -533,10 +531,10 @@ func (p *proc) exitReason(err error) string {
 	if reason, ok := exitReasonOf(p.ctx); ok {
 		return reason
 	}
-	var ee *ExitError
-	switch {
-	case errors.As(err, &ee):
+	if ee, ok := errors.AsType[*ExitError](err); ok {
 		return ee.Reason
+	}
+	switch {
 	case err == nil:
 		return ReasonNormal
 	case p.n.ctx.Err() != nil && errors.Is(err, context.Canceled):

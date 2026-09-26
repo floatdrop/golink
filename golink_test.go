@@ -96,7 +96,7 @@ func recv[M proto.Message](t testing.TB, ch <-chan golink.Msg[M]) golink.Msg[M] 
 }
 
 func ctx(t testing.TB) context.Context {
-	c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	c, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	t.Cleanup(cancel)
 	return c
 }
@@ -143,7 +143,7 @@ func TestLocalTypedSendAndCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := golink.Call[*testpb.Pong](ctx(t), a, e, &testpb.Ping{N: 9})
+	r, err := a.Call[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 9})
 	if err != nil || r.N != 10 {
 		t.Fatalf("call: %v %v", r, err)
 	}
@@ -151,7 +151,7 @@ func TestLocalTypedSendAndCall(t *testing.T) {
 	if pong, ok := got.Body.(*testpb.Pong); !ok || pong.N != 42 || got.From != e.PID() {
 		t.Fatalf("got %+v", got)
 	}
-	if _, err := golink.Call[*testpb.Ping](ctx(t), a, e, &testpb.Ping{N: 1}); !errors.Is(err, golink.ErrType) {
+	if _, err := a.Call[*testpb.Ping](ctx(t), e, &testpb.Ping{N: 1}); !errors.Is(err, golink.ErrType) {
 		t.Fatalf("reply typed wrongly should be ErrType, got %v", err)
 	}
 }
@@ -172,7 +172,7 @@ func TestRemoteByPIDAndName(t *testing.T) {
 	}
 	_ = col
 	_ = ch
-	r, err := golink.Call[*testpb.Pong](ctx(t), a, golink.Named[*testpb.Ping]("b", "echo"), &testpb.Ping{N: 9})
+	r, err := a.CallTo[*testpb.Pong](ctx(t), golink.Named[*testpb.Ping]("b", "echo"), &testpb.Ping{N: 9})
 	if err != nil || r.N != 10 {
 		t.Fatalf("call by name: %v %v", r, err)
 	}
@@ -188,16 +188,15 @@ func TestRemoteByPIDAndName(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Errors from handlers cross the wire.
-	_, err = golink.Call[*testpb.Pong](ctx(t), a, e, &testpb.Ping{N: -1})
-	var re *golink.RemoteError
-	if !errors.As(err, &re) || re.Msg != "negative: -1" {
+	_, err = a.CallTo[*testpb.Pong](ctx(t), e, &testpb.Ping{N: -1})
+	if re, ok := errors.AsType[*golink.RemoteError](err); !ok || re.Msg != "negative: -1" {
 		t.Fatalf("want remote error, got %v", err)
 	}
 	// Unknown process, by PID and by name.
-	if _, err = golink.Call[*testpb.Pong](ctx(t), a, golink.PID{Node: "b", Incarnation: e.PID().Incarnation, ID: 9999}, &testpb.Ping{}); !errors.Is(err, golink.ErrNoProc) {
+	if _, err = a.CallTo[*testpb.Pong](ctx(t), golink.PID{Node: "b", Incarnation: e.PID().Incarnation, ID: 9999}, &testpb.Ping{}); !errors.Is(err, golink.ErrNoProc) {
 		t.Fatalf("want ErrNoProc, got %v", err)
 	}
-	if _, err = golink.Call[*testpb.Pong](ctx(t), a, golink.Named[*testpb.Ping]("b", "nope"), &testpb.Ping{}); !errors.Is(err, golink.ErrNoProc) {
+	if _, err = a.CallTo[*testpb.Pong](ctx(t), golink.Named[*testpb.Ping]("b", "nope"), &testpb.Ping{}); !errors.Is(err, golink.ErrNoProc) {
 		t.Fatalf("want ErrNoProc by name, got %v", err)
 	}
 	if peers := a.Peers(); len(peers) != 1 || peers[0] != "b" {
@@ -213,14 +212,14 @@ func TestTypeMismatchIsDeadLetter(t *testing.T) {
 
 	// A remote sender addresses the process with the wrong type.
 	wrong := golink.Named[*testpb.Pong]("b", "echo")
-	if err := a.Send(wrong, &testpb.Pong{N: 1}); err != nil {
+	if err := a.SendTo(wrong, &testpb.Pong{N: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := golink.Call[*testpb.Pong](ctx(t), a, wrong, &testpb.Pong{}); !errors.Is(err, golink.ErrType) {
+	if _, err := a.CallTo[*testpb.Pong](ctx(t), wrong, &testpb.Pong{}); !errors.Is(err, golink.ErrType) {
 		t.Fatalf("want ErrType, got %v", err)
 	}
 	// Locally too, through an untyped address.
-	if err := b.Send(e.PID(), &testpb.Pong{}); err != nil {
+	if err := b.SendTo(e.PID(), &testpb.Pong{}); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
@@ -237,7 +236,7 @@ func TestTypeMismatchIsDeadLetter(t *testing.T) {
 		t.Fatalf("node info dead letters = %d", b.Info().DeadLetters)
 	}
 	// The process is unharmed.
-	if r, err := golink.Call[*testpb.Pong](ctx(t), a, e, &testpb.Ping{N: 1}); err != nil || r.N != 2 {
+	if r, err := a.CallTo[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); err != nil || r.N != 2 {
 		t.Fatalf("%v %v", r, err)
 	}
 }
@@ -248,14 +247,14 @@ func TestRemoteOrdering(t *testing.T) {
 	col, ch := collector(t, b)
 	const N = 20000
 	_, _ = golink.Spawn[proto.Message](a, func(p *golink.Process[proto.Message]) error {
-		for i := 0; i < N; i++ {
+		for i := range N {
 			if err := p.Send(col, proto.Message(&testpb.Ping{N: int64(i)})); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if m := recv(t, ch); m.Body.(*testpb.Ping).N != int64(i) {
 			t.Fatalf("out of order: want %d got %v", i, m.Body)
 		}
@@ -353,7 +352,7 @@ func TestKillAndRestart(t *testing.T) {
 	w.Monitor(silent)
 	callErr := make(chan error, 1)
 	go func() {
-		_, err := golink.Call[*testpb.Pong](context.Background(), a, silent, &testpb.Ping{})
+		_, err := a.CallTo[*testpb.Pong](t.Context(), silent, &testpb.Ping{})
 		callErr <- err
 	}()
 	time.Sleep(100 * time.Millisecond)
@@ -371,7 +370,7 @@ func TestKillAndRestart(t *testing.T) {
 	if m := recv(t, ch); m.Down == nil || m.Down.PID != silent.PID() || m.Down.Reason != golink.ReasonNoConnection {
 		t.Fatalf("got %+v", m.Down)
 	}
-	if err := a.Send(silent, &testpb.Ping{}); !errors.Is(err, golink.ErrNoConnection) {
+	if err := a.SendTo(silent, &testpb.Ping{}); !errors.Is(err, golink.ErrNoConnection) {
 		t.Fatalf("send to dead node: %v", err)
 	}
 
@@ -380,7 +379,7 @@ func TestKillAndRestart(t *testing.T) {
 		t.Fatal("incarnation did not change")
 	}
 	e, _ := golink.Spawn(b2, echo, golink.WithName("echo"))
-	if r, err := golink.Call[*testpb.Pong](ctx(t), a, golink.Named[*testpb.Ping]("b", "echo"), &testpb.Ping{N: 5}); err != nil || r.N != 6 {
+	if r, err := a.CallTo[*testpb.Pong](ctx(t), golink.Named[*testpb.Ping]("b", "echo"), &testpb.Ping{N: 5}); err != nil || r.N != 6 {
 		t.Fatalf("after restart: %v %v", r, err)
 	}
 	// The old PID names a process of the old incarnation: noproc, never a
@@ -408,11 +407,11 @@ func TestPartitionAndHeal(t *testing.T) {
 	if m := recv(t, ch); m.Down == nil || m.Down.Reason != golink.ReasonNoConnection {
 		t.Fatalf("got %+v", m.Down)
 	}
-	if _, err := golink.Call[*testpb.Pong](ctx(t), a, e, &testpb.Ping{N: 1}); !errors.Is(err, golink.ErrNoConnection) {
+	if _, err := a.CallTo[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); !errors.Is(err, golink.ErrNoConnection) {
 		t.Fatalf("partitioned call: %v", err)
 	}
 	c.Heal("a", "b")
-	if r, err := golink.Call[*testpb.Pong](ctx(t), a, e, &testpb.Ping{N: 1}); err != nil || r.N != 2 {
+	if r, err := a.CallTo[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); err != nil || r.N != 2 {
 		t.Fatalf("after heal: %v %v", r, err)
 	}
 	// The process on b survived the partition; only the link was lost.
@@ -446,7 +445,7 @@ func TestLeftoverCallsFailFast(t *testing.T) {
 	block := make(chan struct{})
 	e, _ := golink.Spawn[*testpb.Ping](a, func(p *golink.Process[*testpb.Ping]) error { <-block; return nil })
 	errc := make(chan error, 1)
-	go func() { _, err := golink.Call[*testpb.Pong](context.Background(), a, e, &testpb.Ping{}); errc <- err }()
+	go func() { _, err := a.CallTo[*testpb.Pong](t.Context(), e, &testpb.Ping{}); errc <- err }()
 	time.Sleep(50 * time.Millisecond)
 	close(block)
 	select {
@@ -471,7 +470,7 @@ func TestRegistry(t *testing.T) {
 	}
 	w, ch := watcher(t, a)
 	w.Monitor(e)
-	_ = a.Send(golink.Name{Node: "a", Name: "svc"}, &testpb.Ping{N: 0})
+	_ = a.SendTo(golink.Name{Node: "a", Name: "svc"}, &testpb.Ping{N: 0})
 	recv(t, ch)
 	if _, ok := a.Whereis("svc"); ok {
 		t.Fatal("name not released on exit")
@@ -498,8 +497,8 @@ func TestInspectAndInfo(t *testing.T) {
 	}, golink.WithName("insp"), golink.WithLabel("order"), golink.WithInspect(func() map[string]string {
 		return map[string]string{"handled": strconv.Itoa(s.handled)}
 	}))
-	for i := 0; i < 3; i++ {
-		_ = a.Send(e, &testpb.Ping{N: 1})
+	for range 3 {
+		_ = a.SendTo(e, &testpb.Ping{N: 1})
 	}
 	time.Sleep(20 * time.Millisecond)
 	got, err := a.Inspect(ctx(t), e.PID())
@@ -512,10 +511,10 @@ func TestInspectAndInfo(t *testing.T) {
 		t.Fatalf("info %+v", info)
 	}
 	// Busy process: inspect times out with a reason, and the mailbox shows the backlog.
-	_ = a.Send(e, &testpb.Ping{N: 7})
-	_ = a.Send(e, &testpb.Ping{N: 1})
+	_ = a.SendTo(e, &testpb.Ping{N: 7})
+	_ = a.SendTo(e, &testpb.Ping{N: 1})
 	time.Sleep(20 * time.Millisecond)
-	short, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	short, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 	if _, err := a.Inspect(short, e.PID()); err == nil || !strings.Contains(err.Error(), "busy") {
 		t.Fatalf("want busy error, got %v", err)
@@ -538,7 +537,7 @@ func TestMetadataPropagates(t *testing.T) {
 	c := golinktest.New(t, "a", "b")
 	a, b := c.Node("a"), c.Node("b")
 	col, ch := collector(t, b)
-	if err := a.SendContext(golink.WithMetadata(context.Background(), golink.Metadata{"trace": "abc"}), col, &testpb.Ping{}); err != nil {
+	if err := a.SendContext(golink.WithMetadata(t.Context(), golink.Metadata{"trace": "abc"}), col, proto.Message(&testpb.Ping{})); err != nil {
 		t.Fatal(err)
 	}
 	if m := recv(t, ch); m.Metadata["trace"] != "abc" {
@@ -552,10 +551,8 @@ func BenchmarkLocalCall(b *testing.B) {
 	c := golinktest.New(b, "a")
 	a := c.Node("a")
 	e, _ := golink.Spawn(a, echo)
-	bg := context.Background()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if _, err := golink.Call[*testpb.Pong](bg, a, e, &testpb.Ping{N: 1}); err != nil {
+	for b.Loop() {
+		if _, err := a.Call[*testpb.Pong](b.Context(), e, &testpb.Ping{N: 1}); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -563,13 +560,11 @@ func BenchmarkLocalCall(b *testing.B) {
 
 func BenchmarkRemoteCall(b *testing.B) {
 	c := golinktest.New(b, "a", "b")
-	a, n2 := c.Node("a"), c.Node("b")
-	e, _ := golink.Spawn(n2, echo)
-	bg := context.Background()
-	_, _ = golink.Call[*testpb.Pong](bg, a, e, &testpb.Ping{N: 1})
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if _, err := golink.Call[*testpb.Pong](bg, a, e, &testpb.Ping{N: 1}); err != nil {
+	a := c.Node("a")
+	e, _ := golink.Spawn(c.Node("b"), echo)
+	_, _ = a.Call[*testpb.Pong](b.Context(), e, &testpb.Ping{N: 1}) // establish the link
+	for b.Loop() {
+		if _, err := a.Call[*testpb.Pong](b.Context(), e, &testpb.Ping{N: 1}); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -577,27 +572,27 @@ func BenchmarkRemoteCall(b *testing.B) {
 
 func BenchmarkRemoteCallParallel(b *testing.B) {
 	c := golinktest.New(b, "a", "b")
-	a, n2 := c.Node("a"), c.Node("b")
-	e, _ := golink.Spawn(n2, echo)
-	bg := context.Background()
-	_, _ = golink.Call[*testpb.Pong](bg, a, e, &testpb.Ping{N: 1})
-	b.ResetTimer()
+	a := c.Node("a")
+	e, _ := golink.Spawn(c.Node("b"), echo)
+	_, _ = a.Call[*testpb.Pong](b.Context(), e, &testpb.Ping{N: 1})
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			if _, err := golink.Call[*testpb.Pong](bg, a, e, &testpb.Ping{N: 1}); err != nil {
+			if _, err := a.Call[*testpb.Pong](b.Context(), e, &testpb.Ping{N: 1}); err != nil {
 				b.Fatal(err)
 			}
 		}
 	})
 }
 
-func BenchmarkRemoteSend(b *testing.B) {
-	c := golinktest.New(b, "a", "b")
-	a, n2 := c.Node("a"), c.Node("b")
+// benchSend measures sends until every one is received, so the number is
+// end-to-end throughput, not the cost of enqueueing. It uses b.N rather than
+// b.Loop on purpose: b.Loop stops the timer when the loop ends, before the
+// wait for the receiver, which would time only the enqueue.
+func benchSend(b *testing.B, from, to *golink.Node) {
 	done := make(chan struct{})
 	total := b.N
-	sink, _ := golink.Spawn[*testpb.Ping](n2, func(p *golink.Process[*testpb.Ping]) error {
-		for i := 0; i < total; i++ {
+	addr, err := golink.Spawn[*testpb.Ping](to, func(p *golink.Process[*testpb.Ping]) error {
+		for range total + 1 {
 			if _, err := p.Receive(); err != nil {
 				return err
 			}
@@ -605,10 +600,15 @@ func BenchmarkRemoteSend(b *testing.B) {
 		close(done)
 		return nil
 	})
-	_ = a.Send(sink, &testpb.Ping{}) // establish the link
+	if err != nil {
+		b.Fatal(err)
+	}
+	msg := &testpb.Ping{}
+	_ = from.Send(addr, msg) // establish the link before timing
+	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N-1; i++ {
-		if err := a.Send(sink, &testpb.Ping{N: int64(i)}); err != nil {
+	for range b.N {
+		if err := from.Send(addr, msg); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -617,23 +617,10 @@ func BenchmarkRemoteSend(b *testing.B) {
 
 func BenchmarkLocalSend(b *testing.B) {
 	c := golinktest.New(b, "a")
-	a := c.Node("a")
-	done := make(chan struct{})
-	total := b.N
-	sink, _ := golink.Spawn[*testpb.Ping](a, func(p *golink.Process[*testpb.Ping]) error {
-		for i := 0; i < total; i++ {
-			if _, err := p.Receive(); err != nil {
-				return err
-			}
-		}
-		close(done)
-		return nil
-	})
-	msg := &testpb.Ping{}
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = a.Send(sink, msg)
-	}
-	<-done
+	benchSend(b, c.Node("a"), c.Node("a"))
+}
+
+func BenchmarkRemoteSend(b *testing.B) {
+	c := golinktest.New(b, "a", "b")
+	benchSend(b, c.Node("a"), c.Node("b"))
 }

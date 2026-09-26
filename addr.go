@@ -2,6 +2,7 @@ package golink
 
 import (
 	"context"
+	"maps"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -45,18 +46,11 @@ func (a Addr[M]) String() string {
 
 func (a Addr[M]) target() (PID, string) { return a.pid, a.name }
 
-// Caller is a Node or a Process: something a Call can be made from.
-type Caller interface {
-	call(ctx context.Context, to Target, req proto.Message) (proto.Message, error)
-}
-
-// Call sends req and waits for the target's Reply, typed as R. The reply's
-// type is checked at the caller: a Reply of another type is ErrType.
-//
-//	resp, err := golink.Call[*orderspb.Reserved](ctx, node, addr, &orderspb.Reserve{})
-func Call[R proto.Message](ctx context.Context, c Caller, to Target, req proto.Message) (R, error) {
+// typed asserts a reply to the type the caller asked for. A reply of another
+// type is ErrType, the same error a caller gets when the callee rejects the
+// request's type.
+func typed[R proto.Message](resp proto.Message, err error) (R, error) {
 	var zero R
-	resp, err := c.call(ctx, to, req)
 	if err != nil {
 		return zero, err
 	}
@@ -69,17 +63,12 @@ func Call[R proto.Message](ctx context.Context, c Caller, to Target, req proto.M
 
 type mdKey struct{}
 
-// WithMetadata returns a context carrying md; Send and Call propagate it
-// with the message, merged over any metadata already in ctx.
+// WithMetadata returns a context carrying md; SendContext and Call propagate
+// it with the message, merged over any metadata already in ctx.
 func WithMetadata(ctx context.Context, md Metadata) context.Context {
 	if old := MetadataFrom(ctx); len(old) > 0 {
-		merged := make(Metadata, len(old)+len(md))
-		for k, v := range old {
-			merged[k] = v
-		}
-		for k, v := range md {
-			merged[k] = v
-		}
+		merged := maps.Clone(old)
+		maps.Copy(merged, md)
 		md = merged
 	}
 	return context.WithValue(ctx, mdKey{}, md)

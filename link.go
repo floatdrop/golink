@@ -43,8 +43,7 @@ type linkStats struct {
 
 func (s *linkStats) fail(err error) {
 	if err != nil {
-		t := err.Error()
-		s.lastErr.Store(&t)
+		s.lastErr.Store(new(err.Error()))
 	}
 	s.state.Store(uint32(LinkDown))
 }
@@ -240,20 +239,20 @@ func (n *Node) dial(peer string) (*outLink, error) {
 		return nil, &LinkError{Peer: peer, Err: err}
 	}
 	l := &outLink{
-		peer:     NodeID{Name: peer, Incarnation: inc},
-		cc:       cc,
-		stream:   stream,
-		cancel:   scancel,
-		q:        newQueue[*golinkv1.Envelope](),
-		done:     make(chan struct{}),
-		drained:  make(chan struct{}),
-		recvDone: make(chan struct{}),
+		established: time.Now(),
+		peer:        NodeID{Name: peer, Incarnation: inc},
+		cc:          cc,
+		stream:      stream,
+		cancel:      scancel,
+		q:           newQueue[*golinkv1.Envelope](),
+		done:        make(chan struct{}),
+		drained:     make(chan struct{}),
+		recvDone:    make(chan struct{}),
 	}
 	n.mu.Lock()
 	l.reconnects = n.dials[peer]
 	n.dials[peer]++
 	n.mu.Unlock()
-	l.established = time.Now()
 	l.state.Store(uint32(LinkUp))
 	return l, nil
 }
@@ -333,8 +332,7 @@ func (n *Node) Link(stream grpc.BidiStreamingServer[golinkv1.Envelope, golinkv1.
 		return err
 	}
 
-	l := &inLink{peer: peer, closed: make(chan struct{})}
-	l.established = time.Now()
+	l := &inLink{peer: peer, closed: make(chan struct{}), established: time.Now()}
 	l.state.Store(uint32(LinkUp))
 
 	// A new stream from a peer we already have one from means the peer lost

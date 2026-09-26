@@ -59,7 +59,7 @@ addr, _ := golink.Spawn(node, func(p *golink.Process[*orderspb.Order]) error {
 
 // From anywhere in the cluster; the address carries the type.
 ledger := golink.Named[*ledgerpb.Entry]("billing-1", "ledger")
-resp, err := golink.Call[*orderspb.Reserved](ctx, node, addr, &orderspb.Order{…})
+resp, err := node.Call[*orderspb.Reserved](ctx, addr, &orderspb.Order{…})
 ```
 
 Inside a process:
@@ -69,6 +69,9 @@ ref := p.Monitor(ledger)                       // Down{Ref: ref} when it exits o
 err := p.Send(ledger, &ledgerpb.Entry{…})       // compile-time typed
 r, err := p.Call[*ledgerpb.Posted](ctx, ledger, &ledgerpb.Entry{…})
 err = p.SendTo(m.From, &orderspb.Ack{})         // untyped: a PID from a message
+a, err := p.CallTo[*orderspb.Ack](ctx, m.From, &orderspb.Ping{})
+
+// Node has the same four: Send, SendTo, Call, CallTo.
 ```
 
 ## What a process sees
@@ -78,7 +81,7 @@ err = p.SendTo(m.From, &orderspb.Ack{})         // untyped: a PID from a message
 | `p.Receive()` | `Msg[M]{From, Body, Down, Metadata}`; error when asked to exit |
 | `p.ReceiveTimeout(d)` | the same, or `context.DeadlineExceeded` |
 | `p.Send(to Addr[N], m N)` / `p.SendTo(Target, proto.Message)` | typed / untyped asynchronous send |
-| `p.Call[R](ctx, to Addr[N], req N)` | the reply as `R`, `*RemoteError`, `ErrNoProc` (also when the callee exits before answering), `ErrType` or `ErrNoConnection` |
+| `p.Call[R](ctx, to Addr[N], req N)` / `p.CallTo[R](ctx, Target, proto.Message)` | the reply as `R`, `*RemoteError`, `ErrNoProc` (also when the callee exits before answering), `ErrType` or `ErrNoConnection` |
 | `p.Reply(m, resp, err)` | answers a call; may be deferred to another goroutine |
 | `p.Monitor(target)` / `p.Demonitor(ref)` | a `Down` with the ref when the target exits: `normal`, the returned error, `panic: …`, `killed`, `noproc`, `noconnection`, `shutdown` |
 | `p.Exit(target, reason)` | asks another process to exit; its `Receive` returns an `*ExitError` |
@@ -139,9 +142,9 @@ from, and the roadmap: an `Inspector` gRPC service, `golink/otel`,
 Apple M3 Max, `go test -bench . -benchmem`, in-memory gRPC:
 
 ```
-BenchmarkLocalCall-14             715.9 ns/op    328 B/op     7 allocs/op
-BenchmarkLocalSend-14             149.6 ns/op     64 B/op     2 allocs/op
-BenchmarkRemoteCall-14           10823 ns/op   3344 B/op    71 allocs/op
-BenchmarkRemoteCallParallel-14    3708 ns/op   3335 B/op    66 allocs/op
-BenchmarkRemoteSend-14            1469 ns/op   1637 B/op    30 allocs/op
+BenchmarkLocalCall-14             783.6 ns/op    328 B/op     7 allocs/op
+BenchmarkLocalSend-14             154.4 ns/op     65 B/op     2 allocs/op
+BenchmarkRemoteCall-14           10730 ns/op   3380 B/op    71 allocs/op
+BenchmarkRemoteCallParallel-14    3480 ns/op   3355 B/op    66 allocs/op
+BenchmarkRemoteSend-14            1426 ns/op   1552 B/op    27 allocs/op
 ```

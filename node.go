@@ -1,11 +1,13 @@
 package golink
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
+	"maps"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -118,15 +120,9 @@ func NewNode(cfg Config) (*Node, error) {
 	if cfg.Resolver == nil {
 		return nil, errors.New("golink: Config.Resolver is required")
 	}
-	if cfg.Incarnation == 0 {
-		cfg.Incarnation = uint64(time.Now().UnixNano())
-	}
-	if cfg.Logger == nil {
-		cfg.Logger = slog.Default()
-	}
-	if cfg.DialTimeout == 0 {
-		cfg.DialTimeout = 5 * time.Second
-	}
+	cfg.Incarnation = cmp.Or(cfg.Incarnation, uint64(time.Now().UnixNano()))
+	cfg.Logger = cmp.Or(cfg.Logger, slog.Default())
+	cfg.DialTimeout = cmp.Or(cfg.DialTimeout, 5*time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 	n := &Node{
 		cfg:     cfg,
@@ -229,12 +225,8 @@ func (n *Node) Unregister(name string) {
 // Processes snapshots every local process, ordered by PID.
 func (n *Node) Processes() []ProcessInfo {
 	n.mu.Lock()
-	procs := make([]*proc, 0, len(n.procs))
-	for _, p := range n.procs {
-		procs = append(procs, p)
-	}
+	procs := slices.SortedFunc(maps.Values(n.procs), func(a, b *proc) int { return cmp.Compare(a.pid.ID, b.pid.ID) })
 	n.mu.Unlock()
-	sort.Slice(procs, func(i, j int) bool { return procs[i].pid.ID < procs[j].pid.ID })
 	out := make([]ProcessInfo, len(procs))
 	for i, p := range procs {
 		out[i] = p.info()
@@ -295,13 +287,9 @@ func (n *Node) Info() NodeInfo {
 		info.Links = append(info.Links, l.info())
 	}
 	n.mu.Unlock()
-	sort.Slice(info.Links, func(i, j int) bool {
-		a, b := info.Links[i], info.Links[j]
-		if a.Peer.Name != b.Peer.Name {
-			return a.Peer.Name < b.Peer.Name
-		}
-		return a.Outbound && !b.Outbound
-	})
+	// Outbound links were collected first, so a stable sort by peer keeps
+	// each peer's outbound link ahead of its inbound one.
+	slices.SortStableFunc(info.Links, func(a, b LinkInfo) int { return cmp.Compare(a.Peer.Name, b.Peer.Name) })
 	return info
 }
 
@@ -323,19 +311,14 @@ func (n *Node) Disconnect(peer string) bool {
 func (n *Node) Peers() []string {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	seen := map[string]bool{}
+	seen := make(map[string]struct{}, len(n.out)+len(n.in))
 	for p := range n.out {
-		seen[p] = true
+		seen[p] = struct{}{}
 	}
 	for p := range n.in {
-		seen[p] = true
+		seen[p] = struct{}{}
 	}
-	out := make([]string, 0, len(seen))
-	for p := range seen {
-		out = append(out, p)
-	}
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(seen))
 }
 
 func (n *Node) local(pid PID) *proc {
@@ -363,24 +346,42 @@ func (n *Node) lookup(pid PID, name string) *proc {
 
 // ---------- messaging from outside a process ----------
 
-// Send delivers msg asynchronously with the node as sender. Sending to a
-// process that does not exist is not an error (it is a dead letter); an error
-// means the message could not be encoded or the node could not be reached.
-func (n *Node) Send(to Target, msg proto.Message) error {
-	return n.send(n.PID(), nil, to, msg, nil)
+// Send delivers m to a typed address, local or remote, with the node as
+// sender. Sending to a process that does not exist is not an error (it is a
+// dead letter); an error means m could not be encoded or the node could not
+// be reached.
+func (n *Node) Send[N proto.Message](to Addr[N], m N) error {
+	return n.send(n.PID(), nil, to, m, nil)
 }
 
 // SendContext is Send with the metadata carried by ctx.
-func (n *Node) SendContext(ctx context.Context, to Target, msg proto.Message) error {
-	return n.send(n.PID(), nil, to, msg, MetadataFrom(ctx))
+func (n *Node) SendContext[N proto.Message](ctx context.Context, to Addr[N], m N) error {
+	return n.send(n.PID(), nil, to, m, MetadataFrom(ctx))
+}
+
+// SendTo delivers m to an untyped target: a PID, a Name, or an Addr of
+// another type. The target's type is checked on delivery only.
+func (n *Node) SendTo(to Target, m proto.Message) error {
+	return n.send(n.PID(), nil, to, m, nil)
+}
+
+// Call sends req to a typed address and waits for the reply, typed as R:
+//
+//	resp, err := node.Call[*orderspb.Reserved](ctx, addr, &orderspb.Order{…})
+//
+// A reply of another type is ErrType; a handler error is a *RemoteError; a
+// callee that is gone, or exits before answering, is ErrNoProc.
+func (n *Node) Call[R, N proto.Message](ctx context.Context, to Addr[N], req N) (R, error) {
+	return typed[R](n.doCall(ctx, n.PID(), nil, to, req))
+}
+
+// CallTo is Call to an untyped target.
+func (n *Node) CallTo[R proto.Message](ctx context.Context, to Target, req proto.Message) (R, error) {
+	return typed[R](n.doCall(ctx, n.PID(), nil, to, req))
 }
 
 // Exit asks a process anywhere to terminate with reason.
 func (n *Node) Exit(to Target, reason string) error { return n.exit(n.PID(), to, reason) }
-
-func (n *Node) call(ctx context.Context, to Target, req proto.Message) (proto.Message, error) {
-	return n.doCall(ctx, n.PID(), nil, to, req)
-}
 
 // ---------- the operations; each has a local and a remote path ----------
 

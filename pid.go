@@ -93,8 +93,7 @@ type ExitError struct{ Reason string }
 func (e *ExitError) Error() string { return "golink: exit: " + e.Reason }
 
 func exitReasonOf(ctx context.Context) (string, bool) {
-	var ee *ExitError
-	if errors.As(context.Cause(ctx), &ee) {
+	if ee, ok := errors.AsType[*ExitError](context.Cause(ctx)); ok {
 		return ee.Reason, true
 	}
 	return "", false

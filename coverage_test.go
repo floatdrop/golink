@@ -53,14 +53,14 @@ func TestAddrForms(t *testing.T) {
 }
 
 func TestMetadataMerge(t *testing.T) {
-	ctx := golink.WithMetadata(context.Background(), golink.Metadata{"a": "1", "b": "1"})
+	ctx := golink.WithMetadata(t.Context(), golink.Metadata{"a": "1", "b": "1"})
 	ctx = golink.WithMetadata(ctx, golink.Metadata{"b": "2"})
 	md := golink.MetadataFrom(ctx)
-	if md["a"] != "1" || md["b"] != "2" || golink.MetadataFrom(context.Background()) != nil {
+	if md["a"] != "1" || md["b"] != "2" || golink.MetadataFrom(t.Context()) != nil {
 		t.Fatalf("%v", md)
 	}
 	m := golink.Msg[proto.Message]{Metadata: md}
-	if golink.MetadataFrom(m.Context(context.Background()))["b"] != "2" {
+	if golink.MetadataFrom(m.Context(t.Context()))["b"] != "2" {
 		t.Fatal("Msg.Context")
 	}
 	if (golink.Msg[proto.Message]{}).Context(ctx) != ctx {
@@ -94,10 +94,10 @@ func TestNewNodeValidation(t *testing.T) {
 		t.Fatalf("defaults: %+v", n.Info())
 	}
 	// Unknown peer: the resolver refuses, the error is a connection error.
-	if err := n.Send(golink.Named[*testpb.Ping]("nowhere", "x"), &testpb.Ping{}); !errors.Is(err, golink.ErrNoConnection) {
+	if err := n.SendTo(golink.Named[*testpb.Ping]("nowhere", "x"), &testpb.Ping{}); !errors.Is(err, golink.ErrNoConnection) {
 		t.Fatalf("got %v", err)
 	}
-	if err := n.Send(golink.PID{}, &testpb.Ping{}); err == nil {
+	if err := n.SendTo(golink.PID{}, &testpb.Ping{}); err == nil {
 		t.Fatal("empty node must be an error")
 	}
 	if err := n.Stop(context.Background()); err != nil {
@@ -109,7 +109,7 @@ func TestNewNodeValidation(t *testing.T) {
 	if _, err := golink.Spawn(n, echo); !errors.Is(err, golink.ErrNodeStopped) {
 		t.Fatalf("spawn after stop: %v", err)
 	}
-	if err := n.Send(golink.Named[*testpb.Ping]("b", "x"), &testpb.Ping{}); !errors.Is(err, golink.ErrNodeStopped) {
+	if err := n.SendTo(golink.Named[*testpb.Ping]("b", "x"), &testpb.Ping{}); !errors.Is(err, golink.ErrNodeStopped) {
 		t.Fatalf("send after stop: %v", err)
 	}
 }
@@ -118,7 +118,7 @@ func TestStopTimesOut(t *testing.T) {
 	n, _ := golink.NewNode(golink.Config{Name: "a", Resolver: golink.StaticResolver{}})
 	block := make(chan struct{})
 	_, _ = golink.Spawn[*testpb.Ping](n, func(p *golink.Process[*testpb.Ping]) error { <-block; return nil })
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if err := n.Stop(ctx); err == nil || !strings.Contains(err.Error(), "stop") {
 		t.Fatalf("got %v", err)
@@ -223,8 +223,9 @@ func TestReceiveTimeoutAndExitError(t *testing.T) {
 	}
 	time.Sleep(10 * time.Millisecond)
 	_ = a.Exit(addr, "bye")
-	var ee *golink.ExitError
-	if err := <-results; !errors.As(err, &ee) || ee.Reason != "bye" {
+	if err := <-results; err == nil {
+		t.Fatal("want exit error")
+	} else if ee, ok := errors.AsType[*golink.ExitError](err); !ok || ee.Reason != "bye" {
 		t.Fatalf("exit: %v", err)
 	}
 	if m := recv(t, ch); m.Down == nil || m.Down.Reason != "bye" {
@@ -248,9 +249,13 @@ func TestSendContextReplyAndMonitorVariants(t *testing.T) {
 	done := make(chan struct{})
 	_, _ = golink.Spawn[proto.Message](a, func(p *golink.Process[proto.Message]) error {
 		defer close(done)
-		md := golink.WithMetadata(context.Background(), golink.Metadata{"k": "v"})
+		md := golink.WithMetadata(t.Context(), golink.Metadata{"k": "v"})
 		if err := p.SendContext(md, col, proto.Message(&testpb.Ping{N: 1})); err != nil {
 			return err
+		}
+		// CallTo from a process, to an untyped target.
+		if r, err := p.CallTo[*testpb.Pong](t.Context(), golink.Name{Node: "b", Name: "echo"}, &testpb.Ping{N: 1}); err != nil || r.N != 2 {
+			t.Errorf("CallTo: %v %v", r, err)
 		}
 		// Reply to something that is not a call.
 		if err := p.Reply(golink.Msg[proto.Message]{}, nil, nil); !errors.Is(err, golink.ErrNotCall) {
@@ -306,10 +311,10 @@ func TestEncodeErrors(t *testing.T) {
 	a, b := c.Node("a"), c.Node("b")
 	bad := &testpb.Reserve{Id: "\xff"}
 	col, _ := collector(t, b)
-	if err := a.Send(col, bad); err == nil || !strings.Contains(err.Error(), "encode") {
+	if err := a.SendTo(col, bad); err == nil || !strings.Contains(err.Error(), "encode") {
 		t.Fatalf("send: %v", err)
 	}
-	if _, err := golink.Call[*testpb.Pong](ctx(t), a, col, bad); err == nil || !strings.Contains(err.Error(), "encode") {
+	if _, err := a.CallTo[*testpb.Pong](ctx(t), col, bad); err == nil || !strings.Contains(err.Error(), "encode") {
 		t.Fatalf("call: %v", err)
 	}
 	// A reply that cannot be encoded is reported to the replier.
@@ -322,7 +327,7 @@ func TestEncodeErrors(t *testing.T) {
 		replyErr <- p.Reply(m, bad, nil)
 		return nil
 	})
-	go func() { _, _ = golink.Call[*testpb.Pong](ctx(t), a, svc, &testpb.Ping{}) }()
+	go func() { _, _ = a.CallTo[*testpb.Pong](ctx(t), svc, &testpb.Ping{}) }()
 	if err := <-replyErr; err == nil || !strings.Contains(err.Error(), "encode") {
 		t.Fatalf("reply: %v", err)
 	}
@@ -347,9 +352,9 @@ func TestInspectWhileBacklogged(t *testing.T) {
 			}
 		}
 	}, golink.WithInspect(func() map[string]string { return map[string]string{"n": "x"} }))
-	_ = a.Send(e, &testpb.Ping{N: 7})
+	_ = a.SendTo(e, &testpb.Ping{N: 7})
 	<-entered
-	_ = a.Send(e, &testpb.Ping{N: 1}) // queued behind the busy handler
+	_ = a.SendTo(e, &testpb.Ping{N: 1}) // queued behind the busy handler
 	got := make(chan error, 1)
 	go func() { _, err := a.Inspect(ctx(t), e.PID()); got <- err }()
 	time.Sleep(20 * time.Millisecond)
@@ -363,7 +368,7 @@ func TestInspectWhileBacklogged(t *testing.T) {
 		_, err := p.Receive()
 		return err
 	}, golink.WithInspect(func() map[string]string { <-blockInspect; return nil }))
-	short, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	short, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
 	defer cancel()
 	if _, err := a.Inspect(short, e2.PID()); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("got %v", err)
@@ -438,7 +443,7 @@ func TestHandshakeFailures(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			n := nodeAgainst(t, tc.peer, 200*time.Millisecond)
-			err := n.Send(golink.Named[*testpb.Ping]("b", "x"), &testpb.Ping{})
+			err := n.SendTo(golink.Named[*testpb.Ping]("b", "x"), &testpb.Ping{})
 			if !errors.Is(err, golink.ErrNoConnection) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("got %v", err)
 			}
@@ -463,7 +468,7 @@ func TestInboundRejections(t *testing.T) {
 	t.Cleanup(func() { _ = cc.Close() })
 	client := golinkv1.NewNodeClient(cc)
 	open := func(md ...string) error {
-		c, cancel := context.WithTimeout(context.Background(), time.Second)
+		c, cancel := context.WithTimeout(t.Context(), time.Second)
 		if len(md) > 0 {
 			c = metadataCtx(c, md...)
 		}
@@ -517,12 +522,12 @@ func TestCopyLocal(t *testing.T) {
 	t.Cleanup(func() { _ = n.Stop(context.Background()) })
 	e, _ := golink.Spawn(n, echo)
 	msg := &testpb.Ping{N: 1}
-	if err := n.Send(e, msg); err != nil {
+	if err := n.SendTo(e, msg); err != nil {
 		t.Fatal(err)
 	}
 	msg.N = -100 // would crash the echo if the pointer were shared
 	req := &testpb.Ping{N: 1}
-	r, err := golink.Call[*testpb.Pong](ctx(t), n, e, req)
+	r, err := n.CallTo[*testpb.Pong](ctx(t), e, req)
 	if err != nil || r.N != 2 {
 		t.Fatalf("%v %v", r, err)
 	}
@@ -539,7 +544,7 @@ func TestCallFailsWhenCalleeExitsMidCall(t *testing.T) {
 		_, err := p.Receive()
 		return err
 	})
-	if _, err := golink.Call[*testpb.Pong](ctx(t), a, quitter, &testpb.Ping{}); !errors.Is(err, golink.ErrNoProc) {
+	if _, err := a.CallTo[*testpb.Pong](ctx(t), quitter, &testpb.Ping{}); !errors.Is(err, golink.ErrNoProc) {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -554,7 +559,7 @@ func TestOrderingOfSnapshots(t *testing.T) {
 	}
 	for _, peer := range []string{"c", "b"} {
 		e, _ := golink.Spawn(c.Node(peer), echo)
-		if _, err := golink.Call[*testpb.Pong](ctx(t), a, e, &testpb.Ping{N: 1}); err != nil {
+		if _, err := a.CallTo[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -575,7 +580,7 @@ func TestOrderingOfSnapshots(t *testing.T) {
 	if info, _ := a.Process(e1.PID()); info.Watchers != 0 {
 		t.Fatalf("%+v", info)
 	}
-	_ = a.Send(e1, &testpb.Ping{N: 0})
+	_ = a.SendTo(e1, &testpb.Ping{N: 0})
 	select {
 	case m := <-ch:
 		t.Fatalf("unexpected %+v", m)
@@ -615,7 +620,7 @@ func TestAuthorize(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = a.Send(golink.Named[*testpb.Ping]("b", "x"), &testpb.Ping{})
+		err = a.SendTo(golink.Named[*testpb.Ping]("b", "x"), &testpb.Ping{})
 		if name == "a" && (err == nil || !strings.Contains(err.Error(), "unknown peer a")) {
 			t.Fatalf("a: %v", err)
 		}
@@ -630,7 +635,7 @@ func TestLinkStatsAfterKill(t *testing.T) {
 	c := golinktest.New(t, "a", "b")
 	a := c.Node("a")
 	e, _ := golink.Spawn(c.Node("b"), echo)
-	if _, err := golink.Call[*testpb.Pong](ctx(t), a, e, &testpb.Ping{N: 1}); err != nil {
+	if _, err := a.CallTo[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if links := a.Info().Links; len(links) != 2 || links[0].State != golink.LinkUp || links[0].Messages == 0 {

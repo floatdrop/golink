@@ -25,10 +25,10 @@ func TestQueue(t *testing.T) {
 		t.Fatal("empty")
 	}
 	// Enough churn to hit the compaction branch (head > 1024 and past half).
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		q.push(i)
 	}
-	for i := 0; i < 2000; i++ {
+	for i := range 2000 {
 		if v, ok := q.tryPop(); !ok || v != i {
 			t.Fatalf("pop %d: %v %v", i, v, ok)
 		}
@@ -182,7 +182,7 @@ func (f *fakeStream) Recv() (*golinkv1.Envelope, error) {
 
 func TestLinkHandlerBranches(t *testing.T) {
 	n := newTestNode(t, "a")
-	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(mdNode, "b", mdIncarnation, "2", mdVersion, "1"))
+	ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(mdNode, "b", mdIncarnation, "2", mdVersion, "1"))
 	// Hello cannot be sent.
 	fs := &fakeStream{ctx: ctx, sendErr: io.ErrClosedPipe, recv: make(chan *golinkv1.Envelope)}
 	if err := n.Link(fs); !errors.Is(err, io.ErrClosedPipe) {
@@ -232,7 +232,7 @@ func TestOutboundWriteFailure(t *testing.T) {
 		t.Fatal("link still registered")
 	}
 	// shutdown on a link that is already gone returns at once.
-	l.shutdown(context.Background())
+	l.shutdown(t.Context())
 }
 
 type fakeClientStream struct {
@@ -252,7 +252,7 @@ func TestShutdownArms(t *testing.T) {
 	// Caller's ctx expires before anything drains.
 	l := mk()
 	l.q.notify <- struct{}{} // notify already pending: the non-blocking push takes the default arm
-	expired, cancel := context.WithCancel(context.Background())
+	expired, cancel := context.WithCancel(t.Context())
 	cancel()
 	l.once.Do(func() {}) // neutralise close (no ClientConn to close)
 	l.shutdown(expired)
@@ -261,7 +261,7 @@ func TestShutdownArms(t *testing.T) {
 	l.once.Do(func() {})
 	close(l.drained)
 	close(l.done)
-	l.shutdown(context.Background())
+	l.shutdown(t.Context())
 	// Drained, peer never answers, ctx expires.
 	l = mk()
 	l.once.Do(func() {})
@@ -270,10 +270,10 @@ func TestShutdownArms(t *testing.T) {
 }
 
 func TestInspectNowOnExited(t *testing.T) {
-	ctx, cancel := context.WithCancelCause(context.Background())
+	ctx, cancel := context.WithCancelCause(t.Context())
 	cancel(nil)
 	p := &proc{ctx: ctx, sys: make(chan inspectReq), started: time.Now()}
-	if _, err := p.inspectNow(context.Background()); !errors.Is(err, ErrNoProc) {
+	if _, err := p.inspectNow(t.Context()); !errors.Is(err, ErrNoProc) {
 		t.Fatal(err)
 	}
 }
@@ -307,7 +307,7 @@ func TestOutboundLostWhileInboundAlive(t *testing.T) {
 
 func TestRecvGoroutineStopsWhenClosed(t *testing.T) {
 	n := newTestNode(t, "a")
-	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(mdNode, "b", mdIncarnation, "2", mdVersion, "1"))
+	ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(mdNode, "b", mdIncarnation, "2", mdVersion, "1"))
 	fs := &fakeStream{ctx: ctx, recvErr: io.EOF, recv: make(chan *golinkv1.Envelope)}
 	done := make(chan error, 1)
 	go func() { done <- n.Link(fs) }()
@@ -353,12 +353,12 @@ func TestDialSharingAndStopWhileDialing(t *testing.T) {
 	}
 	// Two concurrent sends share one dial.
 	errs := make(chan error, 2)
-	go func() { errs <- n.Send(Named[*testpb.Ping]("b", "x"), &testpb.Ping{}) }()
+	go func() { errs <- n.SendTo(Named[*testpb.Ping]("b", "x"), &testpb.Ping{}) }()
 	<-entered
-	go func() { errs <- n.Send(Named[*testpb.Ping]("b", "x"), &testpb.Ping{}) }()
+	go func() { errs <- n.SendTo(Named[*testpb.Ping]("b", "x"), &testpb.Ping{}) }()
 	time.Sleep(20 * time.Millisecond)
 	close(release)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if err := <-errs; err != nil {
 			t.Fatal(err)
 		}
@@ -369,7 +369,7 @@ func TestDialSharingAndStopWhileDialing(t *testing.T) {
 	// Stop while a dial is in flight: the link is discarded.
 	n.Disconnect("b")
 	release = make(chan struct{})
-	go func() { errs <- n.Send(Named[*testpb.Ping]("b", "x"), &testpb.Ping{}) }()
+	go func() { errs <- n.SendTo(Named[*testpb.Ping]("b", "x"), &testpb.Ping{}) }()
 	<-entered
 	_ = n.Stop(context.Background())
 	close(release)
@@ -385,7 +385,7 @@ func TestDialBadTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := n.Send(Named[*testpb.Ping]("b", "x"), &testpb.Ping{}); !errors.Is(err, ErrNoConnection) {
+	if err := n.SendTo(Named[*testpb.Ping]("b", "x"), &testpb.Ping{}); !errors.Is(err, ErrNoConnection) {
 		t.Fatalf("got %v", err)
 	}
 }

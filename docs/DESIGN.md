@@ -52,7 +52,7 @@ addr, _ := golink.Spawn[*orderspb.OrderMsg](node, func(p *golink.Process[*orders
 
 ref := p.Monitor(golink.Name{Node: "billing-2", Name: "ledger"})
 p.Send(addr, &orderspb.OrderMsg{Kind: &orderspb.OrderMsg_Reserve{}})     // compile-time typed
-resp, err := golink.Call[*orderspb.Reserved](ctx, node, addr, &orderspb.OrderMsg{}) // reply typed by R
+resp, err := node.Call[*orderspb.Reserved](ctx, addr, &orderspb.OrderMsg{}) // reply typed by R
 ```
 
 ## Package layout
@@ -156,7 +156,10 @@ func (a Addr[M]) PID() PID
 func (p *Process[M]) Receive() (Msg[M], error)
 func (p *Process[M]) ReceiveTimeout(d time.Duration) (Msg[M], error)
 func (p *Process[M]) Send[N proto.Message](to Addr[N], m N) error
-func (p *Process[M]) Call[N, R proto.Message](ctx, to Addr[N], req N) (R, error)
+func (p *Process[M]) Call[R, N proto.Message](ctx, to Addr[N], req N) (R, error)
+func (p *Process[M]) CallTo[R proto.Message](ctx, to Target, req proto.Message) (R, error)
+func (p *Process[M]) SendTo(to Target, m proto.Message) error
+// Node has the same Send / SendTo / Call / CallTo, with the node as sender.
 func (p *Process[M]) Reply(m Msg[M], resp proto.Message, err error) error   // may be deferred
 func (p *Process[M]) Monitor(to Target) Ref
 func (p *Process[M]) Demonitor(ref Ref)
