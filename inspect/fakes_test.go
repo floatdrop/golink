@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/floatdrop/golink"
 	"github.com/floatdrop/golink/golinktest"
@@ -125,5 +128,26 @@ func TestListProcessesForwarded(t *testing.T) {
 	resp, err := client(c, "a").ListProcesses(t.Context(), &inspectv1.ListProcessesRequest{Node: "b", Label: "remote"})
 	if err != nil || len(resp.GetProcesses()) != 1 || resp.GetProcesses()[0].GetPid().GetNode() != "b" {
 		t.Fatalf("%v %v", resp, err)
+	}
+}
+
+// okWatch is a server stream that accepts every event.
+type okWatch struct{ fakeWatch }
+
+func (*okWatch) Send(*inspectv1.WatchResponse) error { return nil }
+
+func TestWatchEndsWithUnavailableWhenNodeStops(t *testing.T) {
+	// A node on its own, not behind a gRPC server that would cancel the
+	// stream first: only the node stopping can end this Watch.
+	n, err := golink.NewNode(golink.Config{Name: "solo", Resolver: golink.StaticResolver{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- inspect.New(n).Watch(&inspectv1.WatchRequest{}, &okWatch{fakeWatch{ctx: t.Context()}}) }()
+	time.Sleep(20 * time.Millisecond)
+	_ = n.Stop(t.Context())
+	if err := <-done; status.Code(err) != codes.Unavailable {
+		t.Fatalf("got %v", err)
 	}
 }
