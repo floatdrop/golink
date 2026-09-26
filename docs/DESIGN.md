@@ -97,17 +97,30 @@ registration.
 One gRPC service, one method:
 
 ```proto
-service Node { rpc Link(stream Envelope) returns (stream Envelope); }
+service Node { rpc Link(stream Frame) returns (stream Frame); }
 
-message Envelope {
-  oneof kind { Send send = 1; Call call = 2; Reply reply = 3;
-               Monitor monitor = 4; Demonitor demonitor = 5; Down down = 6;
-               Exit exit = 7; }
-  map<string,string> metadata = 15;   // trace context, deadlines, tenant …
+message Frame { repeated Envelope envelopes = 1; }   // everything queued since the last write
+
+message Envelope {                                   // one flat message, decoded cheaply
+  Kind kind = 1;                                     // send, call, reply, monitor, demonitor, down, exit, hello
+  uint64 from_incarnation = 2; uint64 from_id = 3;   // on the node that opened the link
+  uint64 to_incarnation = 4;   uint64 to_id = 5;     // on the node that accepted it
+  string to_name = 6;
+  uint64 ref = 7; Status status = 8; string reason = 9;
+  string body_type = 10; bytes body = 11;            // the message's full name and encoding
+  Hello hello = 12;
+  map<string,string> metadata = 15;                  // trace context, deadlines, tenant …
 }
-message Send { PID from = 1; PID to = 2; string to_name = 3; google.protobuf.Any body = 4; }
 ```
 
+- **A frame per write.** A link's writer sends everything queued since its
+  last write as one gRPC message, split at about 1 MiB (well under gRPC's
+  default 4 MiB limit), so under load many envelopes share the per-message
+  cost of gRPC; at low load a frame holds one envelope and nothing waits.
+- **No node names per envelope.** Every envelope on a link goes from a
+  process of the node that opened it to one of the node that accepted it,
+  so PIDs travel as incarnation and id; the reader fills the node names in
+  from the link.
 - **One link per (node → node) direction**, opened by the sender as a client
   stream. Everything between two nodes — messages, calls, replies, `Down` —
   travels on it in order, which is what gives Erlang's guarantee that a
@@ -129,13 +142,16 @@ message Send { PID from = 1; PID to = 2; string to_name = 3; google.protobuf.Any
   half-closed and waited on until the peer ends it, and only then are
   connections closed. The inbound handler never selects on the stream's own
   context: a peer's cancel is observed through `Recv`, after every envelope
-  that preceded it.
+  that preceded it. The goroutine reading a link dispatches each frame
+  itself; a per-link lock held while dispatching and while closing means
+  nothing from a closed link is dispatched after its `Down{noconnection}`.
 - **Node identity travels in the stream's metadata** (`name`, `incarnation`,
   protocol version). An `Authorize(peer credentials.AuthInfo, claimed NodeInfo) error`
   hook lets mTLS deployments refuse a node whose certificate does not match the
   name it claims.
-- **Bodies are `proto.Message` as `anypb.Any`.** Generated types register
-  themselves, so there is no `Register()` step. Local sends pass the pointer
+- **Bodies are `proto.Message`, sent as their type's full name and their
+  encoding.** Generated types register themselves, so there is no
+  `Register()` step. Local sends pass the pointer
   without copying (fast; "do not mutate after send"); `WithCopyLocal()` clones
   for teams that want strict isolation.
 - **Calls ride the same link**, matched by a call id, never as separate unary

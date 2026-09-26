@@ -235,15 +235,20 @@ from, and what is left: releases, a cluster-wide name registry.
 
 ## Performance
 
-Apple M3 Max, `go test -bench . -benchmem`, in-memory gRPC:
+Against [Hollywood](https://github.com/anthdm/hollywood) on the same machine
+(Apple M3 Max), remote over TCP on loopback for both; see
+[benchmarks](benchmarks/README.md) for the method and what is left of the
+gap:
 
-```
-BenchmarkLocalCall-14             783.6 ns/op    328 B/op     7 allocs/op
-BenchmarkLocalSend-14             154.4 ns/op     65 B/op     2 allocs/op
-BenchmarkRemoteCall-14           10730 ns/op   3380 B/op    71 allocs/op
-BenchmarkRemoteCallParallel-14    3480 ns/op   3355 B/op    66 allocs/op
-BenchmarkRemoteSend-14            1426 ns/op   1552 B/op    27 allocs/op
-```
+| | Hollywood | golink |
+| --- | --- | --- |
+| Local send | 57 ns | 110 ns |
+| Local request | 2311 ns | 753 ns |
+| Remote send | 208 ns | 354 ns |
+| Remote request | 37.3 µs | 42.2 µs |
+| Remote request, 14 in parallel | 4.9 µs | 7.8 µs |
+
+A mailbox that keeps up, and a local send, allocate nothing.
 
 ## License
 

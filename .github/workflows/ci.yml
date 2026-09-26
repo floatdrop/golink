@@ -69,6 +69,28 @@ jobs:
             echo "${{ matrix.module }}/$pkg coverage: $total"
             [ "$total" = "100.0%" ] || { go tool cover -func=coverage.out | awk '$3 != "100.0%"'; exit 1; }
           done
+  benchmarks:
+    # They measure the working tree against Hollywood; CI only checks that
+    # they still build and run.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: benchmarks
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache-dependency-path: benchmarks/go.sum
+      - name: Vet
+        run: go vet ./...
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.1
+          working-directory: benchmarks
+      - name: Compile and run briefly
+        run: go test -run '^$' -bench . -benchtime=50ms ./...
   generate:
     runs-on: ubuntu-latest
     steps:
