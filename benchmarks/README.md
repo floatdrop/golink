@@ -3,43 +3,52 @@
 Separate module, so golink itself does not depend on what it is compared
 with. It measures the working tree (`replace ../`).
 
-golink against [Hollywood](https://github.com/anthdm/hollywood) v1.0.5, each
-used the way it is meant to be:
+golink against [Hollywood](https://github.com/anthdm/hollywood) v1.0.5 and
+[Proto.Actor](https://github.com/asynkron/protoactor-go) (its development
+branch; it has no Go-style release tags), each used the way it is meant to
+be:
 
-- the same message, `wrapperspb.Int64Value`, because Hollywood needs protobuf
-  to go remote;
+- the same message, `wrapperspb.Int64Value`, because Hollywood and
+  Proto.Actor need protobuf to go remote;
 - **send** is end-to-end throughput: the timer stops when the receiver has
   counted every message, not when the sender has queued them;
 - **request** is one caller waiting for each reply; **parallel** is
   `RunParallel` callers against one echo;
-- **remote** is two engines or nodes over real TCP on loopback, the
+- **remote** is two engines, systems or nodes over real TCP on loopback, the
   connection warmed up before timing. golink's own benchmarks in the root
   module use in-memory connections, which would flatter it here.
 
+Each framework is its own package: Hollywood and Proto.Actor both register a
+protobuf file named `actor.proto`, which cannot share a binary, and
+separate binaries also keep one framework's globals (Proto.Actor replaces
+gRPC's logger) out of another's numbers.
+
 Apple M3 Max, `-count=6`, medians by `benchstat`:
 
-| | Hollywood | golink | |
+| | golink | Hollywood | Proto.Actor |
 | --- | --- | --- | --- |
-| Local send | 57 ns, 0 allocs | 110 ns, 0 allocs | 1.9× slower |
-| Local request | 2311 ns, 12 allocs | 753 ns, 3 allocs | 3.1× faster |
-| Remote send | 208 ns, 7 allocs | 354 ns, 6 allocs | 1.7× slower |
-| Remote request | 37.3 µs, 66 allocs | 42.2 µs, 52 allocs | 13% slower |
-| Remote request, parallel | 4.9 µs, 54 allocs | 7.8 µs, 28 allocs | 1.6× slower |
+| Local send | 96 ns, 0 allocs | **60 ns**, 0 allocs | 134 ns (±56%), 0 allocs |
+| Local request | **746 ns**, 3 allocs | 2282 ns, 12 allocs | 2305 ns, 10 allocs |
+| Remote send | 366 ns, 6 allocs | **208 ns**, 7 allocs | 301 ns, 9 allocs |
+| Remote request | 42.4 µs, 52 allocs | **37.5 µs**, 66 allocs | 57.3 µs, 103 allocs |
+| Remote request, parallel | 7.5 µs, 28 allocs | **5.0 µs**, 54 allocs | 6.8 µs, 54 allocs |
+| Geometric mean | 1.53 µs | **1.40 µs** | 2.05 µs |
 
-What is left of the gap is mostly structural:
-
-- golink keeps per-process counters and mailbox ages for `ProcessInfo`, and
-  checks each message's type against the process's on delivery;
-- it speaks gRPC, whose writer adds a goroutine hand-off in each direction
-  that Hollywood's dRPC transport does not have. That is most of the
-  sequential remote request's difference; on a real network the round trip
-  dwarfs it;
-- the wire envelope is marshalled with protobuf reflection, where Hollywood
-  uses vtprotobuf.
+Proto.Actor is the useful control: it speaks gRPC between nodes too, so
+what separates it from golink is not the transport. golink answers a remote
+request 26% sooner than it and a local one three times sooner (a call waits
+on one channel, where both others create a temporary process per request),
+and allocates the least everywhere. It still trails Proto.Actor on remote
+send, where Proto.Actor's writer batches up to a thousand envelopes, and
+Hollywood on every send, where its lighter dRPC transport and
+vtprotobuf-generated envelope count. golink also pays, on every message,
+for what its Inspector reports: per-process counters, mailbox ages, and a
+type check on delivery.
 
 ```sh
-cd benchmarks && go test -run '^$' -bench . -count=6 > new.txt
-benchstat new.txt   # or compare two runs: benchstat old.txt new.txt
+cd benchmarks
+go test -run '^$' -bench . -count=6 ./... | sed 's|pkg: .*/benchmarks/|pkg: |' > new.txt
+benchstat -table goos,goarch,cpu -col pkg -row .name new.txt
 ```
 
 ## History
