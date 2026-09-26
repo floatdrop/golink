@@ -194,6 +194,9 @@ func TestGetProcess(t *testing.T) {
 
 	_, err = a.GetProcess(t.Context(), &inspectv1.GetProcessRequest{Node: "b", Target: byName("nope")})
 	code(t, err, codes.NotFound)
+	if !strings.Contains(status.Convert(err).Message(), "node b:") {
+		t.Fatalf("forwarded error does not name the node: %v", err)
+	}
 	_, err = a.GetProcess(t.Context(), &inspectv1.GetProcessRequest{Target: byPID(golink.PID{Node: "b", Incarnation: b.ID().Incarnation, ID: 999})})
 	code(t, err, codes.NotFound)
 	_, err = a.GetProcess(t.Context(), &inspectv1.GetProcessRequest{})

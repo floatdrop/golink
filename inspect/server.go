@@ -63,21 +63,27 @@ const (
 // remote returns the Inspector to forward to, or nil when the request is
 // about this node. A target PID on another node routes there when the
 // request names no node.
-func (s *Server) remote(ctx context.Context, node string, target *inspectv1.Target) (inspectv1.InspectorClient, error) {
+func (s *Server) remote(ctx context.Context, node string, target *inspectv1.Target) (inspectv1.InspectorClient, string, error) {
 	if node == "" {
 		node = target.GetPid().GetNode()
 	}
 	if node == "" || node == s.node.Name() {
-		return nil, nil
+		return nil, "", nil
 	}
 	if s.peers == nil {
-		return nil, status.Errorf(codes.FailedPrecondition, "inspect: %q is not this node (%s) and no peer dialer is configured", node, s.node.Name())
+		return nil, node, status.Errorf(codes.FailedPrecondition, "inspect: %q is not this node (%s) and no peer dialer is configured", node, s.node.Name())
 	}
 	c, err := s.peers(ctx, node)
 	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "inspect: reach %s: %v", node, err)
+		return nil, node, status.Errorf(codes.Unavailable, "inspect: reach %s: %v", node, err)
 	}
-	return c, nil
+	return c, node, nil
+}
+
+// peerErr says which node a forwarded request failed on, keeping its code.
+func peerErr(node string, err error) error {
+	st := status.Convert(err)
+	return status.Errorf(st.Code(), "inspect: node %s: %s", node, st.Message())
 }
 
 func (s *Server) writable() error {
@@ -116,15 +122,15 @@ func (s *Server) addr(t *inspectv1.Target) (golink.Target, error) {
 }
 
 func (s *Server) GetNode(ctx context.Context, req *inspectv1.GetNodeRequest) (*inspectv1.GetNodeResponse, error) {
-	if c, err := s.remote(ctx, req.GetNode(), nil); c != nil || err != nil {
-		return forward(err, func() (*inspectv1.GetNodeResponse, error) { return c.GetNode(ctx, req) })
+	if c, node, err := s.remote(ctx, req.GetNode(), nil); c != nil || err != nil {
+		return forward(node, err, func() (*inspectv1.GetNodeResponse, error) { return c.GetNode(ctx, req) })
 	}
 	return &inspectv1.GetNodeResponse{Node: nodeInfoTo(s.node.Info())}, nil
 }
 
 func (s *Server) ListProcesses(ctx context.Context, req *inspectv1.ListProcessesRequest) (*inspectv1.ListProcessesResponse, error) {
-	if c, err := s.remote(ctx, req.GetNode(), nil); c != nil || err != nil {
-		return forward(err, func() (*inspectv1.ListProcessesResponse, error) { return c.ListProcesses(ctx, req) })
+	if c, node, err := s.remote(ctx, req.GetNode(), nil); c != nil || err != nil {
+		return forward(node, err, func() (*inspectv1.ListProcessesResponse, error) { return c.ListProcesses(ctx, req) })
 	}
 	resp := &inspectv1.ListProcessesResponse{}
 	for _, p := range s.node.Processes() {
@@ -155,8 +161,8 @@ func matches(p golink.ProcessInfo, req *inspectv1.ListProcessesRequest) bool {
 }
 
 func (s *Server) GetProcess(ctx context.Context, req *inspectv1.GetProcessRequest) (*inspectv1.GetProcessResponse, error) {
-	if c, err := s.remote(ctx, req.GetNode(), req.GetTarget()); c != nil || err != nil {
-		return forward(err, func() (*inspectv1.GetProcessResponse, error) { return c.GetProcess(ctx, req) })
+	if c, node, err := s.remote(ctx, req.GetNode(), req.GetTarget()); c != nil || err != nil {
+		return forward(node, err, func() (*inspectv1.GetProcessResponse, error) { return c.GetProcess(ctx, req) })
 	}
 	pid, err := s.local(req.GetTarget())
 	if err != nil {
@@ -184,8 +190,8 @@ func (s *Server) SetLogLevel(ctx context.Context, req *inspectv1.SetLogLevelRequ
 	if err := s.writable(); err != nil {
 		return nil, err
 	}
-	if c, err := s.remote(ctx, req.GetNode(), req.GetTarget()); c != nil || err != nil {
-		return forward(err, func() (*inspectv1.SetLogLevelResponse, error) { return c.SetLogLevel(ctx, req) })
+	if c, node, err := s.remote(ctx, req.GetNode(), req.GetTarget()); c != nil || err != nil {
+		return forward(node, err, func() (*inspectv1.SetLogLevelResponse, error) { return c.SetLogLevel(ctx, req) })
 	}
 	pid, err := s.local(req.GetTarget())
 	if err != nil {
@@ -201,8 +207,8 @@ func (s *Server) Send(ctx context.Context, req *inspectv1.SendRequest) (*inspect
 	if err := s.writable(); err != nil {
 		return nil, err
 	}
-	if c, err := s.remote(ctx, req.GetNode(), req.GetTarget()); c != nil || err != nil {
-		return forward(err, func() (*inspectv1.SendResponse, error) { return c.Send(ctx, req) })
+	if c, node, err := s.remote(ctx, req.GetNode(), req.GetTarget()); c != nil || err != nil {
+		return forward(node, err, func() (*inspectv1.SendResponse, error) { return c.Send(ctx, req) })
 	}
 	to, err := s.addr(req.GetTarget())
 	if err != nil {
@@ -225,8 +231,8 @@ func (s *Server) Exit(ctx context.Context, req *inspectv1.ExitRequest) (*inspect
 	if err := s.writable(); err != nil {
 		return nil, err
 	}
-	if c, err := s.remote(ctx, req.GetNode(), req.GetTarget()); c != nil || err != nil {
-		return forward(err, func() (*inspectv1.ExitResponse, error) { return c.Exit(ctx, req) })
+	if c, node, err := s.remote(ctx, req.GetNode(), req.GetTarget()); c != nil || err != nil {
+		return forward(node, err, func() (*inspectv1.ExitResponse, error) { return c.Exit(ctx, req) })
 	}
 	to, err := s.addr(req.GetTarget())
 	if err != nil {
@@ -239,19 +245,19 @@ func (s *Server) Exit(ctx context.Context, req *inspectv1.ExitRequest) (*inspect
 
 func (s *Server) Watch(req *inspectv1.WatchRequest, stream grpc.ServerStreamingServer[inspectv1.WatchResponse]) error {
 	ctx := stream.Context()
-	c, err := s.remote(ctx, req.GetNode(), nil)
+	c, node, err := s.remote(ctx, req.GetNode(), nil)
 	if err != nil {
 		return err
 	}
 	if c != nil {
 		upstream, err := c.Watch(ctx, req)
 		if err != nil {
-			return err
+			return peerErr(node, err)
 		}
 		for {
 			resp, err := upstream.Recv()
 			if err != nil {
-				return err
+				return peerErr(node, err)
 			}
 			if err := stream.Send(resp); err != nil {
 				return err
@@ -271,10 +277,14 @@ func (s *Server) Watch(req *inspectv1.WatchRequest, stream grpc.ServerStreamingS
 }
 
 // forward runs a call on a peer's Inspector, unless routing it failed.
-func forward[T any](routeErr error, call func() (T, error)) (T, error) {
+func forward[T any](node string, routeErr error, call func() (T, error)) (T, error) {
+	var zero T
 	if routeErr != nil {
-		var zero T
 		return zero, routeErr
 	}
-	return call()
+	v, err := call()
+	if err != nil {
+		return zero, peerErr(node, err)
+	}
+	return v, nil
 }

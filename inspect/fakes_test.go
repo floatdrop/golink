@@ -3,6 +3,7 @@ package inspect_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,7 +83,7 @@ forwarded:
 	srv = inspect.New(n, inspect.WithPeers(func(context.Context, string) (inspectv1.InspectorClient, error) {
 		return &fakePeer{err: upstreamErr}, nil
 	}))
-	if err := srv.Watch(&inspectv1.WatchRequest{Node: "b"}, stream); !errors.Is(err, upstreamErr) {
+	if err := srv.Watch(&inspectv1.WatchRequest{Node: "b"}, stream); err == nil || !strings.Contains(err.Error(), "node b: peer refused") {
 		t.Fatalf("upstream: %v", err)
 	}
 	srv = inspect.New(n, inspect.WithPeers(func(context.Context, string) (inspectv1.InspectorClient, error) {
@@ -96,7 +97,7 @@ forwarded:
 	srv = inspect.New(n, inspect.WithPeers(func(context.Context, string) (inspectv1.InspectorClient, error) {
 		return &fakePeer{recvErr: recvErr}, nil
 	}))
-	if err := srv.Watch(&inspectv1.WatchRequest{Node: "b"}, stream); !errors.Is(err, recvErr) {
+	if err := srv.Watch(&inspectv1.WatchRequest{Node: "b"}, stream); err == nil || !strings.Contains(err.Error(), "node b: peer stream ended") {
 		t.Fatalf("peer end: %v", err)
 	}
 }
