@@ -13,9 +13,15 @@ option go_package = "github.com/floatdrop/golink/proto/golink/v1;golinkv1";
 service Node {
   // Link is opened by the sending node. The client sends its identity in the
   // request metadata (golink-node, golink-incarnation, golink-version); the
-  // server answers with one Hello and then only reads. Application envelopes
-  // flow client -> server only.
-  rpc Link(stream Envelope) returns (stream Envelope);
+  // server answers with one Frame holding a Hello and then only reads.
+  // Application envelopes flow client -> server only.
+  rpc Link(stream Frame) returns (stream Frame);
+}
+
+// Frame is what a link writes at once: every envelope queued since its last
+// write, in order. Under load many envelopes share one gRPC message.
+message Frame {
+  repeated Envelope envelopes = 1;
 }
 
 // PID identifies a process anywhere in the cluster.

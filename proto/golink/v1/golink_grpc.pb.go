@@ -34,9 +34,9 @@ const (
 type NodeClient interface {
 	// Link is opened by the sending node. The client sends its identity in the
 	// request metadata (golink-node, golink-incarnation, golink-version); the
-	// server answers with one Hello and then only reads. Application envelopes
-	// flow client -> server only.
-	Link(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[Envelope, Envelope], error)
+	// server answers with one Frame holding a Hello and then only reads.
+	// Application envelopes flow client -> server only.
+	Link(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[Frame, Frame], error)
 }
 
 type nodeClient struct {
@@ -47,18 +47,18 @@ func NewNodeClient(cc grpc.ClientConnInterface) NodeClient {
 	return &nodeClient{cc}
 }
 
-func (c *nodeClient) Link(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[Envelope, Envelope], error) {
+func (c *nodeClient) Link(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[Frame, Frame], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &Node_ServiceDesc.Streams[0], Node_Link_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[Envelope, Envelope]{ClientStream: stream}
+	x := &grpc.GenericClientStream[Frame, Frame]{ClientStream: stream}
 	return x, nil
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Node_LinkClient = grpc.BidiStreamingClient[Envelope, Envelope]
+type Node_LinkClient = grpc.BidiStreamingClient[Frame, Frame]
 
 // NodeServer is the server API for Node service.
 // All implementations must embed UnimplementedNodeServer
@@ -68,9 +68,9 @@ type Node_LinkClient = grpc.BidiStreamingClient[Envelope, Envelope]
 type NodeServer interface {
 	// Link is opened by the sending node. The client sends its identity in the
 	// request metadata (golink-node, golink-incarnation, golink-version); the
-	// server answers with one Hello and then only reads. Application envelopes
-	// flow client -> server only.
-	Link(grpc.BidiStreamingServer[Envelope, Envelope]) error
+	// server answers with one Frame holding a Hello and then only reads.
+	// Application envelopes flow client -> server only.
+	Link(grpc.BidiStreamingServer[Frame, Frame]) error
 	mustEmbedUnimplementedNodeServer()
 }
 
@@ -81,7 +81,7 @@ type NodeServer interface {
 // pointer dereference when methods are called.
 type UnimplementedNodeServer struct{}
 
-func (UnimplementedNodeServer) Link(grpc.BidiStreamingServer[Envelope, Envelope]) error {
+func (UnimplementedNodeServer) Link(grpc.BidiStreamingServer[Frame, Frame]) error {
 	return status.Error(codes.Unimplemented, "method Link not implemented")
 }
 func (UnimplementedNodeServer) mustEmbedUnimplementedNodeServer() {}
@@ -106,11 +106,11 @@ func RegisterNodeServer(s grpc.ServiceRegistrar, srv NodeServer) {
 }
 
 func _Node_Link_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(NodeServer).Link(&grpc.GenericServerStream[Envelope, Envelope]{ServerStream: stream})
+	return srv.(NodeServer).Link(&grpc.GenericServerStream[Frame, Frame]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Node_LinkServer = grpc.BidiStreamingServer[Envelope, Envelope]
+type Node_LinkServer = grpc.BidiStreamingServer[Frame, Frame]
 
 // Node_ServiceDesc is the grpc.ServiceDesc for Node service.
 // It's only intended for direct use with grpc.RegisterService,

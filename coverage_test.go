@@ -383,12 +383,12 @@ func TestInspectWhileBacklogged(t *testing.T) {
 // fakePeer is a golink.v1.Node server that misbehaves in a chosen way.
 type fakePeer struct {
 	golinkv1.UnimplementedNodeServer
-	hello *golinkv1.Envelope
+	hello *golinkv1.Frame
 	err   error
 	hang  bool
 }
 
-func (f *fakePeer) Link(stream grpc.BidiStreamingServer[golinkv1.Envelope, golinkv1.Envelope]) error {
+func (f *fakePeer) Link(stream grpc.BidiStreamingServer[golinkv1.Frame, golinkv1.Frame]) error {
 	if f.err != nil {
 		return f.err
 	}
@@ -430,8 +430,9 @@ func nodeAgainst(t *testing.T, peer *fakePeer, dialTimeout time.Duration) *golin
 }
 
 func TestHandshakeFailures(t *testing.T) {
-	hello := func(node string, version uint32) *golinkv1.Envelope {
-		return &golinkv1.Envelope{Kind: &golinkv1.Envelope_Hello{Hello: &golinkv1.Hello{Node: node, Incarnation: 1, Version: version}}}
+	frame := func(envs ...*golinkv1.Envelope) *golinkv1.Frame { return &golinkv1.Frame{Envelopes: envs} }
+	hello := func(node string, version uint32) *golinkv1.Frame {
+		return frame(&golinkv1.Envelope{Kind: &golinkv1.Envelope_Hello{Hello: &golinkv1.Hello{Node: node, Incarnation: 1, Version: version}}})
 	}
 	cases := []struct {
 		name string
@@ -439,7 +440,8 @@ func TestHandshakeFailures(t *testing.T) {
 		want string
 	}{
 		{"server error", &fakePeer{err: status.Error(codes.PermissionDenied, "no")}, "PermissionDenied"},
-		{"not a hello", &fakePeer{hello: &golinkv1.Envelope{Kind: &golinkv1.Envelope_Exit{Exit: &golinkv1.Exit{}}}}, "expected Hello"},
+		{"not a hello", &fakePeer{hello: frame(&golinkv1.Envelope{Kind: &golinkv1.Envelope_Exit{Exit: &golinkv1.Exit{}}})}, "expected Hello"},
+		{"empty frame", &fakePeer{hello: frame()}, "expected Hello"},
 		{"wrong version", &fakePeer{hello: hello("b", 99)}, "protocol 99"},
 		{"wrong node", &fakePeer{hello: hello("c", 1)}, `reached "c"`},
 		{"no hello", &fakePeer{hang: true}, "deadline"},
@@ -491,6 +493,10 @@ func TestInboundRejections(t *testing.T) {
 	}
 	if err := open(); status.Code(err) != codes.FailedPrecondition { // no version at all
 		t.Fatalf("no metadata: %v", err)
+	}
+	// A node speaking another protocol version is refused, saying which.
+	if err := open("golink-version", "9", "golink-node", "other"); status.Code(err) != codes.FailedPrecondition || !strings.Contains(err.Error(), "protocol version 9") {
+		t.Fatalf("protocol 9: %v", err)
 	}
 	if err := open("golink-version", "1"); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("no name: %v", err)

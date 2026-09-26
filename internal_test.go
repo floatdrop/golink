@@ -192,14 +192,14 @@ type fakeStream struct {
 	ctx     context.Context
 	sendErr error
 	recvErr error
-	recv    chan *golinkv1.Envelope
+	recv    chan *golinkv1.Frame
 }
 
 func (f *fakeStream) Context() context.Context { return f.ctx }
-func (f *fakeStream) Send(*golinkv1.Envelope) error {
+func (f *fakeStream) Send(*golinkv1.Frame) error {
 	return f.sendErr
 }
-func (f *fakeStream) Recv() (*golinkv1.Envelope, error) {
+func (f *fakeStream) Recv() (*golinkv1.Frame, error) {
 	if env, ok := <-f.recv; ok {
 		return env, nil
 	}
@@ -210,12 +210,12 @@ func TestLinkHandlerBranches(t *testing.T) {
 	n := newTestNode(t, "a")
 	ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(mdNode, "b", mdIncarnation, "2", mdVersion, "1"))
 	// Hello cannot be sent.
-	fs := &fakeStream{ctx: ctx, sendErr: io.ErrClosedPipe, recv: make(chan *golinkv1.Envelope)}
+	fs := &fakeStream{ctx: ctx, sendErr: io.ErrClosedPipe, recv: make(chan *golinkv1.Frame)}
 	if err := n.Link(fs); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatalf("%v", err)
 	}
 	// Closed from this side while the peer is still sending.
-	fs = &fakeStream{ctx: ctx, recvErr: io.EOF, recv: make(chan *golinkv1.Envelope)}
+	fs = &fakeStream{ctx: ctx, recvErr: io.EOF, recv: make(chan *golinkv1.Frame)}
 	done := make(chan error, 1)
 	go func() { done <- n.Link(fs) }()
 	time.Sleep(20 * time.Millisecond)
@@ -228,7 +228,7 @@ func TestLinkHandlerBranches(t *testing.T) {
 	close(fs.recv)
 	// A node that has stopped refuses links.
 	_ = n.Stop(context.Background())
-	fs = &fakeStream{ctx: ctx, recv: make(chan *golinkv1.Envelope)}
+	fs = &fakeStream{ctx: ctx, recv: make(chan *golinkv1.Frame)}
 	if err := n.Link(fs); err == nil {
 		t.Fatal("link after stop")
 	}
@@ -266,9 +266,9 @@ type fakeClientStream struct {
 	sendErr error
 }
 
-func (f *fakeClientStream) Send(*golinkv1.Envelope) error     { return f.sendErr }
-func (f *fakeClientStream) Recv() (*golinkv1.Envelope, error) { select {} }
-func (f *fakeClientStream) CloseSend() error                  { return nil }
+func (f *fakeClientStream) Send(*golinkv1.Frame) error     { return f.sendErr }
+func (f *fakeClientStream) Recv() (*golinkv1.Frame, error) { select {} }
+func (f *fakeClientStream) CloseSend() error               { return nil }
 
 func TestShutdownArms(t *testing.T) {
 	mk := func() *outLink {
@@ -334,14 +334,14 @@ func TestOutboundLostWhileInboundAlive(t *testing.T) {
 func TestRecvGoroutineStopsWhenClosed(t *testing.T) {
 	n := newTestNode(t, "a")
 	ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(mdNode, "b", mdIncarnation, "2", mdVersion, "1"))
-	fs := &fakeStream{ctx: ctx, recvErr: io.EOF, recv: make(chan *golinkv1.Envelope)}
+	fs := &fakeStream{ctx: ctx, recvErr: io.EOF, recv: make(chan *golinkv1.Frame)}
 	done := make(chan error, 1)
 	go func() { done <- n.Link(fs) }()
 	time.Sleep(20 * time.Millisecond)
 	n.Disconnect("b")
 	<-done
 	// The handler is gone; an envelope arriving now finds nobody to hand it to.
-	fs.recv <- &golinkv1.Envelope{}
+	fs.recv <- &golinkv1.Frame{}
 	close(fs.recv)
 }
 
@@ -426,5 +426,49 @@ func TestSubscribersEdges(t *testing.T) {
 	s.publish(Event{}) // delivering to a closed subscriber is a no-op
 	if len(sub.ch) != 0 {
 		t.Fatal("delivered to a closed subscriber")
+	}
+}
+
+func TestFrameSplitting(t *testing.T) {
+	env := func(body, md int) *golinkv1.Envelope {
+		e := &golinkv1.Envelope{Kind: &golinkv1.Envelope_Send{Send: &golinkv1.Send{Body: &anypb.Any{Value: make([]byte, body)}}}}
+		if md > 0 {
+			e.Metadata = map[string]string{"k": string(make([]byte, md))}
+		}
+		return e
+	}
+	// Small envelopes all fit; their bodies are counted.
+	if n, body := frameOf([]*golinkv1.Envelope{env(10, 0), env(20, 5), {Kind: &golinkv1.Envelope_Monitor{Monitor: &golinkv1.Monitor{}}}}); n != 3 || body != 30 {
+		t.Fatalf("%d %d", n, body)
+	}
+	// A frame stops before it would pass maxFrame, metadata included.
+	half := maxFrame/2 - 100
+	if n, _ := frameOf([]*golinkv1.Envelope{env(half, 0), env(half, 0), env(10, 0)}); n != 2 {
+		t.Fatalf("split at %d", n)
+	}
+	if n, _ := frameOf([]*golinkv1.Envelope{env(half, 0), env(10, half+200)}); n != 1 {
+		t.Fatalf("metadata ignored: %d", n)
+	}
+	// An envelope larger than a frame still goes, alone.
+	if n, body := frameOf([]*golinkv1.Envelope{env(2*maxFrame, 0), env(1, 0)}); n != 1 || body != 2*maxFrame {
+		t.Fatalf("%d %d", n, body)
+	}
+	for _, e := range []*golinkv1.Envelope{
+		{Kind: &golinkv1.Envelope_Call{Call: &golinkv1.Call{Body: &anypb.Any{Value: []byte("ab")}}}},
+		{Kind: &golinkv1.Envelope_Reply{Reply: &golinkv1.Reply{Body: &anypb.Any{Value: []byte("ab")}}}},
+	} {
+		if bodySize(e) != 2 {
+			t.Fatalf("%v", e)
+		}
+	}
+}
+
+// A frame arriving after the link closed is not dispatched.
+func TestNoDispatchAfterClose(t *testing.T) {
+	n := newTestNode(t, "a")
+	l := &inLink{peer: NodeID{Name: "b"}, closed: make(chan struct{})}
+	l.close()
+	if l.deliver(n, &golinkv1.Frame{Envelopes: []*golinkv1.Envelope{{}}}) {
+		t.Fatal("dispatched after close")
 	}
 }

@@ -71,8 +71,8 @@ type LinkInfo struct {
 	State         LinkState
 	EstablishedAt time.Time
 	Reconnects    uint64
-	Messages      uint64
-	Bytes         uint64
+	Messages      uint64 // envelopes: messages, calls, replies, monitors, downs
+	Bytes         uint64 // message bodies carried, not counting framing
 	LastError     string
 }
 

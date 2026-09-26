@@ -14,13 +14,16 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	golinkv1 "github.com/floatdrop/golink/proto/golink/v1"
 )
 
 // Protocol version carried in the handshake. Bumped on incompatible change.
 const protoVersion = 1
+
+// maxFrame is roughly how large a Frame the writer builds, well under gRPC's
+// default 4 MiB receive limit. An envelope larger than that goes alone.
+const maxFrame = 1 << 20
 
 const (
 	mdNode        = "golink-node"
@@ -64,7 +67,7 @@ func (s *linkStats) fill(li *LinkInfo) {
 type outLink struct {
 	peer     NodeID
 	cc       *grpc.ClientConn
-	stream   grpc.BidiStreamingClient[golinkv1.Envelope, golinkv1.Envelope]
+	stream   grpc.BidiStreamingClient[golinkv1.Frame, golinkv1.Frame]
 	cancel   context.CancelFunc
 	q        *queue[*golinkv1.Envelope]
 	done     chan struct{}
@@ -108,13 +111,17 @@ func (l *outLink) writeLoop(n *Node) {
 		case <-l.done:
 			return
 		}
-		for _, env := range l.q.drain() {
-			if err := l.stream.Send(env); err != nil {
+		// Everything queued since the last write goes out together: under
+		// load, many envelopes share one gRPC message.
+		for batch := l.q.drain(); len(batch) > 0; {
+			k, body := frameOf(batch)
+			if err := l.stream.Send(&golinkv1.Frame{Envelopes: batch[:k]}); err != nil {
 				n.connLost(l.peer.Name, l, nil, err, false)
 				return
 			}
-			l.messages.Add(1)
-			l.bytes.Add(uint64(proto.Size(env)))
+			l.messages.Add(uint64(k))
+			l.bytes.Add(uint64(body))
+			batch = batch[k:]
 		}
 		if l.closing.Load() && l.q.len() == 0 {
 			_ = l.stream.CloseSend()
@@ -257,23 +264,26 @@ func (n *Node) dial(peer string) (*outLink, error) {
 
 // handshake waits for the server's Hello within ctx and checks it names the
 // peer we meant to reach.
-func handshake(ctx context.Context, peer string, stream grpc.BidiStreamingClient[golinkv1.Envelope, golinkv1.Envelope]) (uint64, error) {
+func handshake(ctx context.Context, peer string, stream grpc.BidiStreamingClient[golinkv1.Frame, golinkv1.Frame]) (uint64, error) {
 	type res struct {
-		env *golinkv1.Envelope
+		f   *golinkv1.Frame
 		err error
 	}
 	ch := make(chan res, 1)
 	go func() {
-		env, err := stream.Recv()
-		ch <- res{env, err}
+		f, err := stream.Recv()
+		ch <- res{f, err}
 	}()
 	select {
 	case r := <-ch:
 		if r.err != nil {
 			return 0, r.err
 		}
-		h, ok := r.env.Kind.(*golinkv1.Envelope_Hello)
-		if !ok {
+		var h *golinkv1.Envelope_Hello
+		if envs := r.f.GetEnvelopes(); len(envs) == 1 {
+			h, _ = envs[0].Kind.(*golinkv1.Envelope_Hello)
+		}
+		if h == nil {
 			return 0, errors.New("golink: handshake: expected Hello")
 		}
 		if h.Hello.Version != protoVersion {
@@ -294,6 +304,11 @@ type inLink struct {
 	peer   NodeID
 	closed chan struct{}
 	once   sync.Once
+	// mu is held while a frame is dispatched and while the link closes, so
+	// nothing is dispatched after close returns: a Down{noconnection} that
+	// follows a close is never overtaken by a message from the same link.
+	mu      sync.Mutex
+	stopped bool
 	linkStats
 }
 
@@ -303,10 +318,65 @@ func (l *inLink) info() LinkInfo {
 	return li
 }
 
-func (l *inLink) close() { l.once.Do(func() { close(l.closed) }) }
+func (l *inLink) close() {
+	l.once.Do(func() {
+		l.mu.Lock()
+		l.stopped = true
+		l.mu.Unlock()
+		close(l.closed)
+	})
+}
+
+// deliver dispatches a frame's envelopes in order, unless the link has
+// closed; it reports whether it did.
+func (l *inLink) deliver(n *Node, f *golinkv1.Frame) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.stopped {
+		return false
+	}
+	for _, env := range f.GetEnvelopes() {
+		n.dispatch(env)
+	}
+	_, body := frameOf(f.GetEnvelopes())
+	l.messages.Add(uint64(len(f.GetEnvelopes())))
+	l.bytes.Add(uint64(body))
+	return true
+}
+
+// frameOf says how many leading envelopes of batch fit in one frame (at
+// least one) and how many message-body bytes they carry.
+func frameOf(batch []*golinkv1.Envelope) (n, body int) {
+	size := 0
+	for i, env := range batch {
+		b := bodySize(env)
+		est := 64 + b
+		for k, v := range env.GetMetadata() {
+			est += len(k) + len(v) + 8
+		}
+		if i > 0 && size+est > maxFrame {
+			return i, body
+		}
+		size += est
+		body += b
+	}
+	return len(batch), body
+}
+
+func bodySize(env *golinkv1.Envelope) int {
+	switch k := env.GetKind().(type) {
+	case *golinkv1.Envelope_Send:
+		return len(k.Send.GetBody().GetValue())
+	case *golinkv1.Envelope_Call:
+		return len(k.Call.GetBody().GetValue())
+	case *golinkv1.Envelope_Reply:
+		return len(k.Reply.GetBody().GetValue())
+	}
+	return 0
+}
 
 // Link implements golink.v1.Node.
-func (n *Node) Link(stream grpc.BidiStreamingServer[golinkv1.Envelope, golinkv1.Envelope]) error {
+func (n *Node) Link(stream grpc.BidiStreamingServer[golinkv1.Frame, golinkv1.Frame]) error {
 	ctx := stream.Context()
 	md, _ := metadata.FromIncomingContext(ctx)
 	peer := NodeID{Name: first(md, mdNode)}
@@ -324,9 +394,9 @@ func (n *Node) Link(stream grpc.BidiStreamingServer[golinkv1.Envelope, golinkv1.
 			return status.Errorf(codes.PermissionDenied, "golink: %v", err)
 		}
 	}
-	if err := stream.Send(&golinkv1.Envelope{Kind: &golinkv1.Envelope_Hello{Hello: &golinkv1.Hello{
+	if err := stream.Send(&golinkv1.Frame{Envelopes: []*golinkv1.Envelope{{Kind: &golinkv1.Envelope_Hello{Hello: &golinkv1.Hello{
 		Node: n.id.Name, Incarnation: n.id.Incarnation, Version: protoVersion,
-	}}}); err != nil {
+	}}}}}); err != nil {
 		return err
 	}
 
@@ -350,40 +420,29 @@ func (n *Node) Link(stream grpc.BidiStreamingServer[golinkv1.Envelope, golinkv1.
 	n.mu.Unlock()
 	n.linkUp(peer)
 
-	// Recv cannot be interrupted, so it runs on its own goroutine and the
-	// handler can return when the link is closed from this side. The stream's
-	// own context is deliberately not selected on: a peer's cancel must be
-	// seen through Recv, after every envelope that preceded it.
-	envs := make(chan *golinkv1.Envelope)
+	// Recv cannot be interrupted, so it runs on its own goroutine, which also
+	// dispatches what it reads (no hop through a channel), and the handler
+	// can return when the link is closed from this side. The stream's own
+	// context is deliberately not selected on: a peer's cancel must be seen
+	// through Recv, after every envelope that preceded it.
 	errs := make(chan error, 1)
 	go func() {
 		for {
-			env, err := stream.Recv()
+			f, err := stream.Recv()
 			if err != nil {
 				errs <- err
 				return
 			}
-			select {
-			case envs <- env:
-			case <-l.closed:
+			if !l.deliver(n, f) {
 				return
 			}
 		}
 	}()
 	var err error
-loop:
-	for {
-		select {
-		case env := <-envs:
-			l.messages.Add(1)
-			l.bytes.Add(uint64(proto.Size(env)))
-			n.dispatch(env)
-		case err = <-errs:
-			break loop
-		case <-l.closed:
-			err = errors.New("closed")
-			break loop
-		}
+	select {
+	case err = <-errs:
+	case <-l.closed:
+		err = errors.New("closed")
 	}
 	if errors.Is(err, io.EOF) {
 		err = nil
