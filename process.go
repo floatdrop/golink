@@ -58,7 +58,13 @@ type proc struct {
 	exited   bool
 	watchers map[Ref]PID           // who monitors me
 	monitors map[Ref]monitorTarget // whom I monitor
+	open     map[openCall]struct{} // calls taken from the mailbox and not yet answered
 	names    []string              // guarded by n.mu
+}
+
+type openCall struct {
+	from PID
+	ref  uint64
 }
 
 type monitorTarget struct {
@@ -276,6 +282,9 @@ func (p *Process[M]) Reply(m Msg[M], resp proto.Message, err error) error {
 	if m.ref == 0 {
 		return ErrNotCall
 	}
+	p.mu.Lock()
+	delete(p.open, openCall{m.From, m.ref})
+	p.mu.Unlock()
 	if err != nil {
 		return p.n.reply(p.pid, m.From, m.ref, resp, golinkv1.Status_STATUS_ERROR, err.Error())
 	}
@@ -360,6 +369,14 @@ func (p *proc) receive(ctx context.Context) (item, error) {
 func (p *proc) took(it item) item {
 	p.wakeups.Add(1)
 	p.received.Add(1)
+	if it.ref != 0 {
+		p.mu.Lock()
+		if p.open == nil {
+			p.open = map[openCall]struct{}{}
+		}
+		p.open[openCall{it.from, it.ref}] = struct{}{}
+		p.mu.Unlock()
+	}
 	if it.body != nil {
 		t := typeName(it.body)
 		p.lastMsg.Store(&t)
@@ -533,8 +550,8 @@ func (p *proc) terminate(reason string) {
 	p.setState(StateExiting)
 	p.mu.Lock()
 	p.exited = true
-	watchers, monitors := p.watchers, p.monitors
-	p.watchers, p.monitors = nil, nil
+	watchers, monitors, open := p.watchers, p.monitors, p.open
+	p.watchers, p.monitors, p.open = nil, nil, nil
 	p.mu.Unlock()
 	p.cancel(nil)
 
@@ -549,8 +566,11 @@ func (p *proc) terminate(reason string) {
 	n.mu.Unlock()
 	n.exited.Add(1)
 
-	// Whatever is still queued goes nowhere: fail calls now rather than
-	// letting callers time out.
+	// Whatever is still queued goes nowhere, and a call taken but never
+	// answered never will be: fail them now rather than let callers time out.
+	for c := range open {
+		_ = n.reply(p.pid, c.from, c.ref, nil, golinkv1.Status_STATUS_NOPROC, "")
+	}
 	for _, it := range p.mbox.close() {
 		if it.ref != 0 {
 			_ = n.reply(p.pid, it.from, it.ref, nil, golinkv1.Status_STATUS_NOPROC, "")
@@ -574,15 +594,17 @@ func (p *proc) terminate(reason string) {
 	}
 }
 
-// levelHandler applies a per-process threshold over the node's handler.
+// levelHandler gives a process its own threshold. Once set, it replaces the
+// node handler's: a single process can be made more verbose than the rest of
+// the node, or quieter.
 type levelHandler struct {
 	h slog.Handler
 	p *proc
 }
 
 func (l *levelHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	if l.p.levelSet.Load() && level < slog.Level(l.p.level.Load()) {
-		return false
+	if l.p.levelSet.Load() {
+		return level >= slog.Level(l.p.level.Load())
 	}
 	return l.h.Enabled(ctx, level)
 }

@@ -1,9 +1,6 @@
 package golink
 
-import (
-	"context"
-	"sync"
-)
+import "sync"
 
 // queue is an unbounded multi-producer, single-consumer queue. Unbounded is
 // deliberate: like Erlang, a send never blocks, which rules out distributed
@@ -58,21 +55,6 @@ func (q *queue[T]) tryPop() (T, bool) {
 		q.items, q.head = q.items[:n], 0
 	}
 	return v, true
-}
-
-// pop blocks until an item is available or ctx is done.
-func (q *queue[T]) pop(ctx context.Context) (T, error) {
-	for {
-		if v, ok := q.tryPop(); ok {
-			return v, nil
-		}
-		select {
-		case <-q.notify:
-		case <-ctx.Done():
-			var zero T
-			return zero, context.Cause(ctx)
-		}
-	}
 }
 
 // drain removes and returns everything queued.

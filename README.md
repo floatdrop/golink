@@ -78,7 +78,7 @@ err = p.SendTo(m.From, &orderspb.Ack{})         // untyped: a PID from a message
 | `p.Receive()` | `Msg[M]{From, Body, Down, Metadata}`; error when asked to exit |
 | `p.ReceiveTimeout(d)` | the same, or `context.DeadlineExceeded` |
 | `p.Send(to Addr[N], m N)` / `p.SendTo(Target, proto.Message)` | typed / untyped asynchronous send |
-| `p.Call[R](ctx, to Addr[N], req N)` | the reply as `R`, `*RemoteError`, `ErrNoProc`, `ErrType` or `ErrNoConnection` |
+| `p.Call[R](ctx, to Addr[N], req N)` | the reply as `R`, `*RemoteError`, `ErrNoProc` (also when the callee exits before answering), `ErrType` or `ErrNoConnection` |
 | `p.Reply(m, resp, err)` | answers a call; may be deferred to another goroutine |
 | `p.Monitor(target)` / `p.Demonitor(ref)` | a `Down` with the ref when the target exits: `normal`, the returned error, `panic: …`, `killed`, `noproc`, `noconnection`, `shutdown` |
 | `p.Exit(target, reason)` | asks another process to exit; its `Receive` returns an `*ExitError` |

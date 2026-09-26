@@ -1,4 +1,4 @@
-.PHONY: generate test lint bench
+.PHONY: generate test lint bench cover
 
 generate:
 	buf lint && buf generate
@@ -11,3 +11,6 @@ lint:
 
 bench:
 	go test -run '^$$' -bench . -benchmem ./...
+
+cover:
+	go test -count=1 -coverprofile=coverage.out -coverpkg=. . && go tool cover -func=coverage.out | tail -1

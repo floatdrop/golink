@@ -150,9 +150,7 @@ func (l *outLink) close(err error) {
 	l.once.Do(func() {
 		l.fail(err)
 		close(l.done)
-		for _, env := range l.q.close() {
-			_ = env // undelivered; the sender learns through Down / call failure
-		}
+		l.q.close() // undelivered envelopes; senders learn through Down / call failure
 		l.cancel()
 		_ = l.cc.Close()
 	})
@@ -210,7 +208,10 @@ func (n *Node) getOut(peer string) (*outLink, error) {
 }
 
 func (n *Node) dial(peer string) (*outLink, error) {
-	ctx, cancel := context.WithTimeout(n.ctx, n.cfg.DialTimeout)
+	// Not derived from n.ctx: a dial that Stop overtakes completes and is
+	// then discarded by getOut, rather than failing half-way with a
+	// misleading error.
+	ctx, cancel := context.WithTimeout(context.Background(), n.cfg.DialTimeout)
 	defer cancel()
 	addr, err := n.cfg.Resolver.Resolve(ctx, peer)
 	if err != nil {
