@@ -51,7 +51,8 @@ type Membership interface {
 	Watch(ctx context.Context) (<-chan MemberEvent, error)
 }
 
-// MemberEvent is a member joining (Up) or leaving the cluster.
+// MemberEvent is a member joining (Up) or leaving the cluster. A leaving
+// member with Incarnation 0 means whichever incarnation it was.
 type MemberEvent struct {
 	Member Member
 	Up     bool
@@ -247,7 +248,7 @@ func (n *Node) memberEvent(ev MemberEvent) {
 	switch {
 	case linked == 0:
 		return // no link, nothing to settle
-	case !ev.Up && ev.Member.Incarnation == linked:
+	case !ev.Up && (ev.Member.Incarnation == linked || ev.Member.Incarnation == 0):
 		n.disconnect(name, errors.New("left the cluster"))
 	case ev.Up && ev.Member.Incarnation != linked:
 		n.disconnect(name, errors.New("restarted as incarnation "+itoa(ev.Member.Incarnation)))

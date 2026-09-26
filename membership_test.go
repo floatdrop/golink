@@ -126,7 +126,8 @@ func TestMembershipDropsLinks(t *testing.T) {
 	sink, got := collector(t, a)
 	_ = cn.SendTo(sink, &testpb.Ping{})
 	recv(t, got)
-	m.events <- golink.MemberEvent{Member: golink.Member{Name: "c", Incarnation: cn.ID().Incarnation}}
+	// Incarnation 0: whichever it was.
+	m.events <- golink.MemberEvent{Member: golink.Member{Name: "c"}}
 	waitNoPeer(t, a, "c")
 }
 
