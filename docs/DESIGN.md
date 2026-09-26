@@ -439,9 +439,8 @@ them. Two primitives went into the core because they need process internals:
 
 ## Later
 
-- `golink/etcd`: `Resolver`, `Registrar`, `Membership`, and a **global name
-  registry** (`golink.Global{"ledger"}` resolving through etcd with a lease as
-  fencing token).
+- A **global name registry** (`golink.Global{"ledger"}` resolving through
+  etcd, with a lease as fencing token), on top of `golink/etcd`.
 - Cross-node pub/sub with a replay buffer (ergo's events). Useful; not core.
 - Delivery beyond at-most-once, in order per sender. Explicitly out of scope;
   build it above `golink`, as OTP does.
@@ -467,7 +466,7 @@ them. Two primitives went into the core because they need process internals:
 2. ~~`golink/inspect` service and Go client~~ (done, with `Node.Subscribe`);
    ~~`golink/actor` helpers~~ (done, with `SendAfter` and `SpawnMonitor`).
 3. ~~`golink/otel` (metrics + trace propagation)~~ (done: see otel/README.md),
-   `golink/etcd`.
+   ~~`golink/etcd`~~ (done: see etcd/README.md).
 4. `golinkctl`, `DOT`, MCP server.
 
 Coverage target and style follow `fsm` and `di`: 100 % on the core,

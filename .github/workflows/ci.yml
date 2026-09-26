@@ -31,31 +31,35 @@ jobs:
             echo "$pkg coverage: $total"
             [ "$total" = "100.0%" ] || { go tool cover -func=coverage.out | awk '$3 != "100.0%"'; exit 1; }
           done
-  otel:
+  modules:
+    # Nested modules: adapters with dependencies golink itself does not have.
+    strategy:
+      matrix:
+        module: [otel, etcd]
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: otel
+        working-directory: ${{ matrix.module }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
-          cache-dependency-path: otel/go.sum
+          cache-dependency-path: ${{ matrix.module }}/go.sum
       - name: Vet
         run: go vet ./...
       - name: Lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.13.1
-          working-directory: otel
+          working-directory: ${{ matrix.module }}
       - name: Test
         run: go test -race -count=1 ./...
       - name: Coverage (must stay at 100%)
         run: |
           go test -count=1 -coverprofile=coverage.out .
           total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')
-          echo "otel coverage: $total"
+          echo "${{ matrix.module }} coverage: $total"
           [ "$total" = "100.0%" ] || { go tool cover -func=coverage.out | awk '$3 != "100.0%"'; exit 1; }
   generate:
     runs-on: ubuntu-latest

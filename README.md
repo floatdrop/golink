@@ -195,6 +195,15 @@ It is a gRPC service, so `grpcurl` works on it today:
 grpcurl -plaintext -d '{"node":"billing-1","min_mailbox":100}' localhost:9000 golink.inspect.v1.Inspector/ListProcesses
 ```
 
+## Discovery
+
+`Config.Resolver` is all a node needs to reach peers; `golink.StaticResolver`
+is a map. `Config.Registrar` publishes the node on `Start` and withdraws it
+on `Stop`, and `Config.Membership` is the cluster's view of who is alive: a
+peer that leaves, or comes back as a new incarnation, has its links dropped,
+so monitors fire and pending calls fail even when its connection never
+closed. [`golink/etcd`](etcd/README.md) implements all three on etcd leases.
+
 ## Testing a cluster
 
 `golinktest` runs nodes over in-memory connections, so a multi-node scenario
@@ -216,8 +225,7 @@ node, and `c.Conn(name)` dials one.
 
 [docs/DESIGN.md](docs/DESIGN.md) has the wire protocol, the reasons behind
 the choices (and what was rejected), what the observability surface is copied
-from, and the roadmap: `golink/etcd`, a CLI and an MCP server on top of
-the Inspector.
+from, and the roadmap: a CLI and an MCP server on top of the Inspector.
 
 ## Performance
 

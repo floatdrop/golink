@@ -1,0 +1,318 @@
+// Package golinketcd keeps a golink cluster's membership in etcd. A node
+// registers under a lease it keeps alive; peers resolve its address from
+// there; and when the lease ends, because the node stopped or because it
+// stopped answering, every node that watches the cluster drops its links to
+// it, firing Down{noconnection} for monitors across them.
+//
+//	cluster := golinketcd.New(etcdClient, "/golink/prod")
+//	node, err := golink.NewNode(golink.Config{
+//		Name:      "orders-1",
+//		Advertise: "10.0.0.5:9000",
+//		Resolver:  cluster, Registrar: cluster, Membership: cluster,
+//	})
+//
+// Each node is one key, <prefix>/nodes/<name>, holding its name,
+// incarnation and address as JSON. A node that registers a name already
+// present replaces it: a restarted node supersedes its previous
+// incarnation, whose lease has not yet expired.
+package golinketcd
+
+import (
+	"cmp"
+	"context"
+	"encoding/json/v2"
+	"errors"
+	"fmt"
+	"log/slog"
+	"maps"
+	"slices"
+	"strings"
+	"sync/atomic"
+	"time"
+
+	clientv3 "go.etcd.io/etcd/client/v3"
+
+	"github.com/floatdrop/golink"
+)
+
+// ErrNotRegistered is returned by Resolve for a node absent from etcd.
+var ErrNotRegistered = errors.New("golinketcd: node is not registered")
+
+// Option configures New.
+type Option func(*Cluster)
+
+// WithTTL sets the lease TTL, how long a node that stops answering stays
+// registered. It is rounded up to whole seconds. Default 10s.
+func WithTTL(d time.Duration) Option {
+	return func(c *Cluster) { c.ttl = int64((d + time.Second - 1) / time.Second) }
+}
+
+// WithRetry sets the pause before registering again after a lost lease, and
+// before watching again after a broken watch. Default 1s.
+func WithRetry(d time.Duration) Option { return func(c *Cluster) { c.retry = d } }
+
+// WithLogger sets the logger. Default slog.Default().
+func WithLogger(l *slog.Logger) Option { return func(c *Cluster) { c.log = l } }
+
+// Cluster implements golink.Resolver, golink.Registrar and golink.Membership
+// on etcd. One value serves every node of a process.
+type Cluster struct {
+	kv      clientv3.KV
+	lease   clientv3.Lease
+	watcher clientv3.Watcher
+	prefix  string
+	ttl     int64
+	retry   time.Duration
+	log     *slog.Logger
+}
+
+var (
+	_ golink.Resolver   = (*Cluster)(nil)
+	_ golink.Registrar  = (*Cluster)(nil)
+	_ golink.Membership = (*Cluster)(nil)
+)
+
+// New returns a Cluster keeping its keys under prefix.
+func New(cli *clientv3.Client, prefix string, opts ...Option) *Cluster {
+	return newCluster(cli, cli, cli, prefix, opts...)
+}
+
+func newCluster(kv clientv3.KV, lease clientv3.Lease, watcher clientv3.Watcher, prefix string, opts ...Option) *Cluster {
+	c := &Cluster{
+		kv: kv, lease: lease, watcher: watcher,
+		prefix: strings.TrimSuffix(prefix, "/") + "/nodes/",
+		ttl:    10,
+		retry:  time.Second,
+	}
+	for _, o := range opts {
+		o(c)
+	}
+	c.log = cmp.Or(c.log, slog.Default())
+	return c
+}
+
+type record struct {
+	Name        string `json:"name"`
+	Incarnation uint64 `json:"incarnation"`
+	Addr        string `json:"addr,omitempty"`
+}
+
+func (c *Cluster) key(name string) string { return c.prefix + name }
+
+func decode(value []byte) (golink.Member, error) {
+	var r record
+	if err := json.Unmarshal(value, &r); err != nil {
+		return golink.Member{}, fmt.Errorf("golinketcd: bad record: %w", err)
+	}
+	return golink.Member{Name: r.Name, Incarnation: r.Incarnation, Addr: r.Addr}, nil
+}
+
+// Resolve returns the address a node registered.
+func (c *Cluster) Resolve(ctx context.Context, node string) (string, error) {
+	resp, err := c.kv.Get(ctx, c.key(node))
+	if err != nil {
+		return "", fmt.Errorf("golinketcd: resolve %s: %w", node, err)
+	}
+	if len(resp.Kvs) == 0 {
+		return "", fmt.Errorf("%w: %s", ErrNotRegistered, node)
+	}
+	m, err := decode(resp.Kvs[0].Value)
+	if err != nil {
+		return "", err
+	}
+	if m.Addr == "" {
+		return "", fmt.Errorf("golinketcd: %s registered without an address", node)
+	}
+	return m.Addr, nil
+}
+
+// Members lists the registered nodes, ordered by name. Records that cannot
+// be decoded are skipped.
+func (c *Cluster) Members(ctx context.Context) ([]golink.Member, error) {
+	known, _, err := c.list(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]golink.Member, 0, len(known))
+	for _, name := range slices.Sorted(maps.Keys(known)) {
+		out = append(out, known[name])
+	}
+	return out, nil
+}
+
+func (c *Cluster) list(ctx context.Context) (map[string]golink.Member, int64, error) {
+	resp, err := c.kv.Get(ctx, c.prefix, clientv3.WithPrefix())
+	if err != nil {
+		return nil, 0, fmt.Errorf("golinketcd: list: %w", err)
+	}
+	known := make(map[string]golink.Member, len(resp.Kvs))
+	for _, kv := range resp.Kvs {
+		m, err := decode(kv.Value)
+		if err != nil {
+			c.log.Warn("skipping member", "key", string(kv.Key), "err", err)
+			continue
+		}
+		known[m.Name] = m
+	}
+	return known, resp.Header.Revision, nil
+}
+
+// Register publishes self under a lease and keeps it alive. If the lease is
+// lost (etcd was unreachable for longer than the TTL), it registers again,
+// every retry interval, until it succeeds or withdraw is called. withdraw
+// revokes the lease, which removes the key at once.
+func (c *Cluster) Register(ctx context.Context, self golink.Member) (func(context.Context) error, error) {
+	// Cannot fail: a struct of strings and an integer.
+	value, _ := json.Marshal(record{Name: self.Name, Incarnation: self.Incarnation, Addr: self.Addr})
+	id, err := c.publish(ctx, self.Name, value)
+	if err != nil {
+		return nil, err
+	}
+	var lease atomic.Int64
+	lease.Store(int64(id))
+	kctx, stop := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go c.keep(kctx, self.Name, value, &lease, done)
+	return func(ctx context.Context) error {
+		stop()
+		<-done
+		if _, err := c.lease.Revoke(ctx, clientv3.LeaseID(lease.Load())); err != nil {
+			return fmt.Errorf("golinketcd: withdraw %s: %w", self.Name, err)
+		}
+		return nil
+	}, nil
+}
+
+func (c *Cluster) publish(ctx context.Context, name string, value []byte) (clientv3.LeaseID, error) {
+	grant, err := c.lease.Grant(ctx, c.ttl)
+	if err != nil {
+		return 0, fmt.Errorf("golinketcd: register %s: %w", name, err)
+	}
+	if _, err := c.kv.Put(ctx, c.key(name), string(value), clientv3.WithLease(grant.ID)); err != nil {
+		_, _ = c.lease.Revoke(context.WithoutCancel(ctx), grant.ID)
+		return 0, fmt.Errorf("golinketcd: register %s: %w", name, err)
+	}
+	return grant.ID, nil
+}
+
+// keep keeps the lease alive until ctx is done, registering again when it is lost.
+func (c *Cluster) keep(ctx context.Context, name string, value []byte, lease *atomic.Int64, done chan<- struct{}) {
+	defer close(done)
+	for {
+		alive, err := c.lease.KeepAlive(ctx, clientv3.LeaseID(lease.Load()))
+		if err == nil {
+			for range alive {
+			}
+		}
+		for {
+			if ctx.Err() != nil {
+				return
+			}
+			c.log.Warn("lease lost, registering again", "node", name, "err", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(c.retry):
+			}
+			var id clientv3.LeaseID
+			if id, err = c.publish(ctx, name, value); err == nil {
+				lease.Store(int64(id))
+				break
+			}
+		}
+	}
+}
+
+// Watch reports every registered node as up, then follows the prefix:
+// a new or replaced key is a member up, a deleted one (a withdrawn or
+// expired lease) a member down. If the watch breaks (etcd restarted, its
+// history compacted), it lists the members again, every retry interval
+// until that works, and reports what changed in between.
+func (c *Cluster) Watch(ctx context.Context) (<-chan golink.MemberEvent, error) {
+	known, rev, err := c.list(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan golink.MemberEvent)
+	go c.follow(ctx, known, rev, out)
+	return out, nil
+}
+
+func (c *Cluster) follow(ctx context.Context, known map[string]golink.Member, rev int64, out chan<- golink.MemberEvent) {
+	defer close(out)
+	emit := func(m golink.Member, up bool) bool {
+		select {
+		case out <- golink.MemberEvent{Member: m, Up: up}:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(known)) {
+		if !emit(known[name], true) {
+			return
+		}
+	}
+	for {
+		for resp := range c.watcher.Watch(ctx, c.prefix, clientv3.WithPrefix(), clientv3.WithRev(rev+1), clientv3.WithPrevKV()) {
+			if err := resp.Err(); err != nil {
+				c.log.Warn("watch broken, listing members again", "err", err)
+				break
+			}
+			for _, ev := range resp.Events {
+				name := strings.TrimPrefix(string(ev.Kv.Key), c.prefix)
+				if ev.Type == clientv3.EventTypePut {
+					m, err := decode(ev.Kv.Value)
+					if err != nil {
+						c.log.Warn("skipping member", "key", string(ev.Kv.Key), "err", err)
+						continue
+					}
+					known[name] = m
+					if !emit(m, true) {
+						return
+					}
+					continue
+				}
+				gone := golink.Member{Name: name} // incarnation 0: whichever it was
+				if ev.PrevKv != nil {
+					if m, err := decode(ev.PrevKv.Value); err == nil {
+						gone = m
+					}
+				}
+				delete(known, name)
+				if !emit(gone, false) {
+					return
+				}
+			}
+		}
+		// The watch ended: take a fresh snapshot and report the difference.
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(c.retry):
+			}
+			now, nrev, err := c.list(ctx)
+			if err != nil {
+				c.log.Warn("listing members failed", "err", err)
+				continue
+			}
+			for _, name := range slices.Sorted(maps.Keys(known)) {
+				if m, ok := now[name]; !ok || m.Incarnation != known[name].Incarnation {
+					if !emit(known[name], false) {
+						return
+					}
+				}
+			}
+			for _, name := range slices.Sorted(maps.Keys(now)) {
+				if m, ok := known[name]; !ok || m.Incarnation != now[name].Incarnation {
+					if !emit(now[name], true) {
+						return
+					}
+				}
+			}
+			known, rev = now, nrev
+			break
+		}
+	}
+}
