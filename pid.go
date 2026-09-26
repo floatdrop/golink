@@ -109,4 +109,4 @@ func (e *LinkError) Error() string { return fmt.Sprintf("golink: link to %s: %v"
 func (e *LinkError) Unwrap() error { return e.Err }
 
 // Is reports true for ErrNoConnection: every link failure is one.
-func (e *LinkError) Is(target error) bool { return target == ErrNoConnection }
+func (*LinkError) Is(target error) bool { return target == ErrNoConnection }
