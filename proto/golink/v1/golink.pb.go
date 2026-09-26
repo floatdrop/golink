@@ -6,7 +6,7 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        (unknown)
-// source: proto/golink/v1/golink.proto
+// source: golink/v1/golink.proto
 
 package golinkv1
 
@@ -68,11 +68,11 @@ func (x Status) String() string {
 }
 
 func (Status) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_golink_v1_golink_proto_enumTypes[0].Descriptor()
+	return file_golink_v1_golink_proto_enumTypes[0].Descriptor()
 }
 
 func (Status) Type() protoreflect.EnumType {
-	return &file_proto_golink_v1_golink_proto_enumTypes[0]
+	return &file_golink_v1_golink_proto_enumTypes[0]
 }
 
 func (x Status) Number() protoreflect.EnumNumber {
@@ -81,7 +81,7 @@ func (x Status) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Status.Descriptor instead.
 func (Status) EnumDescriptor() ([]byte, []int) {
-	return file_proto_golink_v1_golink_proto_rawDescGZIP(), []int{0}
+	return file_golink_v1_golink_proto_rawDescGZIP(), []int{0}
 }
 
 // PID identifies a process anywhere in the cluster.
@@ -98,7 +98,7 @@ type PID struct {
 
 func (x *PID) Reset() {
 	*x = PID{}
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[0]
+	mi := &file_golink_v1_golink_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -110,7 +110,7 @@ func (x *PID) String() string {
 func (*PID) ProtoMessage() {}
 
 func (x *PID) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[0]
+	mi := &file_golink_v1_golink_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -123,7 +123,7 @@ func (x *PID) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PID.ProtoReflect.Descriptor instead.
 func (*PID) Descriptor() ([]byte, []int) {
-	return file_proto_golink_v1_golink_proto_rawDescGZIP(), []int{0}
+	return file_golink_v1_golink_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *PID) GetNode() string {
@@ -169,7 +169,7 @@ type Envelope struct {
 
 func (x *Envelope) Reset() {
 	*x = Envelope{}
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[1]
+	mi := &file_golink_v1_golink_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -181,7 +181,7 @@ func (x *Envelope) String() string {
 func (*Envelope) ProtoMessage() {}
 
 func (x *Envelope) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[1]
+	mi := &file_golink_v1_golink_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -194,7 +194,7 @@ func (x *Envelope) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Envelope.ProtoReflect.Descriptor instead.
 func (*Envelope) Descriptor() ([]byte, []int) {
-	return file_proto_golink_v1_golink_proto_rawDescGZIP(), []int{1}
+	return file_golink_v1_golink_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Envelope) GetKind() isEnvelope_Kind {
@@ -348,7 +348,7 @@ type Hello struct {
 
 func (x *Hello) Reset() {
 	*x = Hello{}
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[2]
+	mi := &file_golink_v1_golink_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -360,7 +360,7 @@ func (x *Hello) String() string {
 func (*Hello) ProtoMessage() {}
 
 func (x *Hello) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[2]
+	mi := &file_golink_v1_golink_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -373,7 +373,7 @@ func (x *Hello) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Hello.ProtoReflect.Descriptor instead.
 func (*Hello) Descriptor() ([]byte, []int) {
-	return file_proto_golink_v1_golink_proto_rawDescGZIP(), []int{2}
+	return file_golink_v1_golink_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Hello) GetNode() string {
@@ -410,7 +410,7 @@ type Send struct {
 
 func (x *Send) Reset() {
 	*x = Send{}
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[3]
+	mi := &file_golink_v1_golink_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -422,7 +422,7 @@ func (x *Send) String() string {
 func (*Send) ProtoMessage() {}
 
 func (x *Send) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[3]
+	mi := &file_golink_v1_golink_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -435,7 +435,7 @@ func (x *Send) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Send.ProtoReflect.Descriptor instead.
 func (*Send) Descriptor() ([]byte, []int) {
-	return file_proto_golink_v1_golink_proto_rawDescGZIP(), []int{3}
+	return file_golink_v1_golink_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Send) GetFrom() *PID {
@@ -480,7 +480,7 @@ type Call struct {
 
 func (x *Call) Reset() {
 	*x = Call{}
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[4]
+	mi := &file_golink_v1_golink_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -492,7 +492,7 @@ func (x *Call) String() string {
 func (*Call) ProtoMessage() {}
 
 func (x *Call) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[4]
+	mi := &file_golink_v1_golink_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -505,7 +505,7 @@ func (x *Call) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Call.ProtoReflect.Descriptor instead.
 func (*Call) Descriptor() ([]byte, []int) {
-	return file_proto_golink_v1_golink_proto_rawDescGZIP(), []int{4}
+	return file_golink_v1_golink_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Call) GetFrom() *PID {
@@ -557,7 +557,7 @@ type Reply struct {
 
 func (x *Reply) Reset() {
 	*x = Reply{}
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[5]
+	mi := &file_golink_v1_golink_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -569,7 +569,7 @@ func (x *Reply) String() string {
 func (*Reply) ProtoMessage() {}
 
 func (x *Reply) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[5]
+	mi := &file_golink_v1_golink_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -582,7 +582,7 @@ func (x *Reply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Reply.ProtoReflect.Descriptor instead.
 func (*Reply) Descriptor() ([]byte, []int) {
-	return file_proto_golink_v1_golink_proto_rawDescGZIP(), []int{5}
+	return file_golink_v1_golink_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Reply) GetFrom() *PID {
@@ -641,7 +641,7 @@ type Monitor struct {
 
 func (x *Monitor) Reset() {
 	*x = Monitor{}
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[6]
+	mi := &file_golink_v1_golink_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -653,7 +653,7 @@ func (x *Monitor) String() string {
 func (*Monitor) ProtoMessage() {}
 
 func (x *Monitor) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[6]
+	mi := &file_golink_v1_golink_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -666,7 +666,7 @@ func (x *Monitor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Monitor.ProtoReflect.Descriptor instead.
 func (*Monitor) Descriptor() ([]byte, []int) {
-	return file_proto_golink_v1_golink_proto_rawDescGZIP(), []int{6}
+	return file_golink_v1_golink_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Monitor) GetFrom() *PID {
@@ -709,7 +709,7 @@ type Demonitor struct {
 
 func (x *Demonitor) Reset() {
 	*x = Demonitor{}
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[7]
+	mi := &file_golink_v1_golink_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -721,7 +721,7 @@ func (x *Demonitor) String() string {
 func (*Demonitor) ProtoMessage() {}
 
 func (x *Demonitor) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[7]
+	mi := &file_golink_v1_golink_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -734,7 +734,7 @@ func (x *Demonitor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Demonitor.ProtoReflect.Descriptor instead.
 func (*Demonitor) Descriptor() ([]byte, []int) {
-	return file_proto_golink_v1_golink_proto_rawDescGZIP(), []int{7}
+	return file_golink_v1_golink_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Demonitor) GetFrom() *PID {
@@ -778,7 +778,7 @@ type Down struct {
 
 func (x *Down) Reset() {
 	*x = Down{}
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[8]
+	mi := &file_golink_v1_golink_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -790,7 +790,7 @@ func (x *Down) String() string {
 func (*Down) ProtoMessage() {}
 
 func (x *Down) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[8]
+	mi := &file_golink_v1_golink_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -803,7 +803,7 @@ func (x *Down) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Down.ProtoReflect.Descriptor instead.
 func (*Down) Descriptor() ([]byte, []int) {
-	return file_proto_golink_v1_golink_proto_rawDescGZIP(), []int{8}
+	return file_golink_v1_golink_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Down) GetFrom() *PID {
@@ -847,7 +847,7 @@ type Exit struct {
 
 func (x *Exit) Reset() {
 	*x = Exit{}
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[9]
+	mi := &file_golink_v1_golink_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -859,7 +859,7 @@ func (x *Exit) String() string {
 func (*Exit) ProtoMessage() {}
 
 func (x *Exit) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_golink_v1_golink_proto_msgTypes[9]
+	mi := &file_golink_v1_golink_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -872,7 +872,7 @@ func (x *Exit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Exit.ProtoReflect.Descriptor instead.
 func (*Exit) Descriptor() ([]byte, []int) {
-	return file_proto_golink_v1_golink_proto_rawDescGZIP(), []int{9}
+	return file_golink_v1_golink_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Exit) GetFrom() *PID {
@@ -903,11 +903,11 @@ func (x *Exit) GetReason() string {
 	return ""
 }
 
-var File_proto_golink_v1_golink_proto protoreflect.FileDescriptor
+var File_golink_v1_golink_proto protoreflect.FileDescriptor
 
-const file_proto_golink_v1_golink_proto_rawDesc = "" +
+const file_golink_v1_golink_proto_rawDesc = "" +
 	"\n" +
-	"\x1cproto/golink/v1/golink.proto\x12\tgolink.v1\x1a\x19google/protobuf/any.proto\"K\n" +
+	"\x16golink/v1/golink.proto\x12\tgolink.v1\x1a\x19google/protobuf/any.proto\"K\n" +
 	"\x03PID\x12\x12\n" +
 	"\x04node\x18\x01 \x01(\tR\x04node\x12 \n" +
 	"\vincarnation\x18\x02 \x01(\x04R\vincarnation\x12\x0e\n" +
@@ -978,20 +978,20 @@ const file_proto_golink_v1_golink_proto_rawDesc = "" +
 	"\x04Link\x12\x13.golink.v1.Envelope\x1a\x13.golink.v1.Envelope(\x010\x01B6Z4github.com/floatdrop/golink/proto/golink/v1;golinkv1b\x06proto3"
 
 var (
-	file_proto_golink_v1_golink_proto_rawDescOnce sync.Once
-	file_proto_golink_v1_golink_proto_rawDescData []byte
+	file_golink_v1_golink_proto_rawDescOnce sync.Once
+	file_golink_v1_golink_proto_rawDescData []byte
 )
 
-func file_proto_golink_v1_golink_proto_rawDescGZIP() []byte {
-	file_proto_golink_v1_golink_proto_rawDescOnce.Do(func() {
-		file_proto_golink_v1_golink_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_golink_v1_golink_proto_rawDesc), len(file_proto_golink_v1_golink_proto_rawDesc)))
+func file_golink_v1_golink_proto_rawDescGZIP() []byte {
+	file_golink_v1_golink_proto_rawDescOnce.Do(func() {
+		file_golink_v1_golink_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_golink_v1_golink_proto_rawDesc), len(file_golink_v1_golink_proto_rawDesc)))
 	})
-	return file_proto_golink_v1_golink_proto_rawDescData
+	return file_golink_v1_golink_proto_rawDescData
 }
 
-var file_proto_golink_v1_golink_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_proto_golink_v1_golink_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
-var file_proto_golink_v1_golink_proto_goTypes = []any{
+var file_golink_v1_golink_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_golink_v1_golink_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_golink_v1_golink_proto_goTypes = []any{
 	(Status)(0),       // 0: golink.v1.Status
 	(*PID)(nil),       // 1: golink.v1.PID
 	(*Envelope)(nil),  // 2: golink.v1.Envelope
@@ -1006,7 +1006,7 @@ var file_proto_golink_v1_golink_proto_goTypes = []any{
 	nil,               // 11: golink.v1.Envelope.MetadataEntry
 	(*anypb.Any)(nil), // 12: google.protobuf.Any
 }
-var file_proto_golink_v1_golink_proto_depIdxs = []int32{
+var file_golink_v1_golink_proto_depIdxs = []int32{
 	3,  // 0: golink.v1.Envelope.hello:type_name -> golink.v1.Hello
 	4,  // 1: golink.v1.Envelope.send:type_name -> golink.v1.Send
 	5,  // 2: golink.v1.Envelope.call:type_name -> golink.v1.Call
@@ -1043,12 +1043,12 @@ var file_proto_golink_v1_golink_proto_depIdxs = []int32{
 	0,  // [0:27] is the sub-list for field type_name
 }
 
-func init() { file_proto_golink_v1_golink_proto_init() }
-func file_proto_golink_v1_golink_proto_init() {
-	if File_proto_golink_v1_golink_proto != nil {
+func init() { file_golink_v1_golink_proto_init() }
+func file_golink_v1_golink_proto_init() {
+	if File_golink_v1_golink_proto != nil {
 		return
 	}
-	file_proto_golink_v1_golink_proto_msgTypes[1].OneofWrappers = []any{
+	file_golink_v1_golink_proto_msgTypes[1].OneofWrappers = []any{
 		(*Envelope_Hello)(nil),
 		(*Envelope_Send)(nil),
 		(*Envelope_Call)(nil),
@@ -1062,18 +1062,18 @@ func file_proto_golink_v1_golink_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_golink_v1_golink_proto_rawDesc), len(file_proto_golink_v1_golink_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_golink_v1_golink_proto_rawDesc), len(file_golink_v1_golink_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_proto_golink_v1_golink_proto_goTypes,
-		DependencyIndexes: file_proto_golink_v1_golink_proto_depIdxs,
-		EnumInfos:         file_proto_golink_v1_golink_proto_enumTypes,
-		MessageInfos:      file_proto_golink_v1_golink_proto_msgTypes,
+		GoTypes:           file_golink_v1_golink_proto_goTypes,
+		DependencyIndexes: file_golink_v1_golink_proto_depIdxs,
+		EnumInfos:         file_golink_v1_golink_proto_enumTypes,
+		MessageInfos:      file_golink_v1_golink_proto_msgTypes,
 	}.Build()
-	File_proto_golink_v1_golink_proto = out.File
-	file_proto_golink_v1_golink_proto_goTypes = nil
-	file_proto_golink_v1_golink_proto_depIdxs = nil
+	File_golink_v1_golink_proto = out.File
+	file_golink_v1_golink_proto_goTypes = nil
+	file_golink_v1_golink_proto_depIdxs = nil
 }

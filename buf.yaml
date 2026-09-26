@@ -1,6 +1,7 @@
 version: v2
 modules:
-  - path: .
+  - path: proto
+  - path: internal
 lint:
   use:
     - STANDARD

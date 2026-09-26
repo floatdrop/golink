@@ -111,10 +111,39 @@ diagnosis. With a state machine that is one line:
 golink.WithInspect(func() map[string]string { return map[string]string{"state": rec.state.String()} })
 ```
 
-`Config.Hooks` is the single tap for everything else:
+`node.Subscribe(ctx, buffer)` streams what happens on the node: spawns,
+exits with their reasons, links up and down, dead letters. It never blocks
+the node; a subscriber that falls behind loses events and is told how many
+in the next one's `Missed`.
+
+`Config.Hooks` is the synchronous tap for everything else:
 `OnSpawn`, `OnExit`, `OnSend`, `OnReceive`, `OnDeadLetter`, `OnLinkUp`,
 `OnLinkDown`. Metrics, trace propagation (through `Metadata`, which travels
 with every message) and dead-letter logging are built on it outside the core.
+
+## Inspector
+
+`golink/inspect` serves all of the above over gRPC, on the same server:
+
+```go
+node.Register(grpcServer)
+dialer := inspect.NewDialer(resolver, dialOptions...) // reach other nodes' Inspectors
+inspect.New(node, inspect.WithPeers(dialer.Peer)).Register(grpcServer)
+```
+
+`golink.inspect.v1.Inspector` has `GetNode`, `ListProcesses` (filter by
+name, label, state, mailbox depth), `GetProcess` (snapshot plus what the
+process publishes through `WithInspect`), `SetLogLevel`, `Send`, `Exit` and
+`Watch`. Every request names a node; one that is not this node is forwarded
+to that node's Inspector, so one endpoint inspects the whole cluster.
+`inspect.ReadOnly()` refuses the three writes; anything finer is the job of
+the interceptors that guard your other services.
+
+It is a gRPC service, so `grpcurl` works on it today:
+
+```sh
+grpcurl -plaintext -d '{"node":"billing-1","min_mailbox":100}' localhost:9000 golink.inspect.v1.Inspector/ListProcesses
+```
 
 ## Testing a cluster
 
@@ -130,12 +159,16 @@ c.Kill("b")           // as a crash: no shutdown notice
 c.Restart("b")        // same name, new incarnation
 ```
 
+`golinktest.WithServices` registers extra services (an Inspector) on every
+node, and `c.Conn(name)` dials one.
+
 ## Design
 
 [docs/DESIGN.md](docs/DESIGN.md) has the wire protocol, the reasons behind
 the choices (and what was rejected), what the observability surface is copied
 from, and the roadmap: an `Inspector` gRPC service, `golink/otel`,
-`golink/etcd`, supervisors and timers in `golink/actor`.
+`golink/etcd`, supervisors and timers in `golink/actor`, a CLI and an MCP
+server on top of the Inspector.
 
 ## Performance
 

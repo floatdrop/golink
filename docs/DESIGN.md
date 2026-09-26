@@ -328,25 +328,39 @@ frameworks reduces to:
 | Tracing | Sent / Delivered / Processed observations, trace id in the message | eBPF sidecar | `Envelope.metadata` carries W3C trace context; `golink/otel` injects in `OnSend`, extracts in `OnReceive`, and opens a span per `Call`. Same three points as ergo. Sampling stays the tracer's job |
 | Logging | loggers as processes, per-process level | — | `p.Log()` is `slog` with pid/name/label; per-process level via a `slog.Handler` wrapper the node owns, settable at runtime |
 
-### Inspector service (`golink/inspect`, v0.2)
+### Events
+
+`node.Subscribe(ctx, buffer) <-chan Event` streams spawns, exits (with the
+reason), links up and down, and dead letters. Publishing never blocks the
+node: a full subscriber loses the event and the next one it receives carries
+`Missed`, the count lost in between. With no subscriber, the cost is one
+atomic load at each point that would publish. The list of subscribers is
+copy-on-write, so publishing takes no lock but the per-subscriber one that
+guards against a concurrent close.
+
+### Inspector service (`golink/inspect`, done)
 
 A second gRPC service registered on the same server, optional:
 
 ```proto
 service Inspector {
-  rpc Node(NodeRequest) returns (NodeInfo);
-  rpc ListProcesses(ListRequest) returns (ListResponse);    // filter by name/label/state
-  rpc GetProcess(PID) returns (ProcessDetail);               // ProcessInfo + Inspect map
-  rpc SetLogLevel(SetLogLevelRequest) returns (Empty);
-  rpc Send(SendRequest) returns (Empty);                     // Any body, from a tool
-  rpc Exit(ExitRequest) returns (Empty);
-  rpc Watch(WatchRequest) returns (stream Event);            // spawn/exit/link events
+  rpc GetNode(GetNodeRequest) returns (GetNodeResponse);
+  rpc ListProcesses(ListProcessesRequest) returns (ListProcessesResponse); // name, label, state, min mailbox
+  rpc GetProcess(GetProcessRequest) returns (GetProcessResponse);          // ProcessInfo + WithInspect map
+  rpc SetLogLevel(SetLogLevelRequest) returns (SetLogLevelResponse);
+  rpc Send(SendRequest) returns (SendResponse);                            // Any body, from a tool
+  rpc Exit(ExitRequest) returns (ExitResponse);
+  rpc Watch(WatchRequest) returns (stream WatchResponse);                  // Node.Subscribe over the wire
 }
 ```
 
-Because it is gRPC, one node's inspector can answer for a peer by dialing the
-peer's inspector through the resolver — ergo's "run Observer on one node and
-inspect the whole cluster" for free. Access control is the application's
+Every request names a node. One that is not this node is forwarded to that
+node's Inspector through a `PeerFunc`; `inspect.Dialer` implements it over
+the node's own resolver, one connection per peer. That is ergo's "run
+Observer on one node and inspect the whole cluster". A process targeted by
+PID routes to the PID's node when the request names none. `GetProcess` with
+`inspect: true` returns the snapshot even when the process is too busy to
+answer, with `inspect_error` saying so. Access control is the application's
 (interceptors, mTLS), as for any of its other services.
 
 What sits on top, later and outside the core: `golinkctl ps / top / inspect /
@@ -395,10 +409,11 @@ Optional, built only on the public core API so users can ignore or replace them:
 
 ## Order of work
 
-1. `proto/golink/v1`, core `Node`/`Process`, links, static resolver, `ProcessInfo`
-   counters, `Hooks`, `WithInspect`, `golinktest`. Tests: ordering, monitors with
+1. ~~`proto/golink/v1`, core `Node`/`Process`, links, static resolver, `ProcessInfo`
+   counters, `Hooks`, `WithInspect`, `golinktest`~~ (done). Tests: ordering, monitors with
    every reason, node down, restart with new incarnation, bad peer identity.
-2. `golink/inspect` service and Go client; `golink/actor` helpers.
+2. ~~`golink/inspect` service and Go client~~ (done, with `Node.Subscribe`);
+   `golink/actor` helpers.
 3. `golink/otel` (metrics + trace propagation), `golink/etcd`.
 4. `golinkctl`, `DOT`, MCP server.
 

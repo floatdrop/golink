@@ -84,7 +84,7 @@ func (l *outLink) send(env *golinkv1.Envelope) error {
 
 func (l *outLink) info() LinkInfo {
 	li := LinkInfo{Peer: l.peer, Outbound: true}
-	l.linkStats.fill(&li)
+	l.fill(&li)
 	return li
 }
 
@@ -197,9 +197,7 @@ func (n *Node) getOut(peer string) (*outLink, error) {
 	n.mu.Unlock()
 	if err == nil {
 		l.start(n)
-		if n.hooks != nil {
-			n.hooks.OnLinkUp(l.peer)
-		}
+		n.linkUp(l.peer)
 	}
 	d.l, d.err = l, err
 	close(d.done)
@@ -231,7 +229,7 @@ func (n *Node) dial(peer string) (*outLink, error) {
 	stream, err := golinkv1.NewNodeClient(cc).Link(sctx)
 	var inc uint64
 	if err == nil {
-		inc, err = n.handshake(ctx, peer, stream)
+		inc, err = handshake(ctx, peer, stream)
 	}
 	if err != nil {
 		scancel()
@@ -259,7 +257,7 @@ func (n *Node) dial(peer string) (*outLink, error) {
 
 // handshake waits for the server's Hello within ctx and checks it names the
 // peer we meant to reach.
-func (n *Node) handshake(ctx context.Context, peer string, stream grpc.BidiStreamingClient[golinkv1.Envelope, golinkv1.Envelope]) (uint64, error) {
+func handshake(ctx context.Context, peer string, stream grpc.BidiStreamingClient[golinkv1.Envelope, golinkv1.Envelope]) (uint64, error) {
 	type res struct {
 		env *golinkv1.Envelope
 		err error
@@ -301,7 +299,7 @@ type inLink struct {
 
 func (l *inLink) info() LinkInfo {
 	li := LinkInfo{Peer: l.peer, Outbound: false}
-	l.linkStats.fill(&li)
+	l.fill(&li)
 	return li
 }
 
@@ -350,9 +348,7 @@ func (n *Node) Link(stream grpc.BidiStreamingServer[golinkv1.Envelope, golinkv1.
 	}
 	n.in[peer.Name] = l
 	n.mu.Unlock()
-	if n.hooks != nil {
-		n.hooks.OnLinkUp(peer)
-	}
+	n.linkUp(peer)
 
 	// Recv cannot be interrupted, so it runs on its own goroutine and the
 	// handler can return when the link is closed from this side. The stream's
@@ -427,9 +423,7 @@ func (n *Node) connLost(peer string, out *outLink, in *inLink, err error, force 
 			return
 		}
 		n.nodeDown(peer, err)
-		if n.hooks != nil {
-			n.hooks.OnLinkDown(out.peer, err)
-		}
+		n.linkDown(out.peer, err)
 		return
 	}
 	curOut, curIn := n.out[peer], n.in[peer]
@@ -447,9 +441,25 @@ func (n *Node) connLost(peer string, out *outLink, in *inLink, err error, force 
 		curIn.close()
 	}
 	n.nodeDown(peer, err)
+	n.linkDown(id, err)
+}
+
+func (n *Node) linkUp(peer NodeID) {
 	if n.hooks != nil {
-		n.hooks.OnLinkDown(id, err)
+		n.hooks.OnLinkUp(peer)
 	}
+	n.subs.publish(Event{Kind: EventLinkUp, Peer: peer})
+}
+
+func (n *Node) linkDown(peer NodeID, err error) {
+	if n.hooks != nil {
+		n.hooks.OnLinkDown(peer, err)
+	}
+	ev := Event{Kind: EventLinkDown, Peer: peer}
+	if err != nil {
+		ev.Err = err.Error()
+	}
+	n.subs.publish(ev)
 }
 
 func first(md metadata.MD, key string) string {

@@ -178,8 +178,12 @@ func Spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts ...SpawnOp
 	n.wg.Add(1)
 	n.mu.Unlock()
 	n.spawned.Add(1)
-	if n.hooks != nil {
-		n.hooks.OnSpawn(p.info())
+	if n.hooks != nil || n.subs.active() {
+		info := p.info()
+		if n.hooks != nil {
+			n.hooks.OnSpawn(info)
+		}
+		n.subs.publish(Event{Kind: EventSpawn, Process: info})
 	}
 
 	go p.run(func() error { return fn(&Process[M]{p}) })
@@ -225,7 +229,7 @@ func (p *proc) Register(name string) error {
 // to exit. The error is then context.Canceled (node stop) or an *ExitError.
 func (p *Process[M]) Receive() (Msg[M], error) {
 	it, err := p.receive(p.ctx)
-	return p.msg(it), err
+	return toMsg[M](it), err
 }
 
 // ReceiveTimeout is Receive with a deadline; context.DeadlineExceeded on timeout.
@@ -236,10 +240,10 @@ func (p *Process[M]) ReceiveTimeout(d time.Duration) (Msg[M], error) {
 	if err != nil && p.ctx.Err() != nil {
 		err = context.Cause(p.ctx)
 	}
-	return p.msg(it), err
+	return toMsg[M](it), err
 }
 
-func (p *Process[M]) msg(it item) Msg[M] {
+func toMsg[M proto.Message](it item) Msg[M] {
 	m := Msg[M]{From: it.from, Down: it.down, Metadata: it.md, ref: it.ref}
 	if it.body != nil {
 		m.Body, _ = it.body.(M) // accept() checked this on delivery
@@ -587,8 +591,12 @@ func (p *proc) terminate(reason string) {
 			_ = n.demonitor(p.pid, t.pid, ref.ID)
 		}
 	}
-	if n.hooks != nil {
-		n.hooks.OnExit(p.info(), reason)
+	if n.hooks != nil || n.subs.active() {
+		info := p.info()
+		if n.hooks != nil {
+			n.hooks.OnExit(info, reason)
+		}
+		n.subs.publish(Event{Kind: EventExit, Process: info, Reason: reason})
 	}
 }
 

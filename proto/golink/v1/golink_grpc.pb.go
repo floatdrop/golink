@@ -6,7 +6,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             (unknown)
-// source: proto/golink/v1/golink.proto
+// source: golink/v1/golink.proto
 
 package golinkv1
 
@@ -127,5 +127,5 @@ var Node_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "proto/golink/v1/golink.proto",
+	Metadata: "golink/v1/golink.proto",
 }

@@ -4,7 +4,7 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        (unknown)
-// source: internal/testpb/test.proto
+// source: testpb/test.proto
 
 package testpb
 
@@ -32,7 +32,7 @@ type Ping struct {
 
 func (x *Ping) Reset() {
 	*x = Ping{}
-	mi := &file_internal_testpb_test_proto_msgTypes[0]
+	mi := &file_testpb_test_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -44,7 +44,7 @@ func (x *Ping) String() string {
 func (*Ping) ProtoMessage() {}
 
 func (x *Ping) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_testpb_test_proto_msgTypes[0]
+	mi := &file_testpb_test_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -57,7 +57,7 @@ func (x *Ping) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ping.ProtoReflect.Descriptor instead.
 func (*Ping) Descriptor() ([]byte, []int) {
-	return file_internal_testpb_test_proto_rawDescGZIP(), []int{0}
+	return file_testpb_test_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Ping) GetN() int64 {
@@ -76,7 +76,7 @@ type Pong struct {
 
 func (x *Pong) Reset() {
 	*x = Pong{}
-	mi := &file_internal_testpb_test_proto_msgTypes[1]
+	mi := &file_testpb_test_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -88,7 +88,7 @@ func (x *Pong) String() string {
 func (*Pong) ProtoMessage() {}
 
 func (x *Pong) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_testpb_test_proto_msgTypes[1]
+	mi := &file_testpb_test_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -101,7 +101,7 @@ func (x *Pong) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Pong.ProtoReflect.Descriptor instead.
 func (*Pong) Descriptor() ([]byte, []int) {
-	return file_internal_testpb_test_proto_rawDescGZIP(), []int{1}
+	return file_testpb_test_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Pong) GetN() int64 {
@@ -126,7 +126,7 @@ type Order struct {
 
 func (x *Order) Reset() {
 	*x = Order{}
-	mi := &file_internal_testpb_test_proto_msgTypes[2]
+	mi := &file_testpb_test_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -138,7 +138,7 @@ func (x *Order) String() string {
 func (*Order) ProtoMessage() {}
 
 func (x *Order) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_testpb_test_proto_msgTypes[2]
+	mi := &file_testpb_test_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -151,7 +151,7 @@ func (x *Order) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Order.ProtoReflect.Descriptor instead.
 func (*Order) Descriptor() ([]byte, []int) {
-	return file_internal_testpb_test_proto_rawDescGZIP(), []int{2}
+	return file_testpb_test_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Order) GetKind() isOrder_Kind {
@@ -204,7 +204,7 @@ type Reserve struct {
 
 func (x *Reserve) Reset() {
 	*x = Reserve{}
-	mi := &file_internal_testpb_test_proto_msgTypes[3]
+	mi := &file_testpb_test_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -216,7 +216,7 @@ func (x *Reserve) String() string {
 func (*Reserve) ProtoMessage() {}
 
 func (x *Reserve) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_testpb_test_proto_msgTypes[3]
+	mi := &file_testpb_test_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -229,7 +229,7 @@ func (x *Reserve) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Reserve.ProtoReflect.Descriptor instead.
 func (*Reserve) Descriptor() ([]byte, []int) {
-	return file_internal_testpb_test_proto_rawDescGZIP(), []int{3}
+	return file_testpb_test_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Reserve) GetId() string {
@@ -248,7 +248,7 @@ type Cancel struct {
 
 func (x *Cancel) Reset() {
 	*x = Cancel{}
-	mi := &file_internal_testpb_test_proto_msgTypes[4]
+	mi := &file_testpb_test_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -260,7 +260,7 @@ func (x *Cancel) String() string {
 func (*Cancel) ProtoMessage() {}
 
 func (x *Cancel) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_testpb_test_proto_msgTypes[4]
+	mi := &file_testpb_test_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -273,7 +273,7 @@ func (x *Cancel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Cancel.ProtoReflect.Descriptor instead.
 func (*Cancel) Descriptor() ([]byte, []int) {
-	return file_internal_testpb_test_proto_rawDescGZIP(), []int{4}
+	return file_testpb_test_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Cancel) GetId() string {
@@ -292,7 +292,7 @@ type Reserved struct {
 
 func (x *Reserved) Reset() {
 	*x = Reserved{}
-	mi := &file_internal_testpb_test_proto_msgTypes[5]
+	mi := &file_testpb_test_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -304,7 +304,7 @@ func (x *Reserved) String() string {
 func (*Reserved) ProtoMessage() {}
 
 func (x *Reserved) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_testpb_test_proto_msgTypes[5]
+	mi := &file_testpb_test_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -317,7 +317,7 @@ func (x *Reserved) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Reserved.ProtoReflect.Descriptor instead.
 func (*Reserved) Descriptor() ([]byte, []int) {
-	return file_internal_testpb_test_proto_rawDescGZIP(), []int{5}
+	return file_testpb_test_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Reserved) GetId() string {
@@ -327,11 +327,11 @@ func (x *Reserved) GetId() string {
 	return ""
 }
 
-var File_internal_testpb_test_proto protoreflect.FileDescriptor
+var File_testpb_test_proto protoreflect.FileDescriptor
 
-const file_internal_testpb_test_proto_rawDesc = "" +
+const file_testpb_test_proto_rawDesc = "" +
 	"\n" +
-	"\x1ainternal/testpb/test.proto\x12\x0egolink.test.v1\"\x14\n" +
+	"\x11testpb/test.proto\x12\x0egolink.test.v1\"\x14\n" +
 	"\x04Ping\x12\f\n" +
 	"\x01n\x18\x01 \x01(\x03R\x01n\"\x14\n" +
 	"\x04Pong\x12\f\n" +
@@ -348,19 +348,19 @@ const file_internal_testpb_test_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02idB4Z2github.com/floatdrop/golink/internal/testpb;testpbb\x06proto3"
 
 var (
-	file_internal_testpb_test_proto_rawDescOnce sync.Once
-	file_internal_testpb_test_proto_rawDescData []byte
+	file_testpb_test_proto_rawDescOnce sync.Once
+	file_testpb_test_proto_rawDescData []byte
 )
 
-func file_internal_testpb_test_proto_rawDescGZIP() []byte {
-	file_internal_testpb_test_proto_rawDescOnce.Do(func() {
-		file_internal_testpb_test_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_testpb_test_proto_rawDesc), len(file_internal_testpb_test_proto_rawDesc)))
+func file_testpb_test_proto_rawDescGZIP() []byte {
+	file_testpb_test_proto_rawDescOnce.Do(func() {
+		file_testpb_test_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_testpb_test_proto_rawDesc), len(file_testpb_test_proto_rawDesc)))
 	})
-	return file_internal_testpb_test_proto_rawDescData
+	return file_testpb_test_proto_rawDescData
 }
 
-var file_internal_testpb_test_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
-var file_internal_testpb_test_proto_goTypes = []any{
+var file_testpb_test_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_testpb_test_proto_goTypes = []any{
 	(*Ping)(nil),     // 0: golink.test.v1.Ping
 	(*Pong)(nil),     // 1: golink.test.v1.Pong
 	(*Order)(nil),    // 2: golink.test.v1.Order
@@ -368,7 +368,7 @@ var file_internal_testpb_test_proto_goTypes = []any{
 	(*Cancel)(nil),   // 4: golink.test.v1.Cancel
 	(*Reserved)(nil), // 5: golink.test.v1.Reserved
 }
-var file_internal_testpb_test_proto_depIdxs = []int32{
+var file_testpb_test_proto_depIdxs = []int32{
 	3, // 0: golink.test.v1.Order.reserve:type_name -> golink.test.v1.Reserve
 	4, // 1: golink.test.v1.Order.cancel:type_name -> golink.test.v1.Cancel
 	2, // [2:2] is the sub-list for method output_type
@@ -378,12 +378,12 @@ var file_internal_testpb_test_proto_depIdxs = []int32{
 	0, // [0:2] is the sub-list for field type_name
 }
 
-func init() { file_internal_testpb_test_proto_init() }
-func file_internal_testpb_test_proto_init() {
-	if File_internal_testpb_test_proto != nil {
+func init() { file_testpb_test_proto_init() }
+func file_testpb_test_proto_init() {
+	if File_testpb_test_proto != nil {
 		return
 	}
-	file_internal_testpb_test_proto_msgTypes[2].OneofWrappers = []any{
+	file_testpb_test_proto_msgTypes[2].OneofWrappers = []any{
 		(*Order_Reserve)(nil),
 		(*Order_Cancel)(nil),
 	}
@@ -391,17 +391,17 @@ func file_internal_testpb_test_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_testpb_test_proto_rawDesc), len(file_internal_testpb_test_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_testpb_test_proto_rawDesc), len(file_testpb_test_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_internal_testpb_test_proto_goTypes,
-		DependencyIndexes: file_internal_testpb_test_proto_depIdxs,
-		MessageInfos:      file_internal_testpb_test_proto_msgTypes,
+		GoTypes:           file_testpb_test_proto_goTypes,
+		DependencyIndexes: file_testpb_test_proto_depIdxs,
+		MessageInfos:      file_testpb_test_proto_msgTypes,
 	}.Build()
-	File_internal_testpb_test_proto = out.File
-	file_internal_testpb_test_proto_goTypes = nil
-	file_internal_testpb_test_proto_depIdxs = nil
+	File_testpb_test_proto = out.File
+	file_testpb_test_proto_goTypes = nil
+	file_testpb_test_proto_depIdxs = nil
 }

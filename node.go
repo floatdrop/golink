@@ -98,6 +98,7 @@ type Node struct {
 	wg       sync.WaitGroup
 
 	spawned, exited, deadLetters atomic.Uint64
+	subs                         subscribers
 
 	golinkv1.UnimplementedNodeServer
 }
@@ -158,7 +159,7 @@ func (n *Node) PID() PID { return PID{Node: n.id.Name, Incarnation: n.id.Incarna
 
 // Start marks the node running. Processes may be spawned before Start; they
 // run immediately, so Start exists for lifecycle symmetry and for a Registrar.
-func (n *Node) Start(ctx context.Context) error {
+func (n *Node) Start(_ context.Context) error {
 	n.started.CompareAndSwap(0, time.Now().UnixNano())
 	return nil
 }
@@ -461,7 +462,7 @@ func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to Target, re
 
 func (n *Node) reply(from, to PID, ref uint64, body proto.Message, status golinkv1.Status, errText string) error {
 	if to.Node == n.id.Name {
-		n.deliverReply(to, ref, body, status, errText)
+		n.deliverReply(ref, body, status, errText)
 		return nil
 	}
 	var a *anypb.Any
@@ -557,7 +558,7 @@ func (n *Node) deliver(from, to PID, name string, body proto.Message, md Metadat
 	}
 }
 
-func (n *Node) deliverReply(to PID, ref uint64, body proto.Message, status golinkv1.Status, errText string) {
+func (n *Node) deliverReply(ref uint64, body proto.Message, status golinkv1.Status, errText string) {
 	n.mu.Lock()
 	pc := n.pending[ref]
 	delete(n.pending, ref)
@@ -613,6 +614,9 @@ func (n *Node) deadLetter(from, to PID, body proto.Message, reason string) {
 	if n.hooks != nil {
 		n.hooks.OnDeadLetter(from, to, body, reason)
 	}
+	if n.subs.active() {
+		n.subs.publish(Event{Kind: EventDeadLetter, From: from, To: to, Type: typeName(body), Reason: reason})
+	}
 	n.log.Debug("dead letter", "from", from, "to", to, "reason", reason, "type", typeName(body))
 }
 
@@ -640,11 +644,11 @@ func (n *Node) dispatch(env *golinkv1.Envelope) {
 		if k.Reply.Body != nil {
 			var err error
 			if body, err = decode(k.Reply.Body); err != nil {
-				n.deliverReply(pidFrom(k.Reply.To), k.Reply.Ref, nil, golinkv1.Status_STATUS_TYPE, "")
+				n.deliverReply(k.Reply.Ref, nil, golinkv1.Status_STATUS_TYPE, "")
 				return
 			}
 		}
-		n.deliverReply(pidFrom(k.Reply.To), k.Reply.Ref, body, k.Reply.Status, k.Reply.Error)
+		n.deliverReply(k.Reply.Ref, body, k.Reply.Status, k.Reply.Error)
 	case *golinkv1.Envelope_Monitor:
 		n.deliverMonitor(pidFrom(k.Monitor.From), pidFrom(k.Monitor.To), k.Monitor.ToName, k.Monitor.Ref)
 	case *golinkv1.Envelope_Demonitor:

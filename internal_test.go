@@ -389,3 +389,16 @@ func TestDialBadTarget(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestSubscribersEdges(t *testing.T) {
+	var s subscribers
+	sub := &subscriber{ch: make(chan Event, 1)}
+	s.remove(sub) // nothing registered yet
+	s.add(sub)
+	sub.close()
+	sub.close()        // idempotent
+	s.publish(Event{}) // delivering to a closed subscriber is a no-op
+	if len(sub.ch) != 0 {
+		t.Fatal("delivered to a closed subscriber")
+	}
+}
