@@ -641,3 +641,57 @@ func BenchmarkRemoteSend(b *testing.B) {
 	c := golinktest.New(b, "a", "b")
 	benchSend(b, c.Node("a"), c.Node("b"))
 }
+
+func TestBusyMeasuresTheCurrentMessage(t *testing.T) {
+	c := golinktest.New(t, "a")
+	a := c.Node("a")
+	release := make(chan struct{})
+	defer close(release)
+	p, _ := golink.Spawn[*testpb.Ping](a, func(p *golink.Process[*testpb.Ping]) error {
+		for {
+			m, err := p.Receive()
+			if err != nil {
+				return err
+			}
+			if m.Body.GetN() == 1 {
+				<-release
+			}
+		}
+	})
+	time.Sleep(300 * time.Millisecond) // old, but idle
+	_ = a.Send(p, &testpb.Ping{N: 1})
+	time.Sleep(20 * time.Millisecond)
+	short, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+	defer cancel()
+	_, err := a.Inspect(short, p.PID())
+	if d := busyFor(t, err); d > 200*time.Millisecond {
+		t.Fatalf("busy must count from the message, not the start: %v", err)
+	}
+	// A process that never took a message counts from its start.
+	stuck, _ := golink.Spawn[*testpb.Ping](a, func(*golink.Process[*testpb.Ping]) error { <-release; return nil })
+	time.Sleep(50 * time.Millisecond)
+	short2, cancel2 := context.WithTimeout(t.Context(), 10*time.Millisecond)
+	defer cancel2()
+	_, err = a.Inspect(short2, stuck.PID())
+	if d := busyFor(t, err); d < 50*time.Millisecond {
+		t.Fatalf("busy since start: %v", err)
+	}
+	// Untyped processes are named proto.Message, not by the alias's target.
+	u, _ := golink.Spawn[proto.Message](a, func(p *golink.Process[proto.Message]) error { _, err := p.Receive(); return err })
+	if info, _ := a.Process(u.PID()); info.Type != "proto.Message" || info.Label != "proto.Message" {
+		t.Fatalf("%+v", info)
+	}
+}
+
+func busyFor(t *testing.T, err error) time.Duration {
+	t.Helper()
+	if err == nil {
+		t.Fatal("inspect of a busy process answered")
+	}
+	_, rest, ok := strings.Cut(err.Error(), "busy for ")
+	d, perr := time.ParseDuration(strings.SplitN(rest, ":", 2)[0])
+	if !ok || perr != nil {
+		t.Fatalf("no duration in %v", err)
+	}
+	return d
+}

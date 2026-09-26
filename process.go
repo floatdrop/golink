@@ -56,6 +56,7 @@ type proc struct {
 	log      *slog.Logger
 
 	received, sent, wakeups atomic.Uint64
+	handlingSince           atomic.Int64 // unix nanos when the message being handled was taken
 	callsInFlight           atomic.Int32
 	state                   atomic.Uint32
 	peak                    atomic.Int64
@@ -158,7 +159,7 @@ func spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts []SpawnOpt
 	for _, opt := range opts {
 		opt(&o)
 	}
-	typ := reflect.TypeFor[M]().String()
+	typ := typeString[M]()
 	if o.label == "" {
 		o.label = typ
 	}
@@ -498,6 +499,7 @@ func (p *proc) receive(ctx context.Context) (item, error) {
 
 func (p *proc) took(it item) item {
 	p.wakeups.Add(1)
+	p.handlingSince.Store(time.Now().UnixNano())
 	p.received.Add(1)
 	if it.ref != 0 {
 		p.mu.Lock()
@@ -533,7 +535,7 @@ func (p *proc) inspectNow(ctx context.Context) (map[string]string, error) {
 	select {
 	case p.sys <- r:
 	case <-ctx.Done():
-		return nil, fmt.Errorf("golink: inspect %s: busy for %s: %w", p.pid, time.Since(p.started).Round(time.Millisecond), ctx.Err())
+		return nil, fmt.Errorf("golink: inspect %s: busy for %s: %w", p.pid, p.busyFor().Round(time.Millisecond), ctx.Err())
 	case <-p.ctx.Done():
 		return nil, ErrNoProc
 	}
@@ -546,6 +548,24 @@ func (p *proc) inspectNow(ctx context.Context) (map[string]string, error) {
 }
 
 func (p *proc) setState(s ProcessState) { p.state.Store(uint32(s)) }
+
+// busyFor is how long the process has been on the message it took last,
+// or since it started if it has taken none.
+func (p *proc) busyFor() time.Duration {
+	if since := p.handlingSince.Load(); since != 0 {
+		return time.Since(time.Unix(0, since))
+	}
+	return time.Since(p.started)
+}
+
+// typeString names M for display and as the default label. proto.Message is
+// an alias, which reflect reports under its real name, protoreflect.ProtoMessage.
+func typeString[M proto.Message]() string {
+	if t := reflect.TypeFor[M](); t != reflect.TypeFor[proto.Message]() {
+		return t.String()
+	}
+	return "proto.Message"
+}
 
 func (p *proc) info() ProcessInfo {
 	p.mu.Lock()
