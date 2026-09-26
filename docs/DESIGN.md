@@ -32,7 +32,7 @@ node, err := golink.NewNode(golink.Config{
     Resolver:    golinketcd.New(cli, "/golink"), // optional; static map by default
     DialOptions: []grpc.DialOption{grpc.WithTransportCredentials(creds)},
     Logger:      slog.Default(),
-    Hooks:       golinkotel.Hooks(meter, tracer), // optional taps, see Observability
+    Hooks:       otelHooks, // golinkotel.New(): optional, see Observability
 })
 node.Register(grpcServer) // mounts golink.v1.Mesh (+ golink.v1.Inspector if enabled)
 node.Start(ctx)
@@ -338,7 +338,7 @@ frameworks reduces to:
 | Metrics | Observer charts | `WithMetrics()` OTel gauges | `golink/otel` on `Hooks` + `Processes()` snapshots, one series per **label** by default (GoAkt's per-actor default is a cardinality trap it later added a switch for) |
 | Dead letters | log | dead-letter actor + event | `OnDeadLetter` + counter in `NodeInfo` |
 | System events | `gen.CoreEvent` | event stream | `OnSpawn/OnExit/OnLinkUp/OnLinkDown`; `Node.Events()` channel is a thin subscriber over the same hooks |
-| Tracing | Sent / Delivered / Processed observations, trace id in the message | eBPF sidecar | `Envelope.metadata` carries W3C trace context; `golink/otel` injects in `OnSend`, extracts in `OnReceive`, and opens a span per `Call`. Same three points as ergo. Sampling stays the tracer's job |
+| Tracing | Sent / Delivered / Processed observations, trace id in the message | eBPF sidecar | `Envelope.metadata` carries W3C trace context. `golink/otel` opens a producer (send) or client (call) span in `OnSend` and a consumer/server span covering the handling in `OnReceive`; a process's sends inherit the handling span, so chains form without threading a context. Sampling stays the tracer's job |
 | Logging | loggers as processes, per-process level | — | `p.Log()` is `slog` with pid/name/label; per-process level via a `slog.Handler` wrapper the node owns, settable at runtime |
 
 ### Events
@@ -427,7 +427,8 @@ Optional, built only on the public core API so users can ignore or replace them:
    every reason, node down, restart with new incarnation, bad peer identity.
 2. ~~`golink/inspect` service and Go client~~ (done, with `Node.Subscribe`);
    `golink/actor` helpers.
-3. `golink/otel` (metrics + trace propagation), `golink/etcd`.
+3. ~~`golink/otel` (metrics + trace propagation)~~ (done: see otel/README.md),
+   `golink/etcd`.
 4. `golinkctl`, `DOT`, MCP server.
 
 Coverage target and style follow `fsm` and `di`: 100 % on the core,

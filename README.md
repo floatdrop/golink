@@ -116,10 +116,17 @@ exits with their reasons, links up and down, dead letters. It never blocks
 the node; a subscriber that falls behind loses events and is told how many
 in the next one's `Missed`.
 
-`Config.Hooks` is the synchronous tap for everything else:
-`OnSpawn`, `OnExit`, `OnSend`, `OnReceive`, `OnDeadLetter`, `OnLinkUp`,
-`OnLinkDown`. Metrics, trace propagation (through `Metadata`, which travels
-with every message) and dead-letter logging are built on it outside the core.
+`Config.Hooks` is the synchronous tap for everything else: `OnSpawn`,
+`OnExit`, `OnSend`, `OnReceive`, `OnDeadLetter`, `OnLinkUp`, `OnLinkDown`.
+`OnSend` and `OnReceive` return the metadata to use and a `Done` that closes
+what they started, which is all a tracer needs. A process's sends inherit the
+metadata of the message it is handling, so trace chains form without
+threading a context through handlers. `golink.JoinHooks` combines several.
+
+[`golink/otel`](otel/README.md) implements them with OpenTelemetry: spans
+for every send, call and handled message, chained across nodes, and metrics
+by process label (throughput, mailbox wait and depth, handling and call
+latency, exits by reason class, dead letters, link traffic).
 
 ## Inspector
 
@@ -166,9 +173,8 @@ node, and `c.Conn(name)` dials one.
 
 [docs/DESIGN.md](docs/DESIGN.md) has the wire protocol, the reasons behind
 the choices (and what was rejected), what the observability surface is copied
-from, and the roadmap: an `Inspector` gRPC service, `golink/otel`,
-`golink/etcd`, supervisors and timers in `golink/actor`, a CLI and an MCP
-server on top of the Inspector.
+from, and the roadmap: `golink/etcd`, supervisors and timers in
+`golink/actor`, a CLI and an MCP server on top of the Inspector.
 
 ## Performance
 
