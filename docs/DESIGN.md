@@ -467,7 +467,7 @@ them. Two primitives went into the core because they need process internals:
    ~~`golink/actor` helpers~~ (done, with `SendAfter` and `SpawnMonitor`).
 3. ~~`golink/otel` (metrics + trace propagation)~~ (done: see otel/README.md),
    ~~`golink/etcd`~~ (done: see etcd/README.md).
-4. `golinkctl`, `DOT`, MCP server.
+4. ~~`golinkctl`, `DOT`, MCP server~~ (done: `golink/tools`, see tools/README.md).
 
 Coverage target and style follow `fsm` and `di`: 100 % on the core,
 race-detected, examples compiled in CI, `DESIGN.md` kept current.

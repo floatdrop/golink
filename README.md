@@ -189,11 +189,17 @@ to that node's Inspector, so one endpoint inspects the whole cluster.
 `inspect.ReadOnly()` refuses the three writes; anything finer is the job of
 the interceptors that guard your other services.
 
-It is a gRPC service, so `grpcurl` works on it today:
+[`golinkctl`](tools/README.md) is its command line, and serves it to AI
+agents over MCP:
 
 ```sh
-grpcurl -plaintext -d '{"node":"billing-1","min_mailbox":100}' localhost:9000 golink.inspect.v1.Inspector/ListProcesses
+golinkctl --plaintext ps --sort mailbox        # who is falling behind
+golinkctl --plaintext inspect ledger-writer    # what it believes, or that it is busy
+golinkctl --plaintext dot --cluster | dot -Tsvg -o processes.svg
+claude mcp add golink -- golinkctl --plaintext --addr 10.0.0.5:9000 mcp
 ```
+
+It is a plain gRPC service, so `grpcurl` works on it too.
 
 ## Discovery
 
@@ -225,7 +231,7 @@ node, and `c.Conn(name)` dials one.
 
 [docs/DESIGN.md](docs/DESIGN.md) has the wire protocol, the reasons behind
 the choices (and what was rejected), what the observability surface is copied
-from, and the roadmap: a CLI and an MCP server on top of the Inspector.
+from, and what is left: releases, a cluster-wide name registry.
 
 ## Performance
 

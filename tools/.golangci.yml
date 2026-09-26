@@ -1,0 +1,26 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - revive
+  settings:
+    errcheck:
+      # A CLI writes to its terminal everywhere; a failed write there has
+      # nowhere better to be reported. As in di.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    revive:
+      rules:
+        - name: unused-receiver
+        - name: unused-parameter
+  exclusions:
+    generated: strict
+    rules:
+      - linters: [revive]
+        path: _test\.go
+
+issues:
+  uniq-by-line: false
