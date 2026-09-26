@@ -1,0 +1,147 @@
+# golink
+
+Erlang-style processes for Go, on the gRPC server you already run.
+
+A process is a goroutine with a mailbox and a cluster-wide PID. `Send`,
+`Call`, `Monitor` and `Exit` work the same whether the target is in this
+binary or on another node; the node-to-node traffic is one gRPC stream per
+direction, registered on your `*grpc.Server` next to your other services.
+
+- **A library, not a framework.** You bring the gRPC server, credentials,
+  discovery, `slog` and lifecycle. golink never opens a listener, reads env
+  vars, installs globals or starts a goroutine outside `Start`/`Stop`.
+- **Typed mailboxes.** The message type lives on the address, so a send to
+  `Addr[*orderspb.Order]` is checked by the compiler, locally and remotely.
+  Instantiate with `proto.Message` for an untyped process.
+- **Erlang semantics.** Per-sender ordering, `Down` in order with messages,
+  incarnation in the PID so a restart never resurrects a reference,
+  unbounded mailboxes so a slow process cannot stall the link.
+- **Inspectable.** Every process and link keeps counters you can snapshot;
+  a process can publish what it currently believes through `WithInspect`;
+  one `Hooks` interface taps everything for metrics, tracing and dead letters.
+- **Core depends on `grpc` and `protobuf` only.**
+
+```sh
+go get github.com/floatdrop/golink
+```
+
+Requires **Go 1.27** (generic methods).
+
+## Quick start
+
+```go
+node, err := golink.NewNode(golink.Config{
+    Name:        "orders-1",
+    Resolver:    golink.StaticResolver{"billing-1": "10.0.0.7:9000"},
+    DialOptions: []grpc.DialOption{grpc.WithTransportCredentials(creds)},
+})
+node.Register(grpcServer) // mounts golink.v1.Node on your server
+node.Start(ctx)
+defer node.Stop(ctx)
+
+// A typed process: it receives *orderspb.Order and nothing else.
+addr, _ := golink.Spawn(node, func(p *golink.Process[*orderspb.Order]) error {
+    for {
+        m, err := p.Receive()
+        if err != nil {
+            return err // Exit, or the node stopping
+        }
+        if m.Down != nil {
+            p.Log().Warn("ledger gone", "reason", m.Down.Reason)
+            continue
+        }
+        switch k := m.Body.Kind.(type) {
+        case *orderspb.Order_Reserve:
+            p.Reply(m, &orderspb.Reserved{Id: k.Reserve.Id}, nil)
+        }
+    }
+}, golink.WithName("orders"), golink.WithLabel("order"))
+
+// From anywhere in the cluster; the address carries the type.
+ledger := golink.Named[*ledgerpb.Entry]("billing-1", "ledger")
+resp, err := golink.Call[*orderspb.Reserved](ctx, node, addr, &orderspb.Order{…})
+```
+
+Inside a process:
+
+```go
+ref := p.Monitor(ledger)                       // Down{Ref: ref} when it exits or its node is unreachable
+err := p.Send(ledger, &ledgerpb.Entry{…})       // compile-time typed
+r, err := p.Call[*ledgerpb.Posted](ctx, ledger, &ledgerpb.Entry{…})
+err = p.SendTo(m.From, &orderspb.Ack{})         // untyped: a PID from a message
+```
+
+## What a process sees
+
+| Call | Returns |
+| --- | --- |
+| `p.Receive()` | `Msg[M]{From, Body, Down, Metadata}`; error when asked to exit |
+| `p.ReceiveTimeout(d)` | the same, or `context.DeadlineExceeded` |
+| `p.Send(to Addr[N], m N)` / `p.SendTo(Target, proto.Message)` | typed / untyped asynchronous send |
+| `p.Call[R](ctx, to Addr[N], req N)` | the reply as `R`, `*RemoteError`, `ErrNoProc`, `ErrType` or `ErrNoConnection` |
+| `p.Reply(m, resp, err)` | answers a call; may be deferred to another goroutine |
+| `p.Monitor(target)` / `p.Demonitor(ref)` | a `Down` with the ref when the target exits: `normal`, the returned error, `panic: …`, `killed`, `noproc`, `noconnection`, `shutdown` |
+| `p.Exit(target, reason)` | asks another process to exit; its `Receive` returns an `*ExitError` |
+| `p.Log()` | `*slog.Logger` with pid and label; threshold settable at runtime |
+
+Exit reasons and the type check on delivery are the whole error model: a
+message of the wrong type is a dead letter with reason `type` (and `ErrType`
+to a caller), never a panic in the process.
+
+## Observability
+
+```go
+node.Processes()            // []ProcessInfo: state, mailbox depth and oldest age, sent/received,
+                            // calls in flight, last message type, watchers, monitors, log level
+node.Process(pid)
+node.Info()                 // NodeInfo: incarnation, uptime, counts, per-link messages/bytes/reconnects
+node.Inspect(ctx, pid)      // the map the process's WithInspect returns, produced on its own goroutine
+node.SetLogLevel(pid, slog.LevelDebug)
+```
+
+`WithInspect` runs between two messages, inside `Receive`, so it reads the
+process's state without a lock. A process busy in a handler answers when it
+next receives; one that never does reports `busy for 12s`, which is the
+diagnosis. With a state machine that is one line:
+
+```go
+golink.WithInspect(func() map[string]string { return map[string]string{"state": rec.state.String()} })
+```
+
+`Config.Hooks` is the single tap for everything else:
+`OnSpawn`, `OnExit`, `OnSend`, `OnReceive`, `OnDeadLetter`, `OnLinkUp`,
+`OnLinkDown`. Metrics, trace propagation (through `Metadata`, which travels
+with every message) and dead-letter logging are built on it outside the core.
+
+## Testing a cluster
+
+`golinktest` runs nodes over in-memory connections, so a multi-node scenario
+is a plain `go test`:
+
+```go
+c := golinktest.New(t, "a", "b")
+a, b := c.Node("a"), c.Node("b")
+c.Partition("a", "b") // monitors fire Down{noconnection}; calls fail
+c.Heal("a", "b")
+c.Kill("b")           // as a crash: no shutdown notice
+c.Restart("b")        // same name, new incarnation
+```
+
+## Design
+
+[docs/DESIGN.md](docs/DESIGN.md) has the wire protocol, the reasons behind
+the choices (and what was rejected), what the observability surface is copied
+from, and the roadmap: an `Inspector` gRPC service, `golink/otel`,
+`golink/etcd`, supervisors and timers in `golink/actor`.
+
+## Performance
+
+Apple M3 Max, `go test -bench . -benchmem`, in-memory gRPC:
+
+```
+BenchmarkLocalCall-14             715.9 ns/op    328 B/op     7 allocs/op
+BenchmarkLocalSend-14             149.6 ns/op     64 B/op     2 allocs/op
+BenchmarkRemoteCall-14           10823 ns/op   3344 B/op    71 allocs/op
+BenchmarkRemoteCallParallel-14    3708 ns/op   3335 B/op    66 allocs/op
+BenchmarkRemoteSend-14            1469 ns/op   1637 B/op    30 allocs/op
+```

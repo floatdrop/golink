@@ -1,0 +1,35 @@
+// Messages used by mesh's own tests and benchmarks.
+syntax = "proto3";
+
+package golink.test.v1;
+
+option go_package = "github.com/floatdrop/golink/internal/testpb;testpb";
+
+message Ping {
+  int64 n = 1;
+}
+
+message Pong {
+  int64 n = 1;
+}
+
+// Order is a one-contract-per-process message: a typed process accepts
+// *testpb.Order and switches on Kind.
+message Order {
+  oneof kind {
+    Reserve reserve = 1;
+    Cancel cancel = 2;
+  }
+}
+
+message Reserve {
+  string id = 1;
+}
+
+message Cancel {
+  string id = 1;
+}
+
+message Reserved {
+  string id = 1;
+}

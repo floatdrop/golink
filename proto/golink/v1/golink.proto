@@ -1,0 +1,121 @@
+// golink.v1 is the wire protocol between golink nodes. One stream per
+// (sender node -> receiver node) direction carries every interaction between
+// the two, in order: messages, calls, replies, monitors and down notifications.
+syntax = "proto3";
+
+package golink.v1;
+
+import "google/protobuf/any.proto";
+
+option go_package = "github.com/floatdrop/golink/proto/golink/v1;golinkv1";
+
+// Node is registered by a node on the application's gRPC server.
+service Node {
+  // Link is opened by the sending node. The client sends its identity in the
+  // request metadata (golink-node, golink-incarnation, golink-version); the
+  // server answers with one Hello and then only reads. Application envelopes
+  // flow client -> server only.
+  rpc Link(stream Envelope) returns (stream Envelope);
+}
+
+// PID identifies a process anywhere in the cluster.
+message PID {
+  string node = 1;
+  // Incarnation changes every time a node starts, so a PID from before a
+  // restart never reaches a process created after it.
+  uint64 incarnation = 2;
+  uint64 id = 3;
+}
+
+message Envelope {
+  oneof kind {
+    Hello hello = 1;
+    Send send = 2;
+    Call call = 3;
+    Reply reply = 4;
+    Monitor monitor = 5;
+    Demonitor demonitor = 6;
+    Down down = 7;
+    Exit exit = 8;
+  }
+  // Propagated context: trace headers, tenant, deadline. Never interpreted by
+  // golink itself.
+  map<string, string> metadata = 15;
+}
+
+// Hello is the first envelope on a stream, sent by the server. It names the
+// node the client actually reached.
+message Hello {
+  string node = 1;
+  uint64 incarnation = 2;
+  uint32 version = 3;
+}
+
+// Send is an asynchronous message. Exactly one of to / to_name is set.
+message Send {
+  PID from = 1;
+  PID to = 2;
+  string to_name = 3;
+  google.protobuf.Any body = 4;
+}
+
+// Call is a request that expects a Reply carrying the same ref.
+message Call {
+  PID from = 1;
+  PID to = 2;
+  string to_name = 3;
+  uint64 ref = 4;
+  google.protobuf.Any body = 5;
+}
+
+message Reply {
+  PID from = 1;
+  PID to = 2;
+  uint64 ref = 3;
+  Status status = 4;
+  string error = 5;
+  google.protobuf.Any body = 6;
+}
+
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_OK = 1;
+  // The handler returned an error; `error` carries its text.
+  STATUS_ERROR = 2;
+  // No such process, or it exited before answering.
+  STATUS_NOPROC = 3;
+  // The process exists but does not accept this message type.
+  STATUS_TYPE = 4;
+}
+
+// Monitor asks the target's node to send Down when the target exits.
+// ref is unique per watcher node.
+message Monitor {
+  PID from = 1;
+  PID to = 2;
+  string to_name = 3;
+  uint64 ref = 4;
+}
+
+message Demonitor {
+  PID from = 1;
+  PID to = 2;
+  string to_name = 3;
+  uint64 ref = 4;
+}
+
+// Down tells `to` that `from` exited. ref is the one given in Monitor.
+message Down {
+  PID from = 1;
+  PID to = 2;
+  uint64 ref = 3;
+  string reason = 4;
+}
+
+// Exit asks the target to terminate.
+message Exit {
+  PID from = 1;
+  PID to = 2;
+  string to_name = 3;
+  string reason = 4;
+}
