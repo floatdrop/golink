@@ -615,12 +615,12 @@ func (p *proc) removeWatcher(ref Ref) {
 	p.mu.Unlock()
 }
 
-func (p *proc) dropMonitor(ref Ref) bool {
+func (p *proc) dropMonitor(ref Ref) (monitorTarget, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	_, ok := p.monitors[ref]
+	t, ok := p.monitors[ref]
 	delete(p.monitors, ref)
-	return ok
+	return t, ok
 }
 
 // peerDown drops every monitor and watcher that crossed the link to peer and
@@ -632,7 +632,7 @@ func (p *proc) peerDown(peer string) []Down {
 	for ref, t := range p.monitors {
 		if t.pid.Node == peer {
 			delete(p.monitors, ref)
-			downs = append(downs, Down{Ref: ref, PID: t.pid, Reason: ReasonNoConnection})
+			downs = append(downs, Down{Ref: ref, PID: t.pid, Name: t.name, Reason: ReasonNoConnection})
 		}
 	}
 	for ref := range p.watchers {

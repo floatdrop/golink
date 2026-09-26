@@ -53,8 +53,12 @@ func (r Ref) String() string { return "#" + r.Node + "." + strconv.FormatUint(r.
 // Down is delivered to a watcher when the process it monitors exits, or when
 // that process's node becomes unreachable.
 type Down struct {
-	Ref    Ref
+	Ref Ref
+	// PID is the process that exited. For a monitor placed by name on a
+	// node that became unreachable, which process held the name is not
+	// known: PID has only its Node, and Name says what was monitored.
 	PID    PID
+	Name   string // the registered name, when the monitor was placed by name
 	Reason string
 }
 

@@ -320,11 +320,22 @@ func TestMonitorReasons(t *testing.T) {
 			t.Fatal(err)
 		}
 		_ = w.Send(e, &testpb.Ping{N: 0})
-		if m := recv(t, ch); m.Down == nil || m.Down.Ref != ref || m.Down.PID != e.PID() {
+		if m := recv(t, ch); m.Down == nil || m.Down.Ref != ref || m.Down.PID != e.PID() || m.Down.Name != "named" {
 			t.Fatalf("got %+v", m.Down)
 		}
 	})
-	_ = a
+	t.Run("by name, node lost", func(t *testing.T) {
+		e, _ := golink.Spawn(b, echo, golink.WithName("lost"))
+		ref := w.Monitor(golink.Name{Node: "b", Name: "lost"})
+		if _, err := w.Call[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); err != nil {
+			t.Fatal(err)
+		}
+		a.Disconnect("b")
+		// Which process held the name is unknown here: only the name is.
+		if m := recv(t, ch); m.Down == nil || m.Down.Ref != ref || m.Down.Name != "lost" || m.Down.PID != (golink.PID{Node: "b"}) || m.Down.Reason != golink.ReasonNoConnection {
+			t.Fatalf("got %+v", m.Down)
+		}
+	})
 }
 
 func TestDemonitor(t *testing.T) {

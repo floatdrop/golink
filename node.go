@@ -715,8 +715,8 @@ func (n *Node) deliverDown(from, to PID, ref uint64, reason string) {
 		return
 	}
 	r := Ref{Node: n.id.Name, ID: ref}
-	if p.dropMonitor(r) {
-		p.push(item{from: from, down: &Down{Ref: r, PID: from, Reason: reason}, at: time.Now()})
+	if t, ok := p.dropMonitor(r); ok {
+		p.push(item{from: from, down: &Down{Ref: r, PID: from, Name: t.name, Reason: reason}, at: time.Now()})
 	}
 }
 
