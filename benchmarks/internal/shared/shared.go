@@ -5,6 +5,7 @@ package shared
 
 import (
 	"net"
+	"strconv"
 	"testing"
 
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -24,4 +25,15 @@ func FreeAddr(b *testing.B) string {
 	}
 	defer func() { _ = ln.Close() }()
 	return ln.Addr().String()
+}
+
+// FreePort is FreeAddr's port, for frameworks configured with host and port apart.
+func FreePort(b *testing.B) int {
+	b.Helper()
+	_, port, _ := net.SplitHostPort(FreeAddr(b))
+	n, err := strconv.Atoi(port)
+	if err != nil {
+		b.Fatal(err)
+	}
+	return n
 }

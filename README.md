@@ -235,18 +235,19 @@ from, and what is left: releases, a cluster-wide name registry.
 
 ## Performance
 
-Against [Hollywood](https://github.com/anthdm/hollywood) and
+Against [GoAkt](https://github.com/tochemey/goakt),
+[Hollywood](https://github.com/anthdm/hollywood) and
 [Proto.Actor](https://github.com/asynkron/protoactor-go) on the same machine
 (Apple M3 Max), remote over TCP on loopback for all; see
 [benchmarks](benchmarks/README.md) for the method and how to read it:
 
-| | golink | Hollywood | Proto.Actor |
-| --- | --- | --- | --- |
-| Local send | 96 ns | 60 ns | 134 ns |
-| Local request | 746 ns | 2282 ns | 2305 ns |
-| Remote send | 366 ns | 208 ns | 301 ns |
-| Remote request | 42.4 µs | 37.5 µs | 57.3 µs |
-| Remote request, 14 in parallel | 7.5 µs | 5.0 µs | 6.8 µs |
+| | golink | GoAkt | Hollywood | Proto.Actor |
+| --- | --- | --- | --- | --- |
+| Local send | 99 ns | 96 ns | 58 ns | 191 ns |
+| Local request | 738 ns | 565 ns | 2265 ns | 2354 ns |
+| Remote send | 368 ns | 514 ns | 205 ns | 315 ns |
+| Remote request | 44.4 µs | 34.5 µs | 36.4 µs | 58.6 µs |
+| Remote request, 14 in parallel | 7.5 µs | 10.2 µs | 4.9 µs | 7.1 µs |
 
 A mailbox that keeps up, and a local send, allocate nothing.
 
