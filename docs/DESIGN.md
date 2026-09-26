@@ -208,15 +208,27 @@ returned.
 
 ```go
 type Resolver interface { Resolve(ctx, node string) (addr string, err error) }
-type Registrar interface { Register(ctx, self NodeInfo) error }       // keeps alive until ctx is done
-type Membership interface { Watch(ctx) <-chan NodeEvent }             // authoritative up/down
+type Member struct { Name string; Incarnation uint64; Addr string }
+type Registrar interface {
+    Register(ctx, self Member) (withdraw func(context.Context) error, err error)
+}
+type Membership interface { Watch(ctx) (<-chan MemberEvent, error) } // {Member, Up}
 ```
 
-The core ships a static resolver (a map, or `name@host:port` names). The etcd
-module implements all three on leases. `Membership` is how "the lease expired"
-becomes a cluster-wide verdict that a node is dead, on top of the fast but
-local link-loss suspicion — the same split Erlang has between `net_kernel`
-tick and an external registry.
+The core ships a static resolver (a map). `golink/etcd` implements all three
+on leases. `Start` watches `Membership` and then registers; `Stop` withdraws
+last, after the node's processes have exited and their `Down{shutdown}`
+notices have been flushed to peers, so peers see "shutdown" and not
+"noconnection".
+
+`Membership` is how "the lease expired" becomes a cluster-wide verdict on
+top of the fast but local link-loss signal, the same split Erlang has
+between the `net_kernel` tick and an external registry. A `down` for the
+incarnation a node has links to, or an `up` for a newer incarnation, drops
+those links: monitors across them fire `Down{noconnection}` and pending calls
+fail with the cause ("left the cluster", "restarted as incarnation N"). It
+catches a crashed peer behind a half-open connection even when keepalive is
+not configured.
 
 ### golinktest
 

@@ -30,6 +30,13 @@ func WithHooks(h golink.Hooks) Option { return func(c *Cluster) { c.hooks = h } 
 // WithLogger sets the logger every node uses. Default: discards.
 func WithLogger(l *slog.Logger) Option { return func(c *Cluster) { c.logger = l } }
 
+// WithConfig adjusts each node's Config before the node is created, each
+// time it starts (including after Restart): a Registrar, a Membership, hooks
+// for one node only.
+func WithConfig(fn func(name string, cfg *golink.Config)) Option {
+	return func(c *Cluster) { c.configure = append(c.configure, fn) }
+}
+
 // WithServices registers extra gRPC services on every node's server, such as
 // an Inspector, each time the node starts (including after Restart).
 func WithServices(fn func(n *golink.Node, s *grpc.Server)) Option {
@@ -38,10 +45,11 @@ func WithServices(fn func(n *golink.Node, s *grpc.Server)) Option {
 
 // Cluster is a set of nodes and the (simulated) network between them.
 type Cluster struct {
-	t        testing.TB
-	hooks    golink.Hooks
-	logger   *slog.Logger
-	services []func(*golink.Node, *grpc.Server)
+	t         testing.TB
+	hooks     golink.Hooks
+	logger    *slog.Logger
+	services  []func(*golink.Node, *grpc.Server)
+	configure []func(string, *golink.Config)
 
 	mu    sync.Mutex
 	nodes map[string]*member
@@ -215,7 +223,7 @@ func (c *Cluster) start(name string) *golink.Node {
 	c.t.Helper()
 	ln := bufconn.Listen(1 << 20)
 	srv := grpc.NewServer()
-	node, err := golink.NewNode(golink.Config{
+	cfg := golink.Config{
 		Name:        name,
 		Advertise:   name,
 		Incarnation: c.incs.Add(1),
@@ -227,7 +235,11 @@ func (c *Cluster) start(name string) *golink.Node {
 		Logger:      c.logger,
 		Hooks:       c.hooks,
 		DialTimeout: 2 * time.Second,
-	})
+	}
+	for _, fn := range c.configure {
+		fn(name, &cfg)
+	}
+	node, err := golink.NewNode(cfg)
 	if err != nil {
 		c.t.Fatal(err)
 	}

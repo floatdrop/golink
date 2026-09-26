@@ -24,6 +24,39 @@ type Resolver interface {
 	Resolve(ctx context.Context, node string) (addr string, err error)
 }
 
+// Member is one incarnation of a node, as the cluster knows it.
+type Member struct {
+	Name        string
+	Incarnation uint64
+	Addr        string // where peers dial it: its Config.Advertise
+}
+
+// Registrar publishes a node to the cluster, so that peers resolve it and
+// Membership reports it.
+type Registrar interface {
+	// Register returns once self is published, and keeps it published
+	// until withdraw is called. Start calls Register; Stop calls withdraw
+	// last, after the node's processes have exited and their Down notices
+	// have reached its peers.
+	Register(ctx context.Context, self Member) (withdraw func(context.Context) error, err error)
+}
+
+// Membership is the cluster's authoritative view of which nodes are alive.
+// Links notice a dead peer by themselves, but only as fast as keepalive
+// allows and not at all behind a half-open connection; Membership (an etcd
+// lease expiring, say) settles it.
+type Membership interface {
+	// Watch reports members joining and leaving until ctx is done, then
+	// closes the channel.
+	Watch(ctx context.Context) (<-chan MemberEvent, error)
+}
+
+// MemberEvent is a member joining (Up) or leaving the cluster.
+type MemberEvent struct {
+	Member Member
+	Up     bool
+}
+
 // ResolverFunc adapts a function to Resolver.
 type ResolverFunc func(ctx context.Context, node string) (string, error)
 
@@ -52,6 +85,13 @@ type Config struct {
 	Incarnation uint64
 	// Resolver maps peer names to addresses.
 	Resolver Resolver
+	// Registrar, if set, publishes the node on Start and withdraws it on Stop.
+	Registrar Registrar
+	// Membership, if set, is watched from Start: a peer that leaves the
+	// cluster, or comes back as a new incarnation, has its links dropped,
+	// which fires Down{noconnection} for monitors across them and fails
+	// pending calls.
+	Membership Membership
 	// DialOptions are used for every outbound connection: credentials,
 	// keepalive, interceptors. Keepalive is what turns a silent partition
 	// into a link error; set it.
@@ -81,9 +121,10 @@ type Node struct {
 	ctx    context.Context // parent of every process; cancelled first by Stop
 	cancel context.CancelFunc
 
-	nextID  atomic.Uint64
-	nextRef atomic.Uint64
-	started atomic.Int64 // unix nanos, 0 before Start
+	nextID   atomic.Uint64
+	nextRef  atomic.Uint64
+	started  atomic.Int64                // unix nanos, 0 before Start
+	withdraw func(context.Context) error // from Registrar; guarded by mu
 
 	mu       sync.Mutex
 	procs    map[uint64]*proc
@@ -157,11 +198,60 @@ func (n *Node) ID() NodeID { return n.id }
 // from outside any process.
 func (n *Node) PID() PID { return PID{Node: n.id.Name, Incarnation: n.id.Incarnation} }
 
-// Start marks the node running. Processes may be spawned before Start; they
-// run immediately, so Start exists for lifecycle symmetry and for a Registrar.
-func (n *Node) Start(_ context.Context) error {
-	n.started.CompareAndSwap(0, time.Now().UnixNano())
+// Start watches Membership and publishes the node with its Registrar, when
+// configured. Processes may be spawned before Start and run immediately;
+// Start only makes the node known. A second call does nothing.
+func (n *Node) Start(ctx context.Context) error {
+	if !n.started.CompareAndSwap(0, time.Now().UnixNano()) {
+		return nil
+	}
+	if m := n.cfg.Membership; m != nil {
+		events, err := m.Watch(n.ctx)
+		if err != nil {
+			return fmt.Errorf("golink: membership: %w", err)
+		}
+		go n.watchMembers(events)
+	}
+	if r := n.cfg.Registrar; r != nil {
+		withdraw, err := r.Register(ctx, Member{Name: n.id.Name, Incarnation: n.id.Incarnation, Addr: n.cfg.Advertise})
+		if err != nil {
+			return fmt.Errorf("golink: register: %w", err)
+		}
+		n.mu.Lock()
+		n.withdraw = withdraw
+		n.mu.Unlock()
+	}
 	return nil
+}
+
+func (n *Node) watchMembers(events <-chan MemberEvent) {
+	for ev := range events {
+		if ev.Member.Name != n.id.Name {
+			n.memberEvent(ev)
+		}
+	}
+}
+
+// memberEvent drops the links to a peer that left, or that came back as
+// another incarnation: either way, whatever crossed those links is gone.
+func (n *Node) memberEvent(ev MemberEvent) {
+	name := ev.Member.Name
+	n.mu.Lock()
+	var linked uint64
+	if l := n.out[name]; l != nil {
+		linked = l.peer.Incarnation
+	} else if l := n.in[name]; l != nil {
+		linked = l.peer.Incarnation
+	}
+	n.mu.Unlock()
+	switch {
+	case linked == 0:
+		return // no link, nothing to settle
+	case !ev.Up && ev.Member.Incarnation == linked:
+		n.disconnect(name, errors.New("left the cluster"))
+	case ev.Up && ev.Member.Incarnation != linked:
+		n.disconnect(name, errors.New("restarted as incarnation "+itoa(ev.Member.Incarnation)))
+	}
 }
 
 // Stop asks every process to exit (Receive returns ReasonShutdown), waits for
@@ -197,6 +287,14 @@ func (n *Node) Stop(ctx context.Context) error {
 	}
 	for _, l := range ins {
 		l.close()
+	}
+	n.mu.Lock()
+	withdraw := n.withdraw
+	n.mu.Unlock()
+	if withdraw != nil {
+		if werr := withdraw(ctx); werr != nil {
+			err = errors.Join(err, fmt.Errorf("golink: withdraw: %w", werr))
+		}
 	}
 	return err
 }
@@ -298,13 +396,17 @@ func (n *Node) Info() NodeInfo {
 // across it fire Down{noconnection} and pending calls fail; the next send
 // dials again. It reports whether there was a link to drop.
 func (n *Node) Disconnect(peer string) bool {
+	return n.disconnect(peer, errors.New("disconnected"))
+}
+
+func (n *Node) disconnect(peer string, cause error) bool {
 	n.mu.Lock()
 	out, in := n.out[peer], n.in[peer]
 	n.mu.Unlock()
 	if out == nil && in == nil {
 		return false
 	}
-	n.connLost(peer, out, in, errors.New("disconnected"), true)
+	n.connLost(peer, out, in, cause, true)
 	return true
 }
 
@@ -691,8 +793,14 @@ func (n *Node) nodeDown(peer string, err error) {
 		}
 	}
 	n.mu.Unlock()
+	// The cause travels with the error (a transport error, "left the
+	// cluster"); LinkError matches ErrNoConnection either way.
+	cause := err
+	if cause == nil {
+		cause = ErrNoConnection
+	}
 	for _, pc := range failed {
-		pc.ch <- callResult{err: &LinkError{Peer: peer, Err: ErrNoConnection}}
+		pc.ch <- callResult{err: &LinkError{Peer: peer, Err: cause}}
 	}
 	for _, p := range procs {
 		for _, d := range p.peerDown(peer) {
