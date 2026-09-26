@@ -65,7 +65,7 @@ golink/inspect             golink.v1.Inspector gRPC service + Go client (optiona
 golink/actor               optional helpers: handler loop, supervisor, timers
 golink/etcd     (nested module)   Resolver + Registrar + Membership on etcd leases
 golink/otel     (nested module)   Hooks implementation: OTel metrics + trace propagation
-cmd/golinkctl   (later)    CLI over golink.v1.Inspector
+golink/tools    (nested module)   golinkctl: CLI, Graphviz and MCP server over the Inspector
 ```
 
 `golinktest` ships with the first release: the best argument for network
