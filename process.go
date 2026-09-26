@@ -25,7 +25,7 @@ type item struct {
 	down *Down
 	md   Metadata
 	ref  uint64 // call ref; 0 for a plain message
-	at   time.Time
+	at   int64  // unix nanos, when it was queued; only when hooks want the wait
 }
 
 type inspectReq struct {
@@ -56,10 +56,8 @@ type proc struct {
 	log      *slog.Logger
 
 	received, sent, wakeups atomic.Uint64
-	handlingSince           atomic.Int64 // unix nanos when the message being handled was taken
 	callsInFlight           atomic.Int32
 	state                   atomic.Uint32
-	peak                    atomic.Int64
 	lastMsg                 atomic.Pointer[string]
 	level                   atomic.Int64
 	levelSet                atomic.Bool
@@ -171,7 +169,7 @@ func spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts []SpawnOpt
 		label:   o.label,
 		typ:     typ,
 		parent:  o.parent,
-		mbox:    newQueue[item](),
+		mbox:    newQueue[item](true),
 		sys:     make(chan inspectReq),
 		inspect: o.inspect,
 		accept:  func(m proto.Message) bool { _, ok := m.(M); return ok },
@@ -299,18 +297,18 @@ func toMsg[M proto.Message](it item) Msg[M] {
 
 // Send delivers m to a typed address, local or remote. See Node.Send.
 func (p *Process[M]) Send[N proto.Message](to Addr[N], m N) error {
-	return p.n.send(p.pid, p.proc, to, m, p.outgoing(nil))
+	return p.n.send(p.pid, p.proc, to.dest(), m, p.outgoing(nil))
 }
 
 // SendContext is Send with the metadata carried by ctx.
 func (p *Process[M]) SendContext[N proto.Message](ctx context.Context, to Addr[N], m N) error {
-	return p.n.send(p.pid, p.proc, to, m, p.outgoing(MetadataFrom(ctx)))
+	return p.n.send(p.pid, p.proc, to.dest(), m, p.outgoing(MetadataFrom(ctx)))
 }
 
 // SendTo delivers msg to an untyped target such as a Msg's From. The
 // target's type is checked on delivery only.
 func (p *proc) SendTo(to Target, msg proto.Message) error {
-	return p.n.send(p.pid, p, to, msg, p.outgoing(nil))
+	return p.n.send(p.pid, p, destOf(to), msg, p.outgoing(nil))
 }
 
 // Call sends req and waits for the Reply, typed as R:
@@ -320,12 +318,12 @@ func (p *proc) SendTo(to Target, msg proto.Message) error {
 // Replies do not pass through the mailbox, so calling from inside a process
 // never reorders its messages. Errors are as for Node.Call.
 func (p *Process[M]) Call[R, N proto.Message](ctx context.Context, to Addr[N], req N) (R, error) {
-	return typed[R](p.n.doCall(ctx, p.pid, p.proc, to, req, p.outgoing(MetadataFrom(ctx))))
+	return typed[R](p.n.doCall(ctx, p.pid, p.proc, to.dest(), req, p.outgoing(MetadataFrom(ctx))))
 }
 
 // CallTo is Call to an untyped target, such as a Msg's From.
 func (p *Process[M]) CallTo[R proto.Message](ctx context.Context, to Target, req proto.Message) (R, error) {
-	return typed[R](p.n.doCall(ctx, p.pid, p.proc, to, req, p.outgoing(MetadataFrom(ctx))))
+	return typed[R](p.n.doCall(ctx, p.pid, p.proc, destOf(to), req, p.outgoing(MetadataFrom(ctx))))
 }
 
 // SendAfter sends m to a typed address after d, as this process. The timer
@@ -333,7 +331,7 @@ func (p *Process[M]) CallTo[R proto.Message](ctx context.Context, to Target, req
 // message carries the metadata the process holds now, when it is scheduled,
 // not whatever it is handling when the timer fires.
 func (p *Process[M]) SendAfter[N proto.Message](d time.Duration, to Addr[N], m N) *Timer {
-	return p.sendAfter(d, to, m)
+	return p.sendAfter(d, to.dest(), m)
 }
 
 // Timer is a message scheduled with SendAfter.
@@ -356,7 +354,7 @@ func (t *Timer) Stop() bool {
 	return pending
 }
 
-func (p *proc) sendAfter(d time.Duration, to Target, m proto.Message) *Timer {
+func (p *proc) sendAfter(d time.Duration, to dest, m proto.Message) *Timer {
 	md := p.outgoing(nil)
 	tm := &Timer{p: p}
 	p.mu.Lock()
@@ -437,13 +435,7 @@ func (p *proc) Demonitor(ref Ref) {
 // ---------- internals ----------
 
 func (p *proc) push(it item) bool {
-	if !p.mbox.push(it) {
-		return false
-	}
-	if d := int64(p.mbox.len()); d > p.peak.Load() {
-		p.peak.Store(d)
-	}
-	return true
+	return p.mbox.push(it)
 }
 
 // outgoing is the metadata a send from this process carries: md over what
@@ -499,7 +491,6 @@ func (p *proc) receive(ctx context.Context) (item, error) {
 
 func (p *proc) took(it item) item {
 	p.wakeups.Add(1)
-	p.handlingSince.Store(time.Now().UnixNano())
 	p.received.Add(1)
 	if it.ref != 0 {
 		p.mu.Lock()
@@ -510,10 +501,16 @@ func (p *proc) took(it item) item {
 		p.mu.Unlock()
 	}
 	if it.body != nil {
-		p.lastMsg.Store(new(typeName(it.body)))
+		// Only a change of type allocates; a stream of one type does not.
+		if name := typeName(it.body); p.lastMsg.Load() == nil || *p.lastMsg.Load() != name {
+			p.lastMsg.Store(new(name))
+		}
 	}
 	if p.n.hooks != nil {
-		r := ReceiveInfo{PID: p.pid, Label: p.label, From: it.from, Body: it.body, Down: it.down, Call: it.ref != 0, Waited: time.Since(it.at)}
+		r := ReceiveInfo{PID: p.pid, Label: p.label, From: it.from, Body: it.body, Down: it.down, Call: it.ref != 0}
+		if it.at != 0 {
+			r.Waited = time.Since(time.Unix(0, it.at))
+		}
 		it.md, p.handling = p.n.hooks.OnReceive(r, it.md)
 	}
 	if len(it.md) > 0 {
@@ -549,10 +546,11 @@ func (p *proc) inspectNow(ctx context.Context) (map[string]string, error) {
 
 func (p *proc) setState(s ProcessState) { p.state.Store(uint32(s)) }
 
-// busyFor is how long the process has been on the message it took last,
-// or since it started if it has taken none.
+// busyFor is how long ago the process took the batch its current message
+// came in (so at least as long as it has been on that message), or since it
+// started if it has taken none.
 func (p *proc) busyFor() time.Duration {
-	if since := p.handlingSince.Load(); since != 0 {
+	if since := p.mbox.takenAt.Load(); since != 0 {
 		return time.Since(time.Unix(0, since))
 	}
 	return time.Since(p.started)
@@ -593,13 +591,13 @@ func (p *proc) info() ProcessInfo {
 	if t := p.lastMsg.Load(); t != nil {
 		info.LastMessage = *t
 	}
-	p.mbox.mu.Lock()
-	info.Mailbox.Depth = len(p.mbox.items) - p.mbox.head
-	if info.Mailbox.Depth > 0 {
-		info.Mailbox.OldestAge = time.Since(p.mbox.items[p.mbox.head].at)
+	info.Mailbox.Depth = p.mbox.len()
+	if at := p.mbox.oldestStamp(); at != 0 {
+		info.Mailbox.OldestAge = time.Since(time.Unix(0, at))
 	}
-	p.mbox.mu.Unlock()
-	info.Mailbox.Peak = int(p.peak.Load())
+	// Peak is measured at batch swaps; a mailbox nobody is taking from has
+	// its peak right now.
+	info.Mailbox.Peak = max(int(p.mbox.peak.Load()), info.Mailbox.Depth)
 	return info
 }
 
@@ -729,7 +727,9 @@ func (p *proc) terminate(reason string) {
 	for c := range open {
 		_ = n.reply(p.pid, c.from, c.ref, nil, golinkv1.Status_STATUS_NOPROC, "")
 	}
-	for _, it := range p.mbox.close() {
+	// terminate runs on the process's goroutine, the mailbox's consumer, so
+	// it may collect what Receive had swapped in but not yet taken.
+	for _, it := range append(p.mbox.taken(), p.mbox.close()...) {
 		if it.ref != 0 {
 			_ = n.reply(p.pid, it.from, it.ref, nil, golinkv1.Status_STATUS_NOPROC, "")
 		}

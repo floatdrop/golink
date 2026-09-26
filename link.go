@@ -242,7 +242,7 @@ func (n *Node) dial(peer string) (*outLink, error) {
 		cc:          cc,
 		stream:      stream,
 		cancel:      scancel,
-		q:           newQueue[*golinkv1.Envelope](),
+		q:           newQueue[*golinkv1.Envelope](false),
 		done:        make(chan struct{}),
 		drained:     make(chan struct{}),
 		recvDone:    make(chan struct{}),

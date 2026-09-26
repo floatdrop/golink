@@ -455,18 +455,18 @@ func (n *Node) lookup(pid PID, name string) *proc {
 // dead letter); an error means m could not be encoded or the node could not
 // be reached.
 func (n *Node) Send[N proto.Message](to Addr[N], m N) error {
-	return n.send(n.PID(), nil, to, m, nil)
+	return n.send(n.PID(), nil, to.dest(), m, nil)
 }
 
 // SendContext is Send with the metadata carried by ctx.
 func (n *Node) SendContext[N proto.Message](ctx context.Context, to Addr[N], m N) error {
-	return n.send(n.PID(), nil, to, m, MetadataFrom(ctx))
+	return n.send(n.PID(), nil, to.dest(), m, MetadataFrom(ctx))
 }
 
 // SendTo delivers m to an untyped target: a PID, a Name, or an Addr of
 // another type. The target's type is checked on delivery only.
 func (n *Node) SendTo(to Target, m proto.Message) error {
-	return n.send(n.PID(), nil, to, m, nil)
+	return n.send(n.PID(), nil, destOf(to), m, nil)
 }
 
 // Call sends req to a typed address and waits for the reply, typed as R:
@@ -476,12 +476,12 @@ func (n *Node) SendTo(to Target, m proto.Message) error {
 // A reply of another type is ErrType; a handler error is a *RemoteError; a
 // callee that is gone, or exits before answering, is ErrNoProc.
 func (n *Node) Call[R, N proto.Message](ctx context.Context, to Addr[N], req N) (R, error) {
-	return typed[R](n.doCall(ctx, n.PID(), nil, to, req, MetadataFrom(ctx)))
+	return typed[R](n.doCall(ctx, n.PID(), nil, to.dest(), req, MetadataFrom(ctx)))
 }
 
 // CallTo is Call to an untyped target.
 func (n *Node) CallTo[R proto.Message](ctx context.Context, to Target, req proto.Message) (R, error) {
-	return typed[R](n.doCall(ctx, n.PID(), nil, to, req, MetadataFrom(ctx)))
+	return typed[R](n.doCall(ctx, n.PID(), nil, destOf(to), req, MetadataFrom(ctx)))
 }
 
 // Exit asks a process anywhere to terminate with reason.
@@ -502,8 +502,8 @@ func (n *Node) hookSend(from PID, sender *proc, pid PID, name string, body proto
 	return n.hooks.OnSend(s, md)
 }
 
-func (n *Node) send(from PID, sender *proc, to Target, body proto.Message, md Metadata) (err error) {
-	pid, name := to.target()
+func (n *Node) send(from PID, sender *proc, to dest, body proto.Message, md Metadata) (err error) {
+	pid, name := to.pid, to.name
 	md, done := n.hookSend(from, sender, pid, name, body, md, false)
 	if done != nil {
 		defer func() { done(err) }()
@@ -528,8 +528,8 @@ func (n *Node) send(from PID, sender *proc, to Target, body proto.Message, md Me
 	})
 }
 
-func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to Target, req proto.Message, md Metadata) (_ proto.Message, err error) {
-	pid, name := to.target()
+func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to dest, req proto.Message, md Metadata) (_ proto.Message, err error) {
+	pid, name := to.pid, to.name
 	md, done := n.hookSend(from, caller, pid, name, req, md, true)
 	if done != nil {
 		defer func() { done(err) }()
@@ -667,7 +667,11 @@ func (n *Node) deliver(from, to PID, name string, body proto.Message, md Metadat
 		}
 		return
 	}
-	if !p.push(item{from: from, body: body, md: md, ref: ref, at: time.Now()}) {
+	it := item{from: from, body: body, md: md, ref: ref}
+	if n.hooks != nil {
+		it.at = time.Now().UnixNano() // for OnReceive's exact wait
+	}
+	if !p.push(it) {
 		n.deadLetter(from, p.pid, body, ReasonNoProc)
 		if ref != 0 {
 			_ = n.reply(p.pid, from, ref, nil, golinkv1.Status_STATUS_NOPROC, "")
@@ -716,7 +720,7 @@ func (n *Node) deliverDown(from, to PID, ref uint64, reason string) {
 	}
 	r := Ref{Node: n.id.Name, ID: ref}
 	if t, ok := p.dropMonitor(r); ok {
-		p.push(item{from: from, down: &Down{Ref: r, PID: from, Name: t.name, Reason: reason}, at: time.Now()})
+		p.push(item{from: from, down: &Down{Ref: r, PID: from, Name: t.name, Reason: reason}})
 	}
 }
 
@@ -805,7 +809,7 @@ func (n *Node) nodeDown(peer string, err error) {
 	}
 	for _, p := range procs {
 		for _, d := range p.peerDown(peer) {
-			p.push(item{from: d.PID, down: &d, at: time.Now()})
+			p.push(item{from: d.PID, down: &d})
 		}
 	}
 	n.log.Debug("node down", "peer", peer, "err", err)

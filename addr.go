@@ -46,6 +46,20 @@ func (a Addr[M]) String() string {
 
 func (a Addr[M]) target() (PID, string) { return a.pid, a.name }
 
+// dest is a target as the send path carries it: a plain value, where a
+// Target would be boxed on the heap for every message.
+type dest struct {
+	pid  PID
+	name string
+}
+
+func (a Addr[M]) dest() dest { return dest(a) }
+
+func destOf(t Target) dest {
+	pid, name := t.target()
+	return dest{pid, name}
+}
+
 // typed asserts a reply to the type the caller asked for. A reply of another
 // type is ErrType, the same error a caller gets when the callee rejects the
 // request's type.

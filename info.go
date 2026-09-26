@@ -24,9 +24,12 @@ func (s ProcessState) String() string {
 
 // MailboxInfo is a snapshot of a mailbox.
 type MailboxInfo struct {
-	Depth     int
-	Peak      int
-	OldestAge time.Duration // how long the oldest queued message has waited; 0 when empty
+	Depth int
+	Peak  int
+	// OldestAge is how long the oldest queued message has waited, 0 when
+	// empty. It is read from when its batch started queueing: exact for the
+	// first message of a burst, an upper bound for later ones.
+	OldestAge time.Duration
 }
 
 // ProcessInfo is a snapshot of one process, the same for local inspection,

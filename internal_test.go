@@ -20,32 +20,58 @@ import (
 )
 
 func TestQueue(t *testing.T) {
-	q := newQueue[int]()
-	if _, ok := q.tryPop(); ok {
+	q := newQueue[int](true)
+	if _, ok := q.tryPop(); ok || q.oldestStamp() != 0 || q.takenAt.Load() != 0 {
 		t.Fatal("empty")
 	}
-	// Enough churn to hit the compaction branch (head > 1024 and past half).
-	for i := range 3000 {
+	before := time.Now().UnixNano()
+	for i := 1; i <= 3; i++ {
 		q.push(i)
 	}
-	for i := range 2000 {
-		if v, ok := q.tryPop(); !ok || v != i {
-			t.Fatalf("pop %d: %v %v", i, v, ok)
+	// Before the consumer takes a batch, the oldest is when the first came.
+	first := q.oldestStamp()
+	if q.len() != 3 || first < before || first > time.Now().UnixNano() {
+		t.Fatalf("len %d oldest %d", q.len(), first)
+	}
+	if v, _ := q.tryPop(); v != 1 || q.oldestStamp() != first || q.takenAt.Load() < first {
+		t.Fatalf("pop %d oldest %d", v, q.oldestStamp())
+	}
+	q.push(4) // lands in the producers' buffer while the consumer holds 2, 3
+	for want := 2; want <= 4; want++ {
+		if v, ok := q.tryPop(); !ok || v != want {
+			t.Fatalf("pop %d: %d %v", want, v, ok)
 		}
 	}
-	if q.len() != 1000 {
-		t.Fatalf("len %d", q.len())
+	if q.len() != 0 || q.oldestStamp() != 0 {
+		t.Fatal("drained queue reports items")
 	}
-	q.push(3000)
-	rest := q.close()
-	if len(rest) != 1001 || rest[0] != 2000 || rest[1000] != 3000 {
-		t.Fatalf("close: %d %v", len(rest), rest[:2])
+	// Buffers are reused: a queue that is kept up with stops allocating.
+	if n := testing.AllocsPerRun(100, func() { q.push(1); q.tryPop() }); n != 0 {
+		t.Fatalf("%v allocs per push and pop", n)
 	}
-	if q.push(1) {
+	// What the consumer swapped in but did not pop, and what producers
+	// queued since, are both returned once the queue closes.
+	q.push(5)
+	q.push(6)
+	q.tryPop()
+	q.push(7)
+	rest := append(q.taken(), q.close()...)
+	if len(rest) != 2 || rest[0] != 6 || rest[1] != 7 || q.len() != 0 {
+		t.Fatalf("rest %v, len %d", rest, q.len())
+	}
+	if q.push(8) {
 		t.Fatal("push after close")
 	}
-	if got := q.drain(); len(got) != 0 {
-		t.Fatal("drain after close")
+	// drain hands over batches.
+	d := newQueue[int](false)
+	d.push(1)
+	d.push(2)
+	if b := d.drain(); len(b) != 2 || d.len() != 0 {
+		t.Fatalf("batch %v", b)
+	}
+	d.push(3)
+	if b := d.drain(); len(b) != 1 || b[0] != 3 {
+		t.Fatalf("batch %v", b)
 	}
 }
 
@@ -100,7 +126,7 @@ func TestDispatchMalformed(t *testing.T) {
 	n.dispatch(&golinkv1.Envelope{Kind: &golinkv1.Envelope_Reply{Reply: &golinkv1.Reply{To: pidTo(me), Ref: 8, Status: golinkv1.Status_STATUS_OK}}})
 	// Down for a process that does not exist, and for a ref it never held.
 	n.dispatch(&golinkv1.Envelope{Kind: &golinkv1.Envelope_Down{Down: &golinkv1.Down{From: from, To: to, Ref: 1}}})
-	p := &proc{n: n, pid: PID{Node: "a", Incarnation: 1, ID: 5}, mbox: newQueue[item]()}
+	p := &proc{n: n, pid: PID{Node: "a", Incarnation: 1, ID: 5}, mbox: newQueue[item](true)}
 	n.procs[5] = p
 	n.dispatch(&golinkv1.Envelope{Kind: &golinkv1.Envelope_Down{Down: &golinkv1.Down{From: from, To: pidTo(p.pid), Ref: 1}}})
 	if p.mbox.len() != 0 {
@@ -127,7 +153,7 @@ func TestDispatchMalformed(t *testing.T) {
 func TestConnLostStaleAndSendClosed(t *testing.T) {
 	n := newTestNode(t, "a")
 	// Stale links are just closed.
-	out := &outLink{peer: NodeID{Name: "b"}, q: newQueue[*golinkv1.Envelope](), done: make(chan struct{}), drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
+	out := &outLink{peer: NodeID{Name: "b"}, q: newQueue[*golinkv1.Envelope](false), done: make(chan struct{}), drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
 	out.cc = nil
 	in := &inLink{peer: NodeID{Name: "b"}, closed: make(chan struct{})}
 	n.connLost("b", nil, in, nil, false)
@@ -216,7 +242,7 @@ func TestOutboundWriteFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := &outLink{
-		peer: NodeID{Name: "b"}, cc: cc, q: newQueue[*golinkv1.Envelope](), done: make(chan struct{}),
+		peer: NodeID{Name: "b"}, cc: cc, q: newQueue[*golinkv1.Envelope](false), done: make(chan struct{}),
 		drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {},
 		stream: &fakeClientStream{sendErr: io.ErrClosedPipe},
 	}
@@ -246,7 +272,7 @@ func (f *fakeClientStream) CloseSend() error                  { return nil }
 
 func TestShutdownArms(t *testing.T) {
 	mk := func() *outLink {
-		return &outLink{peer: NodeID{Name: "b"}, q: newQueue[*golinkv1.Envelope](), done: make(chan struct{}),
+		return &outLink{peer: NodeID{Name: "b"}, q: newQueue[*golinkv1.Envelope](false), done: make(chan struct{}),
 			drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
 	}
 	// Caller's ctx expires before anything drains.
@@ -280,7 +306,7 @@ func TestInspectNowOnExited(t *testing.T) {
 
 func TestOutboundLostWhileInboundAlive(t *testing.T) {
 	n := newTestNode(t, "a")
-	out := &outLink{peer: NodeID{Name: "b"}, q: newQueue[*golinkv1.Envelope](), done: make(chan struct{}),
+	out := &outLink{peer: NodeID{Name: "b"}, q: newQueue[*golinkv1.Envelope](false), done: make(chan struct{}),
 		drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
 	out.once.Do(func() {})
 	in := &inLink{peer: NodeID{Name: "b"}, closed: make(chan struct{})}
