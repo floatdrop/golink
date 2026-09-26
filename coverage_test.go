@@ -72,8 +72,12 @@ func TestNopHooks(t *testing.T) {
 	var h golink.Hooks = golink.NopHooks{}
 	h.OnSpawn(golink.ProcessInfo{})
 	h.OnExit(golink.ProcessInfo{}, "")
-	h.OnSend(golink.PID{}, golink.PID{}, nil, nil)
-	h.OnReceive(golink.PID{}, nil, 0)
+	if md, d := h.OnSend(golink.SendInfo{}, golink.Metadata{"k": "v"}); md["k"] != "v" || d != nil {
+		t.Fatal("OnSend must pass metadata through")
+	}
+	if md, d := h.OnReceive(golink.ReceiveInfo{}, golink.Metadata{"k": "v"}); md["k"] != "v" || d != nil {
+		t.Fatal("OnReceive must pass metadata through")
+	}
 	h.OnDeadLetter(golink.PID{}, golink.PID{}, nil, "")
 	h.OnLinkUp(golink.NodeID{})
 	h.OnLinkDown(golink.NodeID{}, nil)

@@ -107,10 +107,16 @@ type countingHooks struct {
 	lastDead                                                        atomic.Pointer[string]
 }
 
-func (h *countingHooks) OnSpawn(golink.ProcessInfo)                                 { h.spawns.Add(1) }
-func (h *countingHooks) OnExit(golink.ProcessInfo, string)                          { h.exits.Add(1) }
-func (h *countingHooks) OnSend(_, _ golink.PID, _ proto.Message, _ golink.Metadata) { h.sends.Add(1) }
-func (h *countingHooks) OnReceive(golink.PID, proto.Message, time.Duration)         { h.receives.Add(1) }
+func (h *countingHooks) OnSpawn(golink.ProcessInfo)        { h.spawns.Add(1) }
+func (h *countingHooks) OnExit(golink.ProcessInfo, string) { h.exits.Add(1) }
+func (h *countingHooks) OnSend(_ golink.SendInfo, md golink.Metadata) (golink.Metadata, golink.Done) {
+	h.sends.Add(1)
+	return md, nil
+}
+func (h *countingHooks) OnReceive(_ golink.ReceiveInfo, md golink.Metadata) (golink.Metadata, golink.Done) {
+	h.receives.Add(1)
+	return md, nil
+}
 func (h *countingHooks) OnDeadLetter(_, _ golink.PID, _ proto.Message, reason string) {
 	h.deadLetters.Add(1)
 	h.lastDead.Store(&reason)

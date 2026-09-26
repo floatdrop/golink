@@ -386,10 +386,28 @@ func (n *Node) Exit(to Target, reason string) error { return n.exit(n.PID(), to,
 
 // ---------- the operations; each has a local and a remote path ----------
 
-func (n *Node) send(from PID, sender *proc, to Target, body proto.Message, md Metadata) error {
+// hookSend runs OnSend. The metadata a send carries is what the caller gave
+// (a ctx), over what the sending process inherited from the message it is
+// handling.
+func (n *Node) hookSend(from PID, sender *proc, pid PID, name string, body proto.Message, md Metadata, call bool) (Metadata, Done) {
+	if sender != nil {
+		md = sender.outgoing(md)
+	}
+	if n.hooks == nil {
+		return md, nil
+	}
+	s := SendInfo{From: from, To: pid, ToName: name, Body: body, Call: call, Remote: pid.Node != n.id.Name}
+	if sender != nil {
+		s.FromLabel = sender.label
+	}
+	return n.hooks.OnSend(s, md)
+}
+
+func (n *Node) send(from PID, sender *proc, to Target, body proto.Message, md Metadata) (err error) {
 	pid, name := to.target()
-	if n.hooks != nil {
-		n.hooks.OnSend(from, pid, body, md)
+	md, done := n.hookSend(from, sender, pid, name, body, md, false)
+	if done != nil {
+		defer func() { done(err) }()
 	}
 	if sender != nil {
 		sender.sent.Add(1)
@@ -411,11 +429,11 @@ func (n *Node) send(from PID, sender *proc, to Target, body proto.Message, md Me
 	})
 }
 
-func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to Target, req proto.Message) (proto.Message, error) {
+func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to Target, req proto.Message) (_ proto.Message, err error) {
 	pid, name := to.target()
-	md := MetadataFrom(ctx)
-	if n.hooks != nil {
-		n.hooks.OnSend(from, pid, req, md)
+	md, done := n.hookSend(from, caller, pid, name, req, MetadataFrom(ctx), true)
+	if done != nil {
+		defer func() { done(err) }()
 	}
 	ref := n.nextRef.Add(1)
 	pc := &pendingCall{node: pid.Node, ch: make(chan callResult, 1)}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"reflect"
 	"runtime/debug"
 	"slices"
@@ -42,10 +43,17 @@ type proc struct {
 	sys     chan inspectReq
 	inspect func() map[string]string
 	accept  func(proto.Message) bool
-	ctx     context.Context
-	cancel  context.CancelCauseFunc
-	started time.Time
-	log     *slog.Logger
+
+	// current is the metadata of the message being handled, after
+	// OnReceive: what the process's own sends inherit. handling ends what
+	// OnReceive started. Both are touched only by the process's goroutine,
+	// but current is read by sends that user code may make from others.
+	current  atomic.Pointer[Metadata]
+	handling Done
+	ctx      context.Context
+	cancel   context.CancelCauseFunc
+	started  time.Time
+	log      *slog.Logger
 
 	received, sent, wakeups atomic.Uint64
 	callsInFlight           atomic.Int32
@@ -348,9 +356,36 @@ func (p *proc) push(it item) bool {
 	return true
 }
 
+// outgoing is the metadata a send from this process carries: md over what
+// the process inherited from the message it is handling.
+func (p *proc) outgoing(md Metadata) Metadata {
+	cur := p.current.Load()
+	switch {
+	case cur == nil:
+		return md
+	case len(md) == 0:
+		return *cur
+	}
+	merged := maps.Clone(*cur)
+	maps.Copy(merged, md)
+	return merged
+}
+
+// endHandling closes what OnReceive started for the previous message and
+// drops what sends inherited from it.
+func (p *proc) endHandling(err error) {
+	p.current.Store(nil)
+	if p.handling != nil {
+		d := p.handling
+		p.handling = nil
+		d(err)
+	}
+}
+
 // receive serves inspect requests between messages, then blocks for the
 // next item.
 func (p *proc) receive(ctx context.Context) (item, error) {
+	p.endHandling(nil)
 	p.setState(StateIdle)
 	defer p.setState(StateRunning)
 	select {
@@ -387,7 +422,11 @@ func (p *proc) took(it item) item {
 		p.lastMsg.Store(new(typeName(it.body)))
 	}
 	if p.n.hooks != nil {
-		p.n.hooks.OnReceive(p.pid, it.body, time.Since(it.at))
+		r := ReceiveInfo{PID: p.pid, Label: p.label, From: it.from, Body: it.body, Down: it.down, Call: it.ref != 0, Waited: time.Since(it.at)}
+		it.md, p.handling = p.n.hooks.OnReceive(r, it.md)
+	}
+	if len(it.md) > 0 {
+		p.current.Store(new(it.md)) // not &it.md: that would move every item to the heap
 	}
 	return it
 }
@@ -549,6 +588,11 @@ func (p *proc) exitReason(err error) string {
 }
 
 func (p *proc) terminate(reason string) {
+	var err error
+	if reason != ReasonNormal {
+		err = errors.New(reason)
+	}
+	p.endHandling(err)
 	p.setState(StateExiting)
 	p.mu.Lock()
 	p.exited = true
