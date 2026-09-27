@@ -124,6 +124,8 @@ func TestListProcessesFilters(t *testing.T) {
 	_, _ = n.Spawn(fn2, grpcproc.WithName("orders-idle"), grpcproc.WithLabel("order"), insp2)
 	fn3, insp3 := worker(release)
 	_, _ = n.Spawn(fn3, grpcproc.WithName("billing"), grpcproc.WithLabel("bill"), insp3)
+	fn4, _ := worker(release)
+	_, _ = n.Spawn(fn4, grpcproc.WithLabel("misc")) // no name: matches only an empty name filter
 	_ = n.Send(t.Context(), busy, &testpb.Ping{N: 7})
 	_ = n.Send(t.Context(), busy, &testpb.Ping{N: 1})
 	_ = n.Send(t.Context(), busy, &testpb.Ping{N: 1})
@@ -143,7 +145,7 @@ func TestListProcessesFilters(t *testing.T) {
 		req  *inspectv1.ListProcessesRequest
 		want int
 	}{
-		{"all", &inspectv1.ListProcessesRequest{}, 3},
+		{"all", &inspectv1.ListProcessesRequest{}, 4},
 		{"label", &inspectv1.ListProcessesRequest{Label: "order"}, 2},
 		{"name substring", &inspectv1.ListProcessesRequest{Name: "orders"}, 2},
 		{"no name match", &inspectv1.ListProcessesRequest{Name: "zzz"}, 0},
@@ -158,7 +160,7 @@ func TestListProcessesFilters(t *testing.T) {
 	}
 	resp, _ := a.ListProcesses(t.Context(), &inspectv1.ListProcessesRequest{MinMailbox: 2})
 	p := inspect.ProcessInfo(resp.GetProcesses()[0])
-	if p.PID != busy.PID() || p.Mailbox.Depth != 2 || p.Mailbox.OldestAge <= 0 || p.State != grpcproc.StateRunning || p.Label != "order" || p.Names[0] != "orders-busy" {
+	if p.PID != busy.PID() || p.Mailbox.Depth != 2 || p.Mailbox.OldestAge <= 0 || p.State != grpcproc.StateRunning || p.Label != "order" || p.Name != "orders-busy" {
 		t.Fatalf("%+v", p)
 	}
 }

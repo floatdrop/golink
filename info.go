@@ -36,7 +36,7 @@ type MailboxInfo struct {
 // the Inspector service and any tool built on either.
 type ProcessInfo struct {
 	PID           PID
-	Names         []string
+	Name          string // WithName; "" for an unnamed process
 	Label         string // WithLabel; the low-cardinality key for metrics
 	Type          string // the Go type of M, for display
 	Parent        PID    // the spawning process, for Process.Spawn and SpawnMonitor; zero for Node.Spawn

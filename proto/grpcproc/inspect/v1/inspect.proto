@@ -82,7 +82,8 @@ message Mailbox {
 
 message ProcessInfo {
   grpcproc.v1.PID pid = 1;
-  repeated string names = 2;
+  // Registered with WithName; empty for an unnamed process.
+  string name = 2;
   string label = 3;
   string type = 4;
   grpcproc.v1.PID parent = 5;
@@ -119,7 +120,8 @@ message GetNodeResponse {
 // ListProcessesRequest filters are ANDed; empty fields match everything.
 message ListProcessesRequest {
   string node = 1;
-  // Substring of any registered name.
+  // Substring of the process's name; a process with none matches only an
+  // empty filter.
   string name = 2;
   // Exact label.
   string label = 3;

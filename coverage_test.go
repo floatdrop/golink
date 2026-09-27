@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -150,7 +149,7 @@ func TestProcessAccessorsAndNames(t *testing.T) {
 		t.Fatal("whereis")
 	}
 	info, _ := a.Process(addr.PID())
-	if !info.Parent.IsZero() || !slices.Equal(info.Names, []string{"one"}) || info.LogLevel != slog.LevelInfo {
+	if !info.Parent.IsZero() || info.Name != "one" || info.LogLevel != slog.LevelInfo {
 		t.Fatalf("%+v", info)
 	}
 	// Per-process log level: the node's handler is at Info, so debug is dropped

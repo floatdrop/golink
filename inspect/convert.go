@@ -77,7 +77,7 @@ func nodeInfoTo(n grpcproc.NodeInfo) *inspectv1.NodeInfo {
 func processInfoTo(p grpcproc.ProcessInfo) *inspectv1.ProcessInfo {
 	return &inspectv1.ProcessInfo{
 		Pid:       pidTo(p.PID),
-		Names:     p.Names,
+		Name:      p.Name,
 		Label:     p.Label,
 		Type:      p.Type,
 		Parent:    pidTo(p.Parent),
@@ -153,7 +153,7 @@ func NodeInfo(n *inspectv1.NodeInfo) grpcproc.NodeInfo {
 func ProcessInfo(p *inspectv1.ProcessInfo) grpcproc.ProcessInfo {
 	out := grpcproc.ProcessInfo{
 		PID:   pidFrom(p.GetPid()),
-		Names: p.GetNames(),
+		Name:  p.GetName(),
 		Label: p.GetLabel(),
 		Type:  p.GetType(),
 		State: grpcproc.ProcessState(p.GetState() - 1),

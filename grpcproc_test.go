@@ -523,7 +523,7 @@ func TestInspectAndInfo(t *testing.T) {
 		t.Fatalf("inspect: %v %v", got, err)
 	}
 	info, _ := a.Process(e.PID())
-	if info.Label != "order" || info.Names[0] != "insp" || info.Received != 3 || info.State != grpcproc.StateIdle ||
+	if info.Label != "order" || info.Name != "insp" || info.Received != 3 || info.State != grpcproc.StateIdle ||
 		info.LastMessage != "grpcproc.test.v1.Ping" || info.Type != "*testpb.Ping" {
 		t.Fatalf("info %+v", info)
 	}

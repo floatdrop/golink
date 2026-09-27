@@ -380,7 +380,6 @@ import (
 	"fmt"
 	"log"
 	"maps"
-	"slices"
 	"sync"
 	"time"
 
@@ -489,7 +488,7 @@ func main() {
 		log.Fatal(err)
 	}
 	for e := range events {
-		if !slices.Contains(e.Process.Names, "inventory") {
+		if e.Process.Name != "inventory" {
 			continue
 		}
 		if e.Kind == grpcproc.EventExit {

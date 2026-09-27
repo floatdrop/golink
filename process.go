@@ -573,13 +573,9 @@ func (p *proc) info() ProcessInfo {
 	p.mu.Lock()
 	monitors, watchers := len(p.monitors), len(p.watchers)
 	p.mu.Unlock()
-	var names []string
-	if p.name != "" {
-		names = []string{p.name}
-	}
 	info := ProcessInfo{
 		PID:           p.pid,
-		Names:         names,
+		Name:          p.name,
 		Label:         p.label,
 		Type:          p.typ,
 		Parent:        p.parent,

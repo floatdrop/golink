@@ -176,12 +176,7 @@ func matches(p grpcproc.ProcessInfo, req *inspectv1.ListProcessesRequest) bool {
 		return false
 	case p.Mailbox.Depth < int(req.GetMinMailbox()):
 		return false
-	case req.GetName() != "":
-		for _, n := range p.Names {
-			if strings.Contains(n, req.GetName()) {
-				return true
-			}
-		}
+	case req.GetName() != "" && !strings.Contains(p.Name, req.GetName()):
 		return false
 	}
 	return true

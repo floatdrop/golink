@@ -450,9 +450,10 @@ func (x *Mailbox) GetOldestAge() *durationpb.Duration {
 }
 
 type ProcessInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Pid           *v1.PID                `protobuf:"bytes,1,opt,name=pid,proto3" json:"pid,omitempty"`
-	Names         []string               `protobuf:"bytes,2,rep,name=names,proto3" json:"names,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Pid   *v1.PID                `protobuf:"bytes,1,opt,name=pid,proto3" json:"pid,omitempty"`
+	// Registered with WithName; empty for an unnamed process.
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Label         string                 `protobuf:"bytes,3,opt,name=label,proto3" json:"label,omitempty"`
 	Type          string                 `protobuf:"bytes,4,opt,name=type,proto3" json:"type,omitempty"`
 	Parent        *v1.PID                `protobuf:"bytes,5,opt,name=parent,proto3" json:"parent,omitempty"`
@@ -509,11 +510,11 @@ func (x *ProcessInfo) GetPid() *v1.PID {
 	return nil
 }
 
-func (x *ProcessInfo) GetNames() []string {
+func (x *ProcessInfo) GetName() string {
 	if x != nil {
-		return x.Names
+		return x.Name
 	}
-	return nil
+	return ""
 }
 
 func (x *ProcessInfo) GetLabel() string {
@@ -789,7 +790,8 @@ func (x *GetNodeResponse) GetNode() *NodeInfo {
 type ListProcessesRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Node  string                 `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
-	// Substring of any registered name.
+	// Substring of the process's name; a process with none matches only an
+	// empty filter.
 	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// Exact label.
 	Label string       `protobuf:"bytes,3,opt,name=label,proto3" json:"label,omitempty"`
@@ -1781,10 +1783,10 @@ const file_grpcproc_inspect_v1_inspect_proto_rawDesc = "" +
 	"\x05depth\x18\x01 \x01(\rR\x05depth\x12\x12\n" +
 	"\x04peak\x18\x02 \x01(\rR\x04peak\x128\n" +
 	"\n" +
-	"oldest_age\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\toldestAge\"\xb1\x04\n" +
+	"oldest_age\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\toldestAge\"\xaf\x04\n" +
 	"\vProcessInfo\x12\"\n" +
-	"\x03pid\x18\x01 \x01(\v2\x10.grpcproc.v1.PIDR\x03pid\x12\x14\n" +
-	"\x05names\x18\x02 \x03(\tR\x05names\x12\x14\n" +
+	"\x03pid\x18\x01 \x01(\v2\x10.grpcproc.v1.PIDR\x03pid\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
 	"\x05label\x18\x03 \x01(\tR\x05label\x12\x12\n" +
 	"\x04type\x18\x04 \x01(\tR\x04type\x12(\n" +
 	"\x06parent\x18\x05 \x01(\v2\x10.grpcproc.v1.PIDR\x06parent\x127\n" +

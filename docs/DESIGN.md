@@ -286,7 +286,7 @@ GoAkt's `pid.Metric()` returns, as one struct:
 ```go
 type ProcessInfo struct {
     PID        PID
-    Names      []string
+    Name       string
     Label      string            // WithLabel; the low-cardinality key for metrics
     Parent     PID
     State      ProcessState      // Idle | Running | WaitingReply | Exiting
