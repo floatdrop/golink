@@ -81,6 +81,10 @@ type monitorTarget struct {
 	name string
 }
 
+// target makes a monitorTarget the Target it was placed on: a name, with
+// only its node in pid, or a PID.
+func (t monitorTarget) target() (PID, string) { return t.pid, t.name }
+
 // SpawnOption configures Node.Spawn, Process.Spawn and Process.SpawnMonitor.
 type SpawnOption func(*spawnOpts)
 
@@ -430,10 +434,7 @@ func (p *proc) Demonitor(ref Ref) {
 	delete(p.monitors, ref)
 	p.mu.Unlock()
 	if ok {
-		_ = p.n.demonitor(p.pid, Name{Node: t.pid.Node, Name: t.name}, ref.ID)
-		if t.name == "" {
-			_ = p.n.demonitor(p.pid, t.pid, ref.ID)
-		}
+		_ = p.n.demonitor(p.pid, t, ref.ID)
 	}
 }
 
@@ -748,11 +749,7 @@ func (p *proc) terminate(reason string) {
 		_ = n.down(p.pid, w, ref.ID, reason, false)
 	}
 	for ref, t := range monitors {
-		if t.name != "" {
-			_ = n.demonitor(p.pid, Name{Node: t.pid.Node, Name: t.name}, ref.ID)
-		} else {
-			_ = n.demonitor(p.pid, t.pid, ref.ID)
-		}
+		_ = n.demonitor(p.pid, t, ref.ID)
 	}
 }
 

@@ -338,19 +338,68 @@ func TestMonitorReasons(t *testing.T) {
 	})
 }
 
+// waitWatchers waits until pid on n has want watchers.
+func waitWatchers(t *testing.T, n *grpcproc.Node, pid grpcproc.PID, want int) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(2 * time.Millisecond) {
+		if info, ok := n.Process(pid); ok && info.Watchers == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%v never had %d watchers", pid, want)
+		}
+	}
+}
+
+// Demonitor removes the watcher on the target's side, however the monitor
+// was placed and wherever the target runs; and no Down follows.
 func TestDemonitor(t *testing.T) {
 	c := grpcproctest.New(t, "a", "b")
-	a, b := c.Node("a"), c.Node("b")
-	w, ch := watcher(t, a)
-	e, _ := b.Spawn(echo)
-	ref := w.Monitor(e)
-	w.Demonitor(ref)
-	_ = w.Send(e, &testpb.Ping{N: 0})
-	select {
-	case m := <-ch:
-		t.Fatalf("unexpected %+v", m)
-	case <-time.After(200 * time.Millisecond):
+	a := c.Node("a")
+	for _, node := range []string{"a", "b"} {
+		for _, kind := range []string{"pid", "name", "named", "addr-of-pid", "addr-of-name"} {
+			t.Run(node+"/"+kind, func(t *testing.T) {
+				target := c.Node(node)
+				name := "e-" + node + "-" + kind
+				e, err := target.Spawn(echo, grpcproc.WithName(name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				to := map[string]grpcproc.Target{
+					"pid":          e.PID(),
+					"name":         grpcproc.Name{Node: node, Name: name},
+					"named":        grpcproc.Named[*testpb.Ping](node, name),
+					"addr-of-pid":  grpcproc.AddrOf[*testpb.Ping](e.PID()),
+					"addr-of-name": grpcproc.AddrOf[*testpb.Ping](grpcproc.Name{Node: node, Name: name}),
+				}[kind]
+				w, ch := watcher(t, a)
+				ref := w.Monitor(to)
+				waitWatchers(t, target, e.PID(), 1)
+				w.Demonitor(ref)
+				waitWatchers(t, target, e.PID(), 0)
+				_ = w.Send(e, &testpb.Ping{N: 0}) // echo exits on 0
+				select {
+				case m := <-ch:
+					t.Fatalf("unexpected %+v", m)
+				case <-time.After(150 * time.Millisecond):
+				}
+			})
+		}
 	}
+}
+
+// A watcher that exits holding monitors removes their watchers on the
+// target's side, by PID and by name.
+func TestExitDemonitors(t *testing.T) {
+	c := grpcproctest.New(t, "a", "b")
+	a, b := c.Node("a"), c.Node("b")
+	e, _ := b.Spawn(echo, grpcproc.WithName("x"))
+	w, _ := watcher(t, a)
+	w.Monitor(e.PID())
+	w.Monitor(grpcproc.Name{Node: "b", Name: "x"})
+	waitWatchers(t, b, e.PID(), 2)
+	_ = a.Exit(t.Context(), w.PID(), "bye")
+	waitWatchers(t, b, e.PID(), 0)
 }
 
 func TestKillAndRestart(t *testing.T) {
