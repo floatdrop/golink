@@ -1,0 +1,38 @@
+// The inventory service's contract: what its stock process accepts and
+// answers. Another service depends on this package, never on the service.
+syntax = "proto3";
+
+package inventory.v1;
+
+option go_package = "github.com/floatdrop/grpcproc/examples/guide/proto/inventory/v1;inventoryv1";
+
+// Command is everything the stock process accepts.
+message Command {
+  oneof op {
+    // A call, answered with Reserved.
+    Reserve reserve = 1;
+    // A send: gives back what a reservation took.
+    Release release = 2;
+  }
+}
+
+message Reserve {
+  string order = 1;
+  string sku = 2;
+  int64 qty = 3;
+}
+
+// Reserved is the stock's answer: what is left, or why nothing was
+// reserved. An error means the stock failed, not that it said no.
+message Reserved {
+  // What is left of the sku after the reservation.
+  int64 left = 1;
+  // Why nothing was reserved: not enough stock, say. Empty when it was.
+  string refused = 2;
+}
+
+message Release {
+  string order = 1;
+  string sku = 2;
+  int64 qty = 3;
+}

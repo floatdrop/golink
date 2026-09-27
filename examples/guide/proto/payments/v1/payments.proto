@@ -1,0 +1,23 @@
+// The payments service's contract: its cashier answers charges.
+syntax = "proto3";
+
+package payments.v1;
+
+option go_package = "github.com/floatdrop/grpcproc/examples/guide/proto/payments/v1;paymentsv1";
+
+// Charge takes amount from card for order. It is a call, answered with
+// Charged.
+message Charge {
+  string order = 1;
+  string card = 2;
+  int64 amount = 3;
+}
+
+// Charged is the cashier's answer: a receipt, or why the card was declined.
+// An error means the charge failed, and the card may or may not have been
+// charged.
+message Charged {
+  string receipt = 1;
+  // Why the card was declined. Empty when it was charged.
+  string declined = 2;
+}

@@ -9,6 +9,7 @@ replace github.com/floatdrop/grpcproc => ../
 
 require (
 	github.com/floatdrop/grpcproc v0.0.2-0.20260927045241-731748e1246b
+	golang.yandex/di v0.18.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
 )

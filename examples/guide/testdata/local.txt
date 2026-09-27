@@ -1,0 +1,8 @@
+shop
+└── root             supervisor
+    ├── inventory    supervisor
+    │   └── stock    *inventoryv1.Command
+    ├── payments     supervisor
+    │   └── cashier  *paymentsv1.Charge
+    └── orders       supervisor
+        └── desk     *ordersv1.Place

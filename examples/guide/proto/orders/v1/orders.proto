@@ -1,0 +1,26 @@
+// The orders service's contract: its desk takes orders.
+syntax = "proto3";
+
+package orders.v1;
+
+option go_package = "github.com/floatdrop/grpcproc/examples/guide/proto/orders/v1;ordersv1";
+
+// Place orders qty of sku, paid with card. It is a call, answered with
+// Placed. An error means no answer: the desk could not reach a service it
+// depends on, or not in time.
+message Place {
+  string sku = 1;
+  int64 qty = 2;
+  string card = 3;
+}
+
+// Placed is the desk's answer: the order, or why it was refused.
+message Placed {
+  string order = 1;
+  string receipt = 2;
+  // What is left of the sku once the order is placed.
+  int64 left = 3;
+  // Why the order was refused: the item, the stock or the card. Empty when
+  // it was placed.
+  string refused = 4;
+}

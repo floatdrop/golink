@@ -1,0 +1,19 @@
+registered directly
+  provides   platform.Config, *slog.Logger
+platform.Module
+  provides   grpcproc.Resolver, net.Listener, *platform.server, *grpcproc.Node, *inspect.Server, *platform.Root
+  needs      platform.Config ← registered directly
+             *slog.Logger ← registered directly
+             all of actor.ChildSpec
+inventory.Module
+  provides   inventory.Store, actor.ChildSpec
+payments.Module
+  provides   payments.Gateway, actor.ChildSpec
+orders.Module
+  provides   orders.Prices, actor.ChildSpec
+  needs      platform.Config ← registered directly
+web.Module
+  provides   *web.front, *http.Server
+  needs      *grpcproc.Node ← platform.Module
+             platform.Config ← registered directly
+             *slog.Logger ← registered directly
