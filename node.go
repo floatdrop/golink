@@ -354,9 +354,12 @@ func (n *Node) memberEvent(ev MemberEvent) {
 
 // Stop asks every process to exit (Receive returns ReasonShutdown), waits for
 // them until ctx is done, then closes every link. Watchers of this node's
-// processes receive Down{shutdown} while the links are still up. A dial in
-// flight completes within Config.DialTimeout and its link is discarded;
-// Stop waits for it too, until ctx is done.
+// processes receive Down{shutdown} while the links are still up: every
+// outbound link flushes, and is waited on until its peer ends it, or ctx is
+// done. A dial in flight completes within Config.DialTimeout and its link is
+// discarded; Stop waits for it too, until ctx is done. If ctx cuts any of
+// these waits short, Stop returns its error. The Registrar's withdraw comes
+// last, and gets a second of its own if ctx is done by then.
 func (n *Node) Stop(ctx context.Context) error {
 	n.mu.Lock()
 	if n.stopping {
@@ -382,9 +385,19 @@ func (n *Node) Stop(ctx context.Context) error {
 	outs, ins := n.out, n.in
 	n.out, n.in = map[string]*outLink{}, map[string]*inLink{}
 	n.mu.Unlock()
-	// Let the Down{shutdown} envelopes reach their peers before the links go.
+	// Let the Down{shutdown} envelopes reach their peers before the links go:
+	// every link flushes at once, then each is waited for.
 	for _, l := range outs {
-		l.shutdown(ctx)
+		l.shutdown()
+	}
+	flushed := true
+	for _, l := range outs {
+		if l.finish(ctx) {
+			flushed = false
+		}
+	}
+	if !flushed && err == nil {
+		err = fmt.Errorf("grpcproc: stop: %w", ctx.Err())
 	}
 	for _, l := range ins {
 		l.close()
@@ -415,7 +428,14 @@ func (n *Node) Stop(ctx context.Context) error {
 	withdraw := n.withdraw
 	n.mu.Unlock()
 	if withdraw != nil {
-		if werr := withdraw(ctx); werr != nil {
+		// Withdrawing is what tells the cluster this node is gone; one peer
+		// that never ended its stream must not leave it published.
+		wctx, cancel := context.WithCancel(ctx)
+		if ctx.Err() != nil {
+			wctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		}
+		defer cancel()
+		if werr := withdraw(wctx); werr != nil {
 			err = errors.Join(err, fmt.Errorf("grpcproc: withdraw: %w", werr))
 		}
 	}

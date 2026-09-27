@@ -166,9 +166,11 @@ message Envelope {                                   // one flat message, decode
   Erlang's single connection would: its calls fail and its monitors fire with
   `noconnection`.
 - **A graceful `Stop` flushes before it closes.** Processes exit first and
-  their `Down{shutdown}` envelopes are queued, each outbound link is
-  half-closed and waited on until the peer ends it, and only then are
-  connections closed. The inbound handler never selects on the stream's own
+  their `Down{shutdown}` envelopes are queued; then every outbound link
+  flushes and half-closes at once, each is waited on until its peer ends the
+  stream or Stop's ctx ends, and only then is its connection closed. A peer
+  that never ends its stream holds its own link to the deadline, not the
+  others. The inbound handler never selects on the stream's own
   context: a peer's cancel is observed through `Recv`, after every envelope
   that preceded it. The goroutine reading a link dispatches each frame
   itself; a per-link lock held while dispatching and while closing means

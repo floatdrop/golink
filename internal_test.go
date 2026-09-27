@@ -8,6 +8,7 @@ import (
 	"net"
 	"runtime"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -304,15 +305,17 @@ func TestOutboundWriteFailure(t *testing.T) {
 				t.Fatal("link still registered")
 			}
 		}
-		// shutdown on a link that is already gone returns at once.
-		l.shutdown(t.Context())
+		// finish on a link that is already gone returns at once.
+		l.shutdown()
+		l.finish(t.Context())
 	}
 }
 
 type fakeClientStream struct {
 	grpc.ClientStream
-	sendErr error
-	onSend  func()
+	sendErr     error
+	onSend      func()
+	onCloseSend func()
 }
 
 func (f *fakeClientStream) Send(*grpcprocv1.Frame) error {
@@ -322,9 +325,14 @@ func (f *fakeClientStream) Send(*grpcprocv1.Frame) error {
 	return f.sendErr
 }
 func (f *fakeClientStream) Recv() (*grpcprocv1.Frame, error) { select {} }
-func (f *fakeClientStream) CloseSend() error                 { return nil }
+func (f *fakeClientStream) CloseSend() error {
+	if f.onCloseSend != nil {
+		f.onCloseSend()
+	}
+	return nil
+}
 
-func TestShutdownArms(t *testing.T) {
+func TestFinishArms(t *testing.T) {
 	mk := func() *outLink {
 		return &outLink{peer: NodeID{Name: "b"}, q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
 			drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
@@ -334,19 +342,22 @@ func TestShutdownArms(t *testing.T) {
 	l.q.notify <- struct{}{} // notify already pending: the non-blocking push takes the default arm
 	expired, cancel := context.WithCancel(t.Context())
 	cancel()
-	l.once.Do(func() {}) // neutralise close: these arms are about shutdown's waits
-	l.shutdown(expired)
+	l.once.Do(func() {}) // neutralise close: these arms are about finish's waits
+	l.shutdown()
+	l.finish(expired)
 	// Drained, then the link dies before the peer ends the stream.
 	l = mk()
 	l.once.Do(func() {})
 	close(l.drained)
 	close(l.done)
-	l.shutdown(t.Context())
+	l.shutdown()
+	l.finish(t.Context())
 	// Drained, peer never answers, ctx expires.
 	l = mk()
 	l.once.Do(func() {})
 	close(l.drained)
-	l.shutdown(expired)
+	l.shutdown()
+	l.finish(expired)
 }
 
 func TestInspectNowOnExited(t *testing.T) {
@@ -723,5 +734,96 @@ func TestDemonitorSendsOneEnvelope(t *testing.T) {
 			d.GetToName() != m.GetToName() || d.GetRef() != m.GetRef() {
 			t.Errorf("%v: monitor %v, demonitor %v", target, m, d)
 		}
+	}
+}
+
+// Stop starts every outbound link's shutdown before it waits for any: a peer
+// that never ends its stream holds its own link to the end of Stop's ctx, not
+// the others' flush. Here no peer ever ends its stream, and every link is
+// still told to half-close at once.
+func TestStopFlushesEveryLinkAtOnce(t *testing.T) {
+	n := newTestNode(t, "a")
+	start := time.Now()
+	var mu sync.Mutex
+	closedSend := map[string]time.Duration{}
+	var links []*outLink
+	for _, peer := range []string{"b", "c", "d"} {
+		l := &outLink{node: n, peer: NodeID{Name: peer}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
+			drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
+		l.stream = &fakeClientStream{onCloseSend: func() {
+			mu.Lock()
+			closedSend[peer] = time.Since(start)
+			mu.Unlock()
+		}}
+		n.mu.Lock()
+		n.out[peer] = l
+		n.mu.Unlock()
+		links = append(links, l)
+		go l.writeLoop()
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	// No stream ends, so the flush runs to ctx, and Stop says so.
+	if err := n.Stop(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("stop: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, peer := range []string{"b", "c", "d"} {
+		if at, ok := closedSend[peer]; !ok || at > 150*time.Millisecond {
+			t.Errorf("%s: half-closed at %v (%v)", peer, at, ok)
+		}
+	}
+	for _, l := range links {
+		select {
+		case <-l.done:
+		default:
+			t.Errorf("%s: not closed", l.peer.Name)
+		}
+	}
+}
+
+// A queue sealed once its consumer has everything refuses what comes later,
+// and one that still holds items stays open.
+func TestQueueSealIfEmpty(t *testing.T) {
+	q := newQueue[int](false)
+	q.push(1)
+	if q.sealIfEmpty() {
+		t.Fatal("sealed with an item waiting")
+	}
+	q.drain()
+	if !q.sealIfEmpty() || q.push(2) {
+		t.Fatal("a sealed queue took an item")
+	}
+}
+
+type recordingRegistrar struct{ withdrawCtxErr chan error }
+
+func (r recordingRegistrar) Register(context.Context, Member) (func(context.Context) error, error) {
+	return func(ctx context.Context) error { r.withdrawCtxErr <- ctx.Err(); return nil }, nil
+}
+
+// Stop's withdraw runs with time of its own when the flush used Stop's ctx
+// up: a peer that never ends its stream must not leave the node published.
+func TestStopWithdrawsAfterALongFlush(t *testing.T) {
+	r := recordingRegistrar{withdrawCtxErr: make(chan error, 1)}
+	n, err := NewNode(Config{Name: "a", Resolver: StaticResolver{}, Registrar: r})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := n.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	l := &outLink{node: n, peer: NodeID{Name: "b"}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
+		drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}, stream: &fakeClientStream{}}
+	n.mu.Lock()
+	n.out["b"] = l // its peer never ends the stream
+	n.mu.Unlock()
+	go l.writeLoop()
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	_ = n.Stop(ctx)
+	if err := <-r.withdrawCtxErr; err != nil {
+		t.Fatalf("withdraw ran with a ctx already done: %v", err)
 	}
 }

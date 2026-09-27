@@ -148,6 +148,18 @@ func (q *queue[T]) putBack(items []T) bool {
 	return true
 }
 
+// sealIfEmpty stops accepting items if none are waiting, and reports
+// whether it did. Consumer only.
+func (q *queue[T]) sealIfEmpty() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.in) > 0 {
+		return false
+	}
+	q.closed = true
+	return true
+}
+
 // close stops accepting items and returns those not yet swapped to the
 // consumer. Any goroutine.
 func (q *queue[T]) close() []T {

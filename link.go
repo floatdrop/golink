@@ -141,7 +141,9 @@ func (l *outLink) writeLoop() {
 			l.inflight.Add(-int64(k))
 			batch = batch[k:]
 		}
-		if l.closing.Load() && l.q.len() == 0 {
+		// Sealed as it half-closes: a send that comes later fails at once, as
+		// unsent, rather than wait in a queue nothing will write.
+		if l.closing.Load() && l.q.sealIfEmpty() {
 			_ = l.stream.CloseSend()
 			close(l.drained)
 			return
@@ -149,25 +151,35 @@ func (l *outLink) writeLoop() {
 	}
 }
 
-// shutdown flushes what is queued, half-closes the stream and waits for the
-// peer to end it, so nothing sent is lost to a cancel racing with the data.
-func (l *outLink) shutdown(ctx context.Context) {
+// shutdown starts flushing what is queued, after which the writer
+// half-closes the stream. finish then waits for the peer to end it, so that
+// nothing sent is lost to a cancel racing with the data, and closes the link.
+// Stop starts every link's shutdown before it waits for any: a peer that
+// never ends its stream costs the others nothing.
+func (l *outLink) shutdown() {
 	l.closing.Store(true)
 	select {
 	case l.q.notify <- struct{}{}:
 	default:
 	}
+}
+
+// finish reports whether ctx cut the flush short.
+func (l *outLink) finish(ctx context.Context) (cut bool) {
 	select {
 	case <-l.drained:
 		select {
 		case <-l.recvDone:
 		case <-l.done:
 		case <-ctx.Done():
+			cut = true
 		}
 	case <-l.done:
 	case <-ctx.Done():
+		cut = true
 	}
 	l.close(ErrNodeStopped)
+	return cut
 }
 
 func (l *outLink) close(err error) {
