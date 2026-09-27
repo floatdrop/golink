@@ -25,6 +25,9 @@ type item struct {
 	md   Metadata
 	ref  uint64 // call ref; 0 for a plain message
 	at   int64  // unix nanos, when it was queued; only when hooks want the wait
+	// reply is what a caller of this node waits on for the answer (see
+	// callLocal); nil for a peer's, and for a plain message.
+	reply chan<- callResult
 }
 
 type inspectReq struct {
@@ -65,10 +68,10 @@ type proc struct {
 	// mu guards what follows. Taken inside Node.mu, never around it.
 	mu       sync.Mutex
 	exited   bool
-	watchers map[Ref]PID           // who monitors me
-	monitors map[Ref]monitorTarget // whom I monitor
-	open     map[openCall]struct{} // calls taken from the mailbox and not yet answered
-	timers   map[*Timer]struct{}   // SendAfter timers not yet fired
+	watchers map[Ref]PID                    // who monitors me
+	monitors map[Ref]monitorTarget          // whom I monitor
+	open     map[openCall]chan<- callResult // calls taken from the mailbox and not yet answered, with their item's reply
+	timers   map[*Timer]struct{}            // SendAfter timers not yet fired
 }
 
 type openCall struct {
@@ -129,6 +132,7 @@ type Msg[M proto.Message] struct {
 	Down     *Down
 	Metadata Metadata
 	ref      uint64
+	taker    *proc // for a call: the process that took it, which holds it until it is answered
 }
 
 // IsCall reports whether the sender waits for a Reply.
@@ -281,7 +285,7 @@ func (p *proc) Log() *slog.Logger { return p.log }
 // to exit. The error is then context.Canceled (node stop) or an *ExitError.
 func (p *Process[M]) Receive() (Msg[M], error) {
 	it, err := p.receive(p.ctx)
-	return toMsg[M](it), err
+	return toMsg[M](p.proc, it), err
 }
 
 // ReceiveTimeout is Receive with a deadline; context.DeadlineExceeded on timeout.
@@ -292,11 +296,14 @@ func (p *Process[M]) ReceiveTimeout(d time.Duration) (Msg[M], error) {
 	if err != nil && p.ctx.Err() != nil {
 		err = context.Cause(p.ctx)
 	}
-	return toMsg[M](it), err
+	return toMsg[M](p.proc, it), err
 }
 
-func toMsg[M proto.Message](it item) Msg[M] {
+func toMsg[M proto.Message](taker *proc, it item) Msg[M] {
 	m := Msg[M]{From: it.from, Down: it.down, Metadata: it.md, ref: it.ref}
+	if it.ref != 0 {
+		m.taker = taker
+	}
 	if it.body != nil {
 		m.Body, _ = it.body.(M) // accept() checked this on delivery
 	}
@@ -384,19 +391,27 @@ func (p *proc) sendAfter(d time.Duration, to dest, m proto.Message) *Timer {
 	return tm
 }
 
-// Reply answers a message for which IsCall is true. It may be called later
-// and from any goroutine (a deferred reply).
-func (p *Process[M]) Reply(m Msg[M], resp proto.Message, err error) error {
+// Reply answers a message for which IsCall is true. It may be called later,
+// from any goroutine (a deferred reply), and on another process than the one
+// that received m. A call is answered once: a second Reply, or one after the
+// receiving process exited (which answers ErrNoProc), is dropped.
+func (*Process[M]) Reply(m Msg[M], resp proto.Message, err error) error {
 	if m.ref == 0 {
 		return ErrNotCall
 	}
-	p.mu.Lock()
-	delete(p.open, openCall{m.From, m.ref})
-	p.mu.Unlock()
+	// The call belongs to the process that received it, which may not be p:
+	// m can be handed to another process, even one of another node, to
+	// answer. Whoever takes it from that process's open calls answers it,
+	// from that process's node, the way the call came in.
+	t, c := m.taker, openCall{m.From, m.ref}
+	t.mu.Lock()
+	ch := t.open[c]
+	delete(t.open, c)
+	t.mu.Unlock()
 	if err != nil {
-		return p.n.reply(p.pid, m.From, m.ref, resp, grpcprocv1.Status_STATUS_ERROR, err.Error(), false)
+		return t.n.reply(t.pid, m.From, m.ref, ch, resp, grpcprocv1.Status_STATUS_ERROR, err.Error(), false)
 	}
-	return p.n.reply(p.pid, m.From, m.ref, resp, grpcprocv1.Status_STATUS_OK, "", false)
+	return t.n.reply(t.pid, m.From, m.ref, ch, resp, grpcprocv1.Status_STATUS_OK, "", false)
 }
 
 // Exit asks another process, anywhere, to terminate with reason. A first
@@ -501,9 +516,9 @@ func (p *proc) took(it item) item {
 	if it.ref != 0 {
 		p.mu.Lock()
 		if p.open == nil {
-			p.open = map[openCall]struct{}{}
+			p.open = map[openCall]chan<- callResult{}
 		}
-		p.open[openCall{it.from, it.ref}] = struct{}{}
+		p.open[openCall{it.from, it.ref}] = it.reply
 		p.mu.Unlock()
 	}
 	if it.body != nil {
@@ -723,8 +738,8 @@ func (p *proc) terminate(reason string) {
 
 	// Whatever is still queued goes nowhere, and a call taken but never
 	// answered never will be: fail them now rather than let callers time out.
-	for c := range open {
-		_ = n.reply(p.pid, c.from, c.ref, nil, grpcprocv1.Status_STATUS_NOPROC, "", false)
+	for c, ch := range open {
+		_ = n.reply(p.pid, c.from, c.ref, ch, nil, grpcprocv1.Status_STATUS_NOPROC, "", false)
 	}
 	// terminate runs on the process's goroutine, the mailbox's consumer, so
 	// it may collect what Receive had swapped in but not yet taken.
@@ -733,7 +748,7 @@ func (p *proc) terminate(reason string) {
 			n.deadLetter(it.from, p.pid, it.body, ReasonNoProc)
 		}
 		if it.ref != 0 { // counted first, as deliver does: a caller woken here sees its dead letter
-			_ = n.reply(p.pid, it.from, it.ref, nil, grpcprocv1.Status_STATUS_NOPROC, "", false)
+			_ = n.reply(p.pid, it.from, it.ref, it.reply, nil, grpcprocv1.Status_STATUS_NOPROC, "", false)
 		}
 	}
 	// The exit is reported before its watchers hear of it, so an observer

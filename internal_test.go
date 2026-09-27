@@ -153,9 +153,8 @@ func TestDispatchMalformed(t *testing.T) {
 	// and a call gets noproc.
 	p.accept = func(proto.Message) bool { return true }
 	p.mbox.close()
-	n.deliver(me, p.pid, "", &testpb.Ping{}, nil, 0)
-	n.pending[9] = pc
-	n.deliver(me, p.pid, "", &testpb.Ping{}, nil, 9)
+	n.deliver(p.pid, "", item{from: me, body: &testpb.Ping{}})
+	n.deliver(p.pid, "", item{from: me, body: &testpb.Ping{}, ref: 9, reply: pc.ch})
 	if r := <-pc.ch; !errors.Is(r.err, ErrNoProc) {
 		t.Fatalf("%v", r.err)
 	}

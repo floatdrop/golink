@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/floatdrop/grpcproc"
 	"github.com/floatdrop/grpcproc/grpcproctest"
@@ -112,5 +113,100 @@ func TestStopFailsCallsWaitingOnPeers(t *testing.T) {
 	c.Stop("a")
 	if err := <-failed; !errors.Is(err, grpcproc.ErrNodeStopped) {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// So does a call still waiting on a process of the node, one that outlives
+// Stop. A call made after Stop goes on as before: a process gone is
+// ErrNoProc, and one still running may answer it.
+func TestStopFailsLocalCallsStillWaiting(t *testing.T) {
+	n, err := grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	called, release := make(chan struct{}), make(chan struct{})
+	defer close(release)
+	stuck, err := n.Spawn(func(p *grpcproc.Process[*testpb.Ping]) error {
+		if _, err := p.Receive(); err != nil {
+			return err
+		}
+		close(called)
+		<-release // ignores Stop
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Receive still returns what is queued once the process is told to exit.
+	lingers, err := n.Spawn(func(p *grpcproc.Process[*testpb.Ping]) error {
+		for {
+			m, err := p.Receive()
+			if err != nil {
+				select {
+				case <-release:
+					return nil
+				case <-time.After(time.Millisecond):
+				}
+				continue
+			}
+			_ = p.Reply(m, m.Body, nil)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := make(chan error, 1)
+	go func() {
+		_, err := n.Call[*testpb.Ping](context.Background(), stuck, &testpb.Ping{})
+		failed <- err
+	}()
+	<-called
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := n.Stop(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("stop: %v", err)
+	}
+	if err := <-failed; !errors.Is(err, grpcproc.ErrNodeStopped) {
+		t.Fatalf("got %v", err)
+	}
+	if _, err := n.Call[*testpb.Ping](context.Background(), grpcproc.Named[*testpb.Ping]("a", "nobody"), &testpb.Ping{}); !errors.Is(err, grpcproc.ErrNoProc) {
+		t.Fatalf("after stop, no process: %v", err)
+	}
+	if resp, err := n.Call[*testpb.Ping](context.Background(), lingers, &testpb.Ping{N: 42}); err != nil || resp.GetN() != 42 {
+		t.Fatalf("after stop, a process still running: %v, %v", resp, err)
+	}
+}
+
+// A process can hand a call to another to answer, on its node or another:
+// the answer leaves from the node that took the call.
+func TestReplyThroughAnotherProcess(t *testing.T) {
+	c := grpcproctest.New(t, "a", "b")
+	for _, answerer := range []string{"a", "b"} {
+		for _, caller := range []string{"a", "b"} {
+			jobs := make(chan grpcproc.Msg[*testpb.Ping], 1)
+			front, err := c.Node("a").Spawn(func(p *grpcproc.Process[*testpb.Ping]) error {
+				m, err := p.Receive()
+				if err != nil {
+					return err
+				}
+				jobs <- m
+				_, err = p.Receive() // stays up: nothing answers for it on exit
+				return err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := c.Node(answerer).Spawn(func(p *grpcproc.Process[*testpb.Ping]) error {
+				return p.Reply(<-jobs, &testpb.Ping{N: 7}, nil)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			resp, err := c.Node(caller).Call[*testpb.Ping](ctx, front, &testpb.Ping{N: 1})
+			cancel()
+			if err != nil || resp.GetN() != 7 {
+				t.Fatalf("taken on a, answered on %s, called from %s: %v, %v", answerer, caller, resp, err)
+			}
+		}
 	}
 }
