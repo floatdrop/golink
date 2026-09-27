@@ -2,29 +2,11 @@
 
 Erlang-style processes for Go, on the gRPC server you already run.
 
-A process is a goroutine with a mailbox and a cluster-wide PID. `Send`,
-`Call`, `Monitor` and `Exit` work the same whether the target is in this
-binary or on another node; the node-to-node traffic is one gRPC stream per
-direction, registered on your `*grpc.Server` next to your other services.
-
-- **A library, not a framework.** You bring the gRPC server, credentials,
-  discovery, `slog` and lifecycle. grpcproc never opens a listener, reads env
-  vars, installs globals or starts a goroutine outside `Start`/`Stop`.
-- **Typed mailboxes.** The message type lives on the address, so a send to
-  `Addr[*shoppb.Reserve]` is checked by the compiler, locally and remotely.
-- **Erlang semantics.** Per-sender ordering, `Down` in order with messages,
-  incarnation in the PID so a restart never resurrects a reference,
-  unbounded mailboxes so a slow process cannot stall the link.
-- **Inspectable.** Every process and link keeps counters; a process can
-  publish what it currently believes; one `Hooks` interface taps everything
-  for metrics, tracing and dead letters.
-- **Core depends on `grpc` and `protobuf` only.**
-
 ```sh
 go get github.com/floatdrop/grpcproc
 ```
 
-Requires Go 1.27 (generic methods). The full reference is on
+The full reference is on
 [pkg.go.dev](https://pkg.go.dev/github.com/floatdrop/grpcproc).
 **[The guide](https://floatdrop.github.io/grpcproc/)** is one application,
 read top to bottom: a shop whose services are actors wired with
