@@ -855,6 +855,11 @@ func (n *Node) dispatch(peer string, env *grpcprocv1.Envelope) {
 		}
 		n.deliver(from, to, name, body, env.GetMetadata(), ref)
 	case grpcprocv1.Kind_KIND_REPLY:
+		if to.Incarnation != n.id.Incarnation {
+			// A reply to a call of an earlier incarnation of this node,
+			// whose refs this one reuses: its caller is gone.
+			return
+		}
 		var body proto.Message
 		if env.GetBodyType() != "" {
 			var err error

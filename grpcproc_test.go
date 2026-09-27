@@ -809,3 +809,73 @@ func TestStopGivesUpOnADialThatWillNotEnd(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// A restarted node reuses its call refs, so a reply meant for its earlier
+// incarnation must not answer the new one's call with the same ref.
+func TestReplyToAnEarlierIncarnationIsDropped(t *testing.T) {
+	c := grpcproctest.New(t, "a", "b")
+	a := c.Node("a")
+	held, release, replied := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	if _, err := a.Spawn(func(p *grpcproc.Process[*testpb.Ping]) error {
+		m, err := p.Receive()
+		if err != nil {
+			return err
+		}
+		close(held)
+		<-release
+		replied <- p.Reply(m, &testpb.Ping{}, nil) // to b's first incarnation
+		return nil
+	}, grpcproc.WithName("hold")); err != nil {
+		t.Fatal(err)
+	}
+	received := make(chan struct{}, 1)
+	if _, err := a.Spawn(func(p *grpcproc.Process[*testpb.Ping]) error {
+		for {
+			m, err := p.Receive()
+			if err != nil {
+				return err
+			}
+			if m.Body.GetN() == 1 {
+				received <- struct{}{} // and never answers
+				continue
+			}
+			_ = p.Reply(m, m.Body, nil)
+		}
+	}, grpcproc.WithName("x")); err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		_, _ = c.Node("b").Call[*testpb.Ping](context.Background(), grpcproc.Named[*testpb.Ping]("a", "hold"), &testpb.Ping{})
+	}()
+	<-held
+	c.Kill("b")
+	b := c.Restart("b")
+
+	// The new b's first call has the ref the old b's had.
+	pending := make(chan error, 1)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() {
+		_, err := b.Call[*testpb.Ping](ctx, grpcproc.Named[*testpb.Ping]("a", "x"), &testpb.Ping{N: 1})
+		pending <- err
+	}()
+	<-received
+	close(release)
+	if err := <-replied; err != nil {
+		t.Fatalf("the stale reply was not sent: %v", err)
+	}
+	// A reply sent after the stale one reaches b after it, on the same link.
+	if _, err := b.Call[*testpb.Ping](t.Context(), grpcproc.Named[*testpb.Ping]("a", "x"), &testpb.Ping{N: 2}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-pending:
+		t.Fatalf("the call was answered by a reply to the earlier b: %v", err)
+	default:
+	}
+	cancel()
+	if err := <-pending; !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}

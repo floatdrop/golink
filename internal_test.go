@@ -129,7 +129,16 @@ func TestDispatchMalformed(t *testing.T) {
 	if r := <-pc.ch; !errors.Is(r.err, ErrType) {
 		t.Fatalf("%v", r.err)
 	}
-	n.dispatch("b", &grpcprocv1.Envelope{Kind: grpcprocv1.Kind_KIND_REPLY, Ref: 8, Status: grpcprocv1.Status_STATUS_OK})
+	n.dispatch("b", &grpcprocv1.Envelope{Kind: grpcprocv1.Kind_KIND_REPLY, ToIncarnation: 1, Ref: 8, Status: grpcprocv1.Status_STATUS_OK})
+	// A reply to an earlier incarnation of this node leaves a call of this
+	// one with the same ref alone.
+	stale := &pendingCall{node: "b", ch: make(chan callResult, 1)}
+	n.pending[8] = stale
+	n.dispatch("b", &grpcprocv1.Envelope{Kind: grpcprocv1.Kind_KIND_REPLY, ToIncarnation: 0, Ref: 8, Status: grpcprocv1.Status_STATUS_OK})
+	if len(stale.ch) != 0 || n.pending[8] != stale {
+		t.Fatal("a reply to an earlier incarnation answered a call")
+	}
+	delete(n.pending, 8)
 	// Down for a process that does not exist, and for a ref it never held.
 	n.dispatch("b", &grpcprocv1.Envelope{Kind: grpcprocv1.Kind_KIND_DOWN, FromIncarnation: 1, FromId: 1, ToIncarnation: 1, ToId: 1, Ref: 1})
 	p := &proc{n: n, pid: PID{Node: "a", Incarnation: 1, ID: 5}, mbox: newQueue[item](true)}
