@@ -7,7 +7,7 @@ module github.com/floatdrop/grpcproc/tools
 go 1.27.1
 
 require (
-	github.com/floatdrop/grpcproc v0.0.2-0.20260927034655-896fa8548b6e
+	github.com/floatdrop/grpcproc v0.0.2-0.20260927041133-17d85d80dc26
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12

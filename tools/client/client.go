@@ -6,7 +6,9 @@ package client
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"slices"
 	"strconv"
@@ -14,6 +16,8 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/floatdrop/grpcproc"
@@ -192,19 +196,33 @@ func (c *Client) SetLogLevel(ctx context.Context, node, target, level string) er
 	return err
 }
 
+// deadlinePassed reports whether err is ctx's own deadline, before ctx says
+// so itself: the server's deadline timer ends the stream (RST_STREAM
+// CANCEL), which the client reports as DeadlineExceeded once the deadline
+// has passed.
+func deadlinePassed(ctx context.Context, err error) bool {
+	d, ok := ctx.Deadline()
+	return ok && !time.Now().Before(d) && status.Code(err) == codes.DeadlineExceeded
+}
+
 // Watch streams node's events to fn until ctx is done or fn returns false.
-// It returns nil when either ends it.
+// It returns nil when either ends it, and when the Inspector ends the stream
+// cleanly (EOF), which it does once it sees ctx done.
 func (c *Client) Watch(ctx context.Context, node string, fn func(EventView) bool) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stream, err := c.rpc.Watch(ctx, &inspectv1.WatchRequest{Node: node})
 	if err != nil {
+		// Not EOF: opening a stream reports a failed write as EOF.
+		if ctx.Err() != nil || deadlinePassed(ctx, err) {
+			return nil
+		}
 		return err
 	}
 	for {
 		resp, err := stream.Recv()
 		if err != nil {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || errors.Is(err, io.EOF) || deadlinePassed(ctx, err) {
 				return nil
 			}
 			return err

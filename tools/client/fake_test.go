@@ -1,22 +1,28 @@
 package client
 
 import (
+	"cmp"
 	"context"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	inspectv1 "github.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1"
 )
 
 // fake answers GetNode for "a" (linked to "b", which fails) and fails
-// everything else, or hands out a scripted event stream.
+// everything else, or hands out a scripted event stream that then ends with
+// end (errFake by default).
 type fake struct {
 	inspectv1.InspectorClient
 	events []*inspectv1.Event
+	end    error
 }
 
 var errFake = errors.New("unavailable")
@@ -40,17 +46,18 @@ func (f *fake) Watch(context.Context, *inspectv1.WatchRequest, ...grpc.CallOptio
 	if f.events == nil {
 		return nil, errFake
 	}
-	return &stream{events: f.events}, nil
+	return &stream{events: f.events, end: cmp.Or(f.end, errFake)}, nil
 }
 
 type stream struct {
 	grpc.ClientStream
 	events []*inspectv1.Event
+	end    error
 }
 
 func (s *stream) Recv() (*inspectv1.WatchResponse, error) {
 	if len(s.events) == 0 {
-		return nil, errFake
+		return nil, s.end
 	}
 	e := s.events[0]
 	s.events = s.events[1:]
@@ -84,6 +91,18 @@ func TestFailuresAndOddities(t *testing.T) {
 	if len(got) != 1 || got[0].Kind != "link-up" || got[0].Peer != "b#2" {
 		t.Fatalf("%+v", got)
 	}
+	// A stream the Inspector ends cleanly is a clean end; a watch that
+	// cannot open because ctx is done, too.
+	c.rpc = &fake{events: []*inspectv1.Event{}, end: io.EOF}
+	if err := c.Watch(ctx, "", func(EventView) bool { return true }); err != nil {
+		t.Fatal(err)
+	}
+	done, cancel := context.WithCancel(ctx)
+	cancel()
+	c.rpc = &fake{}
+	if err := c.Watch(done, "", func(EventView) bool { return true }); err != nil {
+		t.Fatal(err)
+	}
 	// A cluster whose first node fails is an error.
 	c.rpc = &failing{}
 	if _, err := c.Cluster(ctx); !errors.Is(err, errFake) {
@@ -95,4 +114,27 @@ type failing struct{ inspectv1.InspectorClient }
 
 func (failing) GetNode(context.Context, *inspectv1.GetNodeRequest, ...grpc.CallOption) (*inspectv1.GetNodeResponse, error) {
 	return nil, errFake
+}
+
+func TestDeadlinePassed(t *testing.T) {
+	passed, cancelPassed := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer cancelPassed()
+	later, cancelLater := context.WithTimeout(t.Context(), time.Hour)
+	defer cancelLater()
+	deadline := status.Error(codes.DeadlineExceeded, "deadline")
+	for i, tc := range []struct {
+		ctx  context.Context
+		err  error
+		want bool
+	}{
+		{passed, deadline, true},       // gRPC reported our deadline first
+		{later, deadline, false},       // not our deadline: it has not passed
+		{t.Context(), deadline, false}, // no deadline of ours
+		{passed, status.Error(codes.Unavailable, "gone"), false},
+		{passed, io.EOF, false},
+	} {
+		if got := deadlinePassed(tc.ctx, tc.err); got != tc.want {
+			t.Errorf("case %d (%v): got %v", i, tc.err, got)
+		}
+	}
 }
