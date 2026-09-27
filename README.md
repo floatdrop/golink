@@ -612,8 +612,9 @@ latency, exits by reason class, dead letters, link traffic).
 
 ```go
 node.Register(grpcServer)
-dialer := inspect.NewDialer(resolver, dialOptions...) // reach other nodes' Inspectors
-inspect.New(node, inspect.WithPeers(dialer.Peer)).Register(grpcServer)
+insp := inspect.New(node, inspect.WithResolver(resolver, dialOptions...)) // reaches other nodes' Inspectors
+insp.Register(grpcServer)
+defer insp.Close()
 ```
 
 `grpcproc.inspect.v1.Inspector` has `GetNode`, `ListProcesses` (filter by

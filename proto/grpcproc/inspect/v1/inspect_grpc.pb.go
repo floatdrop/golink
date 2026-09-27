@@ -41,7 +41,7 @@ const (
 //
 // Every request names the node it is about. An empty node, or this node's
 // own name, is answered here; any other name is forwarded to that node's
-// Inspector when the server was built with a peer dialer, so one endpoint
+// Inspector when the server was built to reach other nodes, so one endpoint
 // can inspect the whole cluster.
 type InspectorClient interface {
 	GetNode(ctx context.Context, in *GetNodeRequest, opts ...grpc.CallOption) (*GetNodeResponse, error)
@@ -151,7 +151,7 @@ type Inspector_WatchClient = grpc.ServerStreamingClient[WatchResponse]
 //
 // Every request names the node it is about. An empty node, or this node's
 // own name, is answered here; any other name is forwarded to that node's
-// Inspector when the server was built with a peer dialer, so one endpoint
+// Inspector when the server was built to reach other nodes, so one endpoint
 // can inspect the whole cluster.
 type InspectorServer interface {
 	GetNode(context.Context, *GetNodeRequest) (*GetNodeResponse, error)

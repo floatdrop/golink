@@ -11,44 +11,62 @@ import (
 	inspectv1 "github.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1"
 )
 
-// Dialer reaches other nodes' Inspectors through the same resolver the node
-// uses, keeping one connection per peer. Its Peer method is a PeerFunc.
-type Dialer struct {
+// dialer reaches other nodes' Inspectors through a resolver, keeping one
+// connection per peer. Its peer method is a PeerFunc; see WithResolver.
+type dialer struct {
 	resolver grpcproc.Resolver
 	opts     []grpc.DialOption
 
-	mu    sync.Mutex
-	conns map[string]*grpc.ClientConn
+	mu     sync.Mutex
+	conns  map[string]*grpc.ClientConn
+	closed bool
 }
 
-// NewDialer returns a Dialer that resolves node names with r and dials with opts.
-func NewDialer(r grpcproc.Resolver, opts ...grpc.DialOption) *Dialer {
-	return &Dialer{resolver: r, opts: opts, conns: map[string]*grpc.ClientConn{}}
+var errClosed = errors.New("inspect: server closed")
+
+func newDialer(r grpcproc.Resolver, opts ...grpc.DialOption) *dialer {
+	return &dialer{resolver: r, opts: opts, conns: map[string]*grpc.ClientConn{}}
 }
 
-// Peer returns an Inspector client for node.
-func (d *Dialer) Peer(ctx context.Context, node string) (inspectv1.InspectorClient, error) {
+// peer returns an Inspector client for node. It resolves and dials without
+// the lock, so a slow resolver holds up only first requests to a node.
+func (d *dialer) peer(ctx context.Context, node string) (inspectv1.InspectorClient, error) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	if cc := d.conns[node]; cc != nil {
+	cc, closed := d.conns[node], d.closed
+	d.mu.Unlock()
+	switch {
+	case closed:
+		return nil, errClosed
+	case cc != nil:
 		return inspectv1.NewInspectorClient(cc), nil
 	}
 	addr, err := d.resolver.Resolve(ctx, node)
 	if err != nil {
 		return nil, err
 	}
-	cc, err := grpc.NewClient(addr, d.opts...)
-	if err != nil {
+	if cc, err = grpc.NewClient(addr, d.opts...); err != nil {
 		return nil, err
 	}
-	d.conns[node] = cc
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	switch {
+	case d.closed:
+		_ = cc.Close()
+		return nil, errClosed
+	case d.conns[node] != nil:
+		_ = cc.Close() // a concurrent first request got there first
+		cc = d.conns[node]
+	default:
+		d.conns[node] = cc
+	}
 	return inspectv1.NewInspectorClient(cc), nil
 }
 
-// Close closes every connection the Dialer opened.
-func (d *Dialer) Close() error {
+// closeAll closes every connection the dialer opened; it opens no more.
+func (d *dialer) closeAll() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.closed = true
 	var errs []error
 	for node, cc := range d.conns {
 		errs = append(errs, cc.Close())

@@ -4,7 +4,7 @@
 // interceptors guard the application's other services.
 //
 //	node.Register(grpcServer)
-//	inspect.New(node, inspect.WithPeers(dialer.Peer)).Register(grpcServer)
+//	inspect.New(node, inspect.WithResolver(resolver, dialOptions...)).Register(grpcServer)
 package inspect
 
 import (
@@ -28,9 +28,22 @@ type PeerFunc func(ctx context.Context, node string) (inspectv1.InspectorClient,
 // Option configures a Server.
 type Option func(*Server)
 
-// WithPeers lets the server answer for other nodes by forwarding to their
-// Inspector. Without it, a request for another node is FailedPrecondition.
-func WithPeers(f PeerFunc) Option { return func(s *Server) { s.peers = f } }
+// WithResolver lets the server answer for other nodes by forwarding to their
+// Inspector, found with r and dialed with opts: usually the node's own
+// Config.Resolver and Config.DialOptions. It keeps one connection per node,
+// until Close. Without it, or WithPeers, a request for another node is
+// FailedPrecondition.
+func WithResolver(r grpcproc.Resolver, opts ...grpc.DialOption) Option {
+	return func(s *Server) {
+		s.dialer = newDialer(r, opts...)
+		s.peers = s.dialer.peer
+	}
+}
+
+// WithPeers is WithResolver for other ways of reaching a node's Inspector.
+// Whichever of the two comes last is used. Close does not release what f
+// holds.
+func WithPeers(f PeerFunc) Option { return func(s *Server) { s.peers, s.dialer = f, nil } }
 
 // ReadOnly refuses SetLogLevel, Send and Exit with PermissionDenied.
 func ReadOnly() Option { return func(s *Server) { s.readOnly = true } }
@@ -40,6 +53,7 @@ type Server struct {
 	inspectv1.UnimplementedInspectorServer
 	node     *grpcproc.Node
 	peers    PeerFunc
+	dialer   *dialer // from WithResolver; Close closes its connections
 	readOnly bool
 }
 
@@ -50,6 +64,17 @@ func New(node *grpcproc.Node, opts ...Option) *Server {
 		o(s)
 	}
 	return s
+}
+
+// Close closes the connections WithResolver opened to other nodes. The
+// server keeps answering for its own node; with WithResolver, a request for
+// another node fails from then on (Unavailable, or Canceled if it was
+// already on its way).
+func (s *Server) Close() error {
+	if s.dialer == nil {
+		return nil
+	}
+	return s.dialer.closeAll()
 }
 
 // Register mounts the Inspector on r.
@@ -71,7 +96,7 @@ func (s *Server) remote(ctx context.Context, node string, target *inspectv1.Targ
 		return nil, "", nil
 	}
 	if s.peers == nil {
-		return nil, node, status.Errorf(codes.FailedPrecondition, "inspect: %q is not this node (%s) and no peer dialer is configured", node, s.node.Name())
+		return nil, node, status.Errorf(codes.FailedPrecondition, "inspect: %q is not this node (%s), and there is no WithResolver or WithPeers", node, s.node.Name())
 	}
 	c, err := s.peers(ctx, node)
 	if err != nil {

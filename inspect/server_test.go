@@ -3,6 +3,7 @@ package inspect_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -23,21 +24,24 @@ import (
 	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
-// cluster starts nodes that each serve an Inspector able to forward to the others.
+// cluster starts nodes that each serve an Inspector able to forward to the
+// others, over the cluster's own connections to them.
 func cluster(t *testing.T, opts []inspect.Option, names ...string) *grpcproctest.Cluster {
 	t.Helper()
-	var c *grpcproctest.Cluster
-	var dialer *inspect.Dialer
-	c = grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithServices(func(n *grpcproc.Node, s *grpc.Server) {
-		// A closure, not the method value dialer.Peer: the dialer is created
-		// after the cluster, and the method value would bind a nil receiver.
-		peers := func(ctx context.Context, node string) (inspectv1.InspectorClient, error) {
-			return dialer.Peer(ctx, node)
+	conns := map[string]*grpc.ClientConn{}
+	peers := func(_ context.Context, node string) (inspectv1.InspectorClient, error) {
+		cc, ok := conns[node]
+		if !ok {
+			return nil, fmt.Errorf("no node %q", node)
 		}
+		return inspectv1.NewInspectorClient(cc), nil
+	}
+	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithServices(func(n *grpcproc.Node, s *grpc.Server) {
 		inspect.New(n, append([]inspect.Option{inspect.WithPeers(peers)}, opts...)...).Register(s)
 	})}, names...)
-	dialer = inspect.NewDialer(c.Resolver(), c.DialOptions()...)
-	t.Cleanup(func() { _ = dialer.Close() })
+	for _, name := range names {
+		conns[name] = c.Conn(name) // here, not on a handler's goroutine: Conn may fail the test
+	}
 	return c
 }
 
@@ -305,7 +309,8 @@ func TestReadOnly(t *testing.T) {
 }
 
 func TestRoutingErrors(t *testing.T) {
-	// No peer dialer: another node is FailedPrecondition, for every method.
+	// No way to reach other nodes: another node is FailedPrecondition, for
+	// every method.
 	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithServices(func(n *grpcproc.Node, s *grpc.Server) {
 		inspect.New(n).Register(s)
 	})}, "a")
@@ -332,7 +337,7 @@ func TestRoutingErrors(t *testing.T) {
 			t.Errorf("method %d: %v", i, err)
 		}
 	}
-	// A peer dialer that fails: Unavailable.
+	// Peers that cannot be reached: Unavailable.
 	c2 := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithServices(func(n *grpcproc.Node, s *grpc.Server) {
 		inspect.New(n, inspect.WithPeers(func(context.Context, string) (inspectv1.InspectorClient, error) {
 			return nil, errors.New("no route")

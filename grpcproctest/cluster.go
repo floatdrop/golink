@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
 	"slices"
 	"sync"
@@ -94,8 +95,9 @@ func NewWith(t testing.TB, opts []Option, names ...string) *Cluster {
 		for _, m := range c.nodes {
 			members = append(members, m)
 		}
+		conns := slices.Collect(maps.Values(c.conns))
 		c.mu.Unlock()
-		for _, cc := range c.conns {
+		for _, cc := range conns {
 			_ = cc.Close()
 		}
 		for _, m := range members {
@@ -106,7 +108,8 @@ func NewWith(t testing.TB, opts []Option, names ...string) *Cluster {
 }
 
 // Resolver resolves node names of this cluster, for components that dial
-// nodes themselves (an Inspector's peer dialer). Use it with DialOptions.
+// nodes themselves (an Inspector built with inspect.WithResolver). Use it
+// with DialOptions.
 func (*Cluster) Resolver() grpcproc.Resolver {
 	return grpcproc.ResolverFunc(func(_ context.Context, node string) (string, error) { return "passthrough:///" + node, nil })
 }

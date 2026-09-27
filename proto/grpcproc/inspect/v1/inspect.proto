@@ -17,7 +17,7 @@ option go_package = "github.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1;ins
 //
 // Every request names the node it is about. An empty node, or this node's
 // own name, is answered here; any other name is forwarded to that node's
-// Inspector when the server was built with a peer dialer, so one endpoint
+// Inspector when the server was built to reach other nodes, so one endpoint
 // can inspect the whole cluster.
 service Inspector {
   rpc GetNode(GetNodeRequest) returns (GetNodeResponse);
