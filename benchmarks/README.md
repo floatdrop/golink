@@ -30,32 +30,32 @@ Apple M3 Max, `-count=6`, medians by `benchstat`:
 
 | | grpcproc | GoAkt | Hollywood | Proto.Actor |
 | --- | --- | --- | --- | --- |
-| Local send | 99 ns, 0 allocs | 96 ns, 0 allocs | **58 ns**, 0 allocs | 191 ns, 0 allocs |
-| Local request | 738 ns, 3 allocs | **565 ns**, 2 allocs | 2265 ns, 12 allocs | 2354 ns, 10 allocs |
-| Remote send | 368 ns, 6 allocs | 514 ns (±22%), 7 allocs | **205 ns**, 7 allocs | 315 ns, 9 allocs |
-| Remote request | 44.4 µs, 52 allocs | **34.5 µs**, 42 allocs | 36.4 µs, 66 allocs | 58.6 µs, 103 allocs |
-| Remote request, parallel | 7.5 µs, 28 allocs | 10.2 µs, 40 allocs | **4.9 µs**, 54 allocs | 7.1 µs, 54 allocs |
-| Geometric mean | 1.55 µs | 1.58 µs | **1.37 µs** | 2.26 µs |
+| Local send | 93 ns, 0 allocs | 106 ns (±16%), 0 allocs | **58 ns**, 0 allocs | 189 ns, 0 allocs |
+| Local request | 726 ns, 2 allocs | **574 ns**, 2 allocs | 2246 ns, 12 allocs | 2321 ns (±13%), 10 allocs |
+| Remote send | 374 ns, 6 allocs | 453 ns (±11%), 6 allocs | **211 ns**, 7 allocs | 309 ns, 9 allocs |
+| Remote request | 41.8 µs, 52 allocs | **34.7 µs**, 42 allocs | 35.9 µs, 66 allocs | 53.8 µs, 103 allocs |
+| Remote request, parallel | 7.1 µs, 28 allocs | 10.1 µs, 40 allocs | **5.1 µs**, 54 allocs | 6.9 µs (±12%), 54 allocs |
+| Geometric mean | 1.50 µs | 1.58 µs | **1.38 µs** | 2.19 µs |
 
-Proto.Actor's local send varies between runs (134 ns to 191 ns in two runs
-of six), and so does GoAkt's remote send; the others hold within a few
-percent.
+Proto.Actor's local send varies between runs (94 ns and 189 ns in two runs
+of six), and GoAkt's sends and some of Proto.Actor's requests vary within
+one, as marked; the others hold within a few percent.
 
 How to read it:
 
 - **The transport decides sequential remote latency.** GoAkt (its own TCP
   protocol) and Hollywood (dRPC) answer a remote request in 35–36 µs; the
-  two that speak gRPC take longer, grpcproc 44 µs and Proto.Actor 59 µs.
+  two that speak gRPC take longer, grpcproc 42 µs and Proto.Actor 54 µs.
   gRPC-go's writer adds a goroutine hand-off in each direction. On a real
   network the round trip dwarfs the difference; for grpcproc it is the cost
   of living on the application's gRPC server.
-- **Against the other gRPC library**, grpcproc answers a remote request 24%
-  sooner than Proto.Actor and trails it by about 50 ns on remote send, where
+- **Against the other gRPC library**, grpcproc answers a remote request 22%
+  sooner than Proto.Actor and trails it by about 65 ns on remote send, where
   Proto.Actor's writer batches up to a thousand envelopes.
-- **Locally**, a grpcproc call waits on one channel where Hollywood and
-  Proto.Actor create a temporary process per request, which puts it three
-  times ahead of them. GoAkt is quicker still: grpcproc allocates a pending
-  call and its channel per call, which a pool could remove.
+- **Locally**, a grpcproc call waits on one channel of its own where
+  Hollywood and Proto.Actor create a temporary process per request, which
+  puts it three times ahead of them. GoAkt is quicker still, with as many
+  allocations per call.
 - **Hollywood's sends are fastest** everywhere, with a lighter transport and
   vtprotobuf-generated envelopes. grpcproc also pays, on every message, for
   what its Inspector reports: per-process counters, mailbox ages, and a type
@@ -73,14 +73,16 @@ The same benchmarks, v0.0.0 (published as golink) against the commits after it:
 
 | | v0.0.0 | now |
 | --- | --- | --- |
-| Local send | 201 ns, 2 allocs | 110 ns, 0 allocs |
-| Local request | 812 ns, 5 allocs | 753 ns, 3 allocs |
-| Remote send | 1570 ns, 29 allocs | 354 ns, 6 allocs |
-| Remote request | 47.5 µs, 72 allocs | 42.2 µs, 52 allocs |
-| Remote request, parallel | 9.6 µs, 63 allocs | 7.8 µs, 28 allocs |
+| Local send | 201 ns, 2 allocs | 93 ns, 0 allocs |
+| Local request | 812 ns, 5 allocs | 726 ns, 2 allocs |
+| Remote send | 1570 ns, 29 allocs | 374 ns, 6 allocs |
+| Remote request | 47.5 µs, 72 allocs | 41.8 µs, 52 allocs |
+| Remote request, parallel | 9.6 µs, 63 allocs | 7.1 µs, 28 allocs |
 
 Mailboxes swap batches between producers and the consumer instead of
 growing a slice, read the clock once per batch, and share no counter
 between sides; links write one gRPC message per batch of envelopes and
-dispatch what they read without a hop through a channel; and the wire
-envelope is one flat message, without node names or an `Any`.
+dispatch what they read without a hop through a channel; the wire envelope
+is one flat message, without node names or an `Any`; and a local call waits
+on a channel of its own, with no node-wide table of calls or lock between
+callers.

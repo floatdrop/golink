@@ -466,11 +466,11 @@ Against [GoAkt](https://github.com/tochemey/goakt),
 
 | | grpcproc | GoAkt | Hollywood | Proto.Actor |
 | --- | --- | --- | --- | --- |
-| Local send | 99 ns | 96 ns | 58 ns | 191 ns |
-| Local request | 738 ns | 565 ns | 2265 ns | 2354 ns |
-| Remote send | 368 ns | 514 ns | 205 ns | 315 ns |
-| Remote request | 44.4 µs | 34.5 µs | 36.4 µs | 58.6 µs |
-| Remote request, 14 in parallel | 7.5 µs | 10.2 µs | 4.9 µs | 7.1 µs |
+| Local send | 93 ns | 106 ns | 58 ns | 189 ns |
+| Local request | 726 ns | 574 ns | 2246 ns | 2321 ns |
+| Remote send | 374 ns | 453 ns | 211 ns | 309 ns |
+| Remote request | 41.8 µs | 34.7 µs | 35.9 µs | 53.8 µs |
+| Remote request, 14 in parallel | 7.1 µs | 10.1 µs | 5.1 µs | 6.9 µs |
 
 A mailbox that keeps up, and a local send, allocate nothing.
 
