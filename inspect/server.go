@@ -10,6 +10,8 @@ package inspect
 import (
 	"cmp"
 	"context"
+	"errors"
+	"io"
 	"log/slog"
 	"strings"
 	"time"
@@ -281,6 +283,11 @@ func (s *Server) Watch(req *inspectv1.WatchRequest, stream grpc.ServerStreamingS
 		}
 		for {
 			resp, err := upstream.Recv()
+			if errors.Is(err, io.EOF) {
+				// The peer ended the watch cleanly, which it does when its
+				// ctx, derived from this one, is done: end it cleanly too.
+				return nil
+			}
 			if err != nil {
 				return peerErr(node, err)
 			}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -102,6 +103,13 @@ forwarded:
 	}))
 	if err := srv.Watch(&inspectv1.WatchRequest{Node: "b"}, stream); err == nil || !strings.Contains(err.Error(), "node b: peer stream ended") {
 		t.Fatalf("peer end: %v", err)
+	}
+	// The peer ends it cleanly (EOF): so does the relay.
+	srv = inspect.New(n, inspect.WithPeers(func(context.Context, string) (inspectv1.InspectorClient, error) {
+		return &fakePeer{recvErr: io.EOF}, nil
+	}))
+	if err := srv.Watch(&inspectv1.WatchRequest{Node: "b"}, stream); err != nil {
+		t.Fatalf("clean peer end: %v", err)
 	}
 }
 
