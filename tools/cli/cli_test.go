@@ -148,7 +148,10 @@ func TestWatch(t *testing.T) {
 func TestWrites(t *testing.T) {
 	f := testcluster.Start(t)
 	ok(t, run(t, f, "loglevel", "talker", "debug"))
-	has(t, ok(t, run(t, f, "inspect", "talker")), "log level:      DEBUG")
+	out := ok(t, run(t, f, "inspect", "talker"))
+	has(t, out, "log level:      DEBUG")
+	has(t, out, "links:          0")
+	has(t, out, "trap exit:      false")
 	ok(t, run(t, f, "exit", "talker", "bye"))
 	time.Sleep(20 * time.Millisecond)
 	if r := run(t, f, "inspect", "talker"); r.code != 1 || !strings.Contains(r.stderr, "no process") {

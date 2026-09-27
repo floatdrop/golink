@@ -396,6 +396,7 @@ func cmdInspect(ctx context.Context, a *app, args []string) error {
 		{"mailbox", fmt.Sprintf("%d (peak %d, oldest %s)", p.Mailbox, p.MailboxPeak, cmp.Or(p.OldestWait, "-"))},
 		{"received", u(p.Received)}, {"sent", u(p.Sent)}, {"calls in flight", strconv.Itoa(int(p.CallsInFlight))},
 		{"last message", p.LastMessage}, {"monitors", strconv.Itoa(p.Monitors)}, {"watchers", strconv.Itoa(p.Watchers)},
+		{"links", strconv.Itoa(p.Links)}, {"trap exit", strconv.FormatBool(p.TrapExit)},
 		{"log level", p.LogLevel},
 	} {
 		fmt.Fprintf(w, "%s:\t%s\n", kv[0], kv[1])

@@ -52,7 +52,9 @@ type ProcessView struct {
 	CallsInFlight uint32            `json:"calls_in_flight,omitzero"`
 	LastMessage   string            `json:"last_message,omitempty" jsonschema:"type of the last message it took"`
 	Monitors      int               `json:"monitors,omitzero" jsonschema:"processes it watches"`
-	Watchers      int               `json:"watchers,omitzero" jsonschema:"processes watching it"`
+	Links         int               `json:"links,omitzero" jsonschema:"processes it is linked to: whose exit ends it, or reaches it as a message if it traps exits"`
+	TrapExit      bool              `json:"trap_exit,omitzero" jsonschema:"whether the exits of processes it is linked to reach it as messages"`
+	Watchers      int               `json:"watchers,omitzero" jsonschema:"processes monitoring or linked to it"`
 	LogLevel      string            `json:"log_level"`
 	Inspect       map[string]string `json:"inspect,omitempty" jsonschema:"what the process says about itself"`
 	InspectError  string            `json:"inspect_error,omitempty" jsonschema:"why inspect is empty: busy, or gone"`
@@ -126,7 +128,7 @@ func (c *Client) processView(p grpcproc.ProcessInfo) ProcessView {
 		State: p.State.String(), Uptime: c.since(p.StartedAt),
 		Mailbox: p.Mailbox.Depth, MailboxPeak: p.Mailbox.Peak, OldestWait: Short(p.Mailbox.OldestAge),
 		Received: p.Received, Sent: p.Sent, CallsInFlight: p.CallsInFlight, LastMessage: p.LastMessage,
-		Monitors: p.Monitors, Watchers: p.Watchers, LogLevel: p.LogLevel.String(),
+		Monitors: p.Monitors, Links: p.Links, TrapExit: p.TrapExit, Watchers: p.Watchers, LogLevel: p.LogLevel.String(),
 	}
 }
 
