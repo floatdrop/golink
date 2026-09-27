@@ -1,0 +1,33 @@
+// Messages of the examples: a shop with a stock of items.
+syntax = "proto3";
+
+package shop.v1;
+
+option go_package = "github.com/floatdrop/golink/examples/shoppb;shoppb";
+
+// Reserve asks for qty items of sku. The answer is Reserved.
+message Reserve {
+  string sku = 1;
+  int64 qty = 2;
+}
+
+// Reserved is what is left of sku after a reservation.
+message Reserved {
+  string sku = 1;
+  int64 left = 2;
+}
+
+// Restock adds qty items of sku.
+message Restock {
+  string sku = 1;
+  int64 qty = 2;
+}
+
+// Stock is everything a stock process accepts. A mailbox holds one message
+// type; a oneof lets it carry several operations.
+message Stock {
+  oneof op {
+    Reserve reserve = 1;
+    Restock restock = 2;
+  }
+}

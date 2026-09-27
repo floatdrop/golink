@@ -80,7 +80,7 @@ func ChildFunc[M proto.Message](name string, fn func(*golink.Process[M]) error, 
 // Child is a child that runs a Handler, built afresh by newHandler at every
 // start so a restart begins from a clean state:
 //
-//	actor.Child[*orderspb.Order]("orders", func() *Orders { return &Orders{repo: repo} })
+//	actor.Child("orders", func() *Orders { return &Orders{repo: repo} })
 func Child[M proto.Message, H Handler[M]](name string, newHandler func() H, opts ...golink.SpawnOption) ChildSpec {
 	return ChildFunc(name, func(p *golink.Process[M]) error { return Run[M](newHandler())(p) }, opts...)
 }

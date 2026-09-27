@@ -1,0 +1,4 @@
+reserved, left: 1
+reserve failed: only 1 apple left
+stock exited: closing
+no such process: true

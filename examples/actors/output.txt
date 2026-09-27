@@ -1,0 +1,7 @@
+ledger: 2 apple
+reserved, left: 3
+reserve failed: cannot reserve -1
+ledger: 1 apple
+reserved, left: 2
+inventory stopped: a reservation must be a call
+then: golink: no such process

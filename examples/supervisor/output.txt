@@ -1,0 +1,5 @@
+reserved, left: 3
+inventory exited: bad restock of 0 apple
+inventory started again
+reserved, left: 2
+supervisor restarts: 1/3 in 1m0s

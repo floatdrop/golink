@@ -199,8 +199,12 @@ func (m Msg[M]) Context() context.Context      // sender's deadline and metadata
 | `M` | Send site | Use |
 |---|---|---|
 | a generated oneof wrapper, `*orderspb.OrderMsg` | `p.Send(a, &orderspb.OrderMsg{Kind: …})` | one contract per process, visible in the `.proto` |
-| your own marker interface, `interface{ proto.Message; orderMsg() }` | `p.Send(a, &orderspb.Reserve{})` | several generated types, no wrapper, one extra method each |
-| `proto.Message` | anything | the untyped process |
+| your own marker interface, `OrderMsg interface{ proto.Message; orderMsg() }` | `p.Send[OrderMsg](a, &orderspb.Reserve{})` | several generated types, no wrapper, one extra method each |
+| `proto.Message` | `p.SendTo(a, anything)` | the untyped process |
+
+With an interface `M`, the send names it: Go infers `N` from the address and
+from the message alike, and they differ. That is why the examples use a
+oneof.
 
 The untyped process is the typed one instantiated with the interface, so
 there is one implementation. Types do not cross the wire: a remote sender can
