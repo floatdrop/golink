@@ -25,8 +25,7 @@ direction, registered on your `*grpc.Server` next to your other services.
 go get github.com/floatdrop/grpcproc
 ```
 
-Requires **Go 1.27** (generic methods). Versions up to v0.0.1 were published
-as `github.com/floatdrop/golink`.
+Requires **Go 1.27** (generic methods).
 
 ## Quick start
 
