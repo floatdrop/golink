@@ -27,6 +27,11 @@ go get github.com/floatdrop/grpcproc
 
 Requires **Go 1.27** (generic methods).
 
+**[The guide](https://floatdrop.github.io/grpcproc/)** is one application,
+read top to bottom: a shop whose services are actors wired with
+[golang.yandex/di](https://github.com/yandex/di), run in one process or as
+three nodes from the same code.
+
 ## Quick start
 
 Two nodes, a typed process on one, called and monitored from the other:
@@ -716,6 +721,10 @@ that this README embeds the current code, with
 cd examples && go test ./quickstart ./actors ./supervisor -update
 cd .. && gofmt -w examples && go run github.com/campoy/embedmd@v1.0.0 -w README.md
 ```
+
+[`examples/guide`](examples/guide) is the application the guide shows, from
+[`site/`](site). Its tests run it in both deployments and pin the output the
+page prints; `go test ./guide -update` refreshes it.
 
 ## Design
 

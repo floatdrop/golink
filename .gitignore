@@ -2,3 +2,9 @@ coverage.out
 go.work
 go.work.sum
 *.test
+
+# Site
+site/node_modules/
+site/build/
+site/.ssr/
+examples/bin/

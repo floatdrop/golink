@@ -1,0 +1,524 @@
+/* Gravity UI's tokens and component styles. Every component this page uses
+   imports its own CSS, so the bundle picks the rest up on its own; this file
+   is the theme layer plus the handful of page shapes uikit has no component
+   for -- a prose column, a code figure, a sticky sidebar.
+
+   Nearly every size here comes from a `--g-text-*` token. uikit's scale is built for
+   application density, and a page of prose reads a step or two up it, so the
+   *choice* of step is the design; the numbers are not ours to invent. */
+@import '@gravity-ui/uikit/styles/styles.css';
+
+/* Gravity UI's own stylesheet pulls Inter from Google Fonts. Nothing
+   third-party is on the path to rendering this page -- the star count is the
+   only outside request and it is made after paint -- so it asks for the
+   system UI face instead; drop
+   `@import '@gravity-ui/uikit/styles/fonts.css';` above and delete this block
+   to get Inter back. */
+.g-root {
+	--g-font-family-sans:
+		ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+	--g-font-family-monospace:
+		ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+
+	/* Prose is wider than a uikit control, and one measure keeps it readable. */
+	--gp-measure: 68ch;
+	--gp-page: 64rem;
+	--gp-gutter: var(--g-spacing-5);
+	--gp-topbar-height: 56px;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+}
+
+html {
+	background: var(--g-color-base-background);
+	color: var(--g-color-text-primary);
+	/* Tells the browser's own widgets -- scrollbars, form controls -- which way
+	   the page went, before any of our CSS applies. */
+	color-scheme: light;
+}
+
+html.g-root_theme_dark {
+	color-scheme: dark;
+}
+
+/* uikit's `.g-root` carries `font-size: var(--g-text-body-1-font-size)`, and
+   this page puts that class on the html element so the inlined script can
+   settle the theme before the body exists. Left alone that makes 1rem 13px
+   for the whole document -- every page metric below silently three-quarters
+   of what it reads as. The root keeps the browser's own size; `body` takes
+   uikit's step instead, and nothing in uikit needs the root to change, since
+   every size it ships is a `--g-text-*` pixel token. */
+html.g-root {
+	font-size: 100%;
+}
+
+/* body-2 is the neutral default: it is what the chrome around the prose --
+   the topbar, the sidebar, the footer -- is sized against. The prose itself
+   sets its own step below. */
+body {
+	font-family: var(--g-font-family-sans);
+	font-size: var(--g-text-body-2-font-size);
+	line-height: var(--g-text-body-2-line-height);
+	-webkit-font-smoothing: antialiased;
+}
+
+/* ---- page frame ---------------------------------------------------------- */
+
+.gp-page {
+	max-width: var(--gp-page);
+	margin: 0 auto;
+	padding-inline: var(--gp-gutter);
+}
+
+.gp-topbar {
+	position: sticky;
+	top: 0;
+	z-index: 10;
+	background: color-mix(in srgb, var(--g-color-base-background) 88%, transparent);
+	-webkit-backdrop-filter: blur(8px);
+	backdrop-filter: blur(8px);
+	border-bottom: 1px solid var(--g-color-line-generic);
+}
+
+.gp-topbar__inner {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--g-spacing-4);
+	min-height: var(--gp-topbar-height);
+	padding-block: var(--g-spacing-2);
+}
+
+.gp-topbar__brand {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--g-spacing-2);
+	font-family: var(--g-font-family-monospace);
+	font-size: var(--g-text-body-1-font-size);
+	color: var(--g-color-text-secondary);
+	text-decoration: none;
+}
+
+/* The mark, at the size of the icons across from it. */
+.gp-topbar__mark {
+	flex: none;
+	width: 24px;
+	height: 24px;
+}
+
+.gp-topbar__brand:hover {
+	color: var(--g-color-text-primary);
+}
+
+.gp-controls {
+	display: flex;
+	align-items: center;
+	gap: var(--g-spacing-2);
+}
+
+/* ---- theme and copy buttons ---------------------------------------------- */
+
+/* Neither button re-renders -- the page ships no React -- so both states are
+   in the markup and CSS shows whichever applies. The suffix names the state
+   the icon appears in, not the one it switches to. */
+.gp-theme-icon,
+.gp-copy-icon {
+	display: inline-flex;
+}
+
+.gp-theme-icon_on-dark,
+.g-root_theme_dark .gp-theme-icon_on-light {
+	display: none;
+}
+
+.g-root_theme_dark .gp-theme-icon_on-dark {
+	display: inline-flex;
+}
+
+.gp-copy-icon_done {
+	display: none;
+}
+
+.gp-copy_done .gp-copy-icon_idle {
+	display: none;
+}
+
+.gp-copy_done .gp-copy-icon_done {
+	display: inline-flex;
+	color: var(--g-color-text-positive);
+}
+
+/* The star count, appended by the inlined script. uikit pulls a button's icon
+   in with negative margins, so the text lands flush against it. */
+.gp-stars {
+	padding-inline-start: var(--g-spacing-1);
+	font-variant-numeric: tabular-nums;
+}
+
+/* The star is drawn here rather than appended with the count, so the script
+   has no markup to build. `--g-color-text-warning` is uikit's yellow, and it
+   is a different one per theme, which a hard-coded gold would not be. */
+.gp-stars::before {
+	content: '\2605';
+	margin-inline-end: 0.25em;
+	font-size: 0.95em;
+	color: var(--g-color-text-warning);
+}
+
+/* ---- hero ---------------------------------------------------------------- */
+
+/* The words alone in one column, and, from the page's two-column width in
+   the block below, the mark beside them. The topbar's small mark is there
+   at every width. */
+.gp-hero {
+	/* Gravity's spacing scale stops at 40px; the page rhythm above a section is
+	   coarser than any control's, so these few are spelled out. */
+	padding-block: 4.5rem 3.5rem;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	align-items: center;
+	gap: var(--g-spacing-6);
+}
+
+.gp-hero__copy {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: var(--g-spacing-5);
+}
+
+.gp-hero__art {
+	display: none;
+}
+
+/* display-3 is 40px, which is the right ceiling and far too much at 390px, so
+   the variant sets the family and weight and the size scales with the page. */
+.gp-hero__title {
+	margin: 0;
+	max-width: 22ch;
+	font-size: clamp(1.875rem, 6vw, 2.5rem);
+	line-height: 1.12;
+	letter-spacing: -0.02em;
+	text-wrap: balance;
+}
+
+.gp-hero__lead {
+	margin: 0;
+	max-width: var(--gp-measure);
+	line-height: 1.55;
+}
+
+.gp-hero__install {
+	display: flex;
+	align-items: center;
+	gap: var(--g-spacing-2);
+	padding: var(--g-spacing-1) var(--g-spacing-1) var(--g-spacing-1) var(--g-spacing-3);
+	border: 1px solid var(--g-color-line-generic);
+	border-radius: var(--g-border-radius-l);
+	background: var(--g-color-base-generic-ultralight);
+}
+
+.gp-hero__install-code {
+	font-family: var(--g-font-family-monospace);
+	font-size: var(--g-text-code-2-font-size);
+	line-height: var(--g-text-code-2-line-height);
+}
+
+/* ---- body ---------------------------------------------------------------- */
+
+.gp-layout {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: var(--g-spacing-8);
+	padding-bottom: 4rem;
+}
+
+/* ---- table of contents --------------------------------------------------- */
+
+/* uikit's Toc draws the rail, the indent and every state, the active one
+   included -- the inlined script only sets the class as you scroll. What the
+   component leaves to the page is the type, since it inherits whatever it is
+   dropped into. Nothing else here overrides it. */
+.gp-toc {
+	display: none; /* shown beside the prose from the two-column width up */
+	min-width: 0;
+	font-size: var(--g-text-body-1-font-size);
+	line-height: var(--g-text-body-1-line-height);
+}
+
+/* ---- two columns --------------------------------------------------------- */
+
+/* The one breakpoint on the page. Below it the hero is the words alone and
+   the table of contents is not shown at all; from it up, the mark sits
+   beside the words and the contents beside the prose, sticky. The two switch
+   together, so the page never has one of them without the other. This block
+   comes after every base rule it overrides, since the cascade breaks the tie
+   between equal selectors by order. */
+@media (min-width: 64rem) {
+	.gp-hero {
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: var(--g-spacing-10);
+	}
+
+	.gp-hero__art {
+		display: block;
+		width: 11rem;
+		height: auto;
+		aspect-ratio: 1;
+	}
+
+	.gp-layout {
+		grid-template-columns: 15rem minmax(0, 1fr);
+		gap: var(--g-spacing-9);
+	}
+
+	.gp-toc {
+		display: block;
+		position: sticky;
+		top: calc(var(--gp-topbar-height) + var(--g-spacing-5));
+		align-self: start;
+		max-height: calc(100vh - var(--gp-topbar-height) - var(--g-spacing-8));
+		overflow-y: auto;
+	}
+}
+
+
+/* ---- prose --------------------------------------------------------------- */
+
+/* body-3 is 17px, uikit's largest body step and the one a column of text
+   wants; its 24px leading is a control's, so the leading is set in ems. */
+.gp-prose {
+	min-width: 0;
+	font-size: var(--g-text-body-3-font-size);
+	line-height: 1.6;
+}
+
+.gp-prose p {
+	margin: 0 0 1.15em;
+	max-width: var(--gp-measure);
+}
+
+.gp-intro {
+	margin-bottom: 3rem;
+}
+
+.gp-intro p:last-child {
+	margin-bottom: 0;
+}
+
+.gp-section {
+	margin-bottom: 3.5rem;
+	scroll-margin-top: calc(var(--gp-topbar-height) + var(--g-spacing-4));
+}
+
+.gp-section__heading {
+	display: flex;
+	align-items: baseline;
+	gap: var(--g-spacing-3);
+	margin: 0 0 var(--g-spacing-4);
+	line-height: 1.25;
+	letter-spacing: -0.01em;
+	text-wrap: balance;
+}
+
+.gp-section__number {
+	flex: none;
+	font-family: var(--g-font-family-monospace);
+	font-size: var(--g-text-body-2-font-size);
+	font-weight: var(--g-text-body-font-weight);
+	font-variant-numeric: tabular-nums;
+	color: var(--g-color-text-secondary);
+}
+
+/* Inline code inside prose: one step below body-3, which is code-inline-3, so
+   it sits on the line instead of shrinking out of it. */
+.gp-code {
+	padding: 0.1em 0.25em;
+	border-radius: var(--g-border-radius-xs);
+	background: var(--g-color-base-generic);
+}
+
+/* ---- code figures -------------------------------------------------------- */
+
+.gp-figure {
+	margin: var(--g-spacing-5) 0 var(--g-spacing-6);
+	overflow: hidden;
+	border: 1px solid var(--g-color-line-generic);
+	border-radius: var(--g-border-radius-l);
+}
+
+.gp-figure__caption {
+	display: flex;
+	align-items: center;
+	gap: var(--g-spacing-2);
+	padding: var(--g-spacing-2) var(--g-spacing-4);
+	border-bottom: 1px solid var(--g-color-line-generic);
+	color: var(--g-color-text-secondary);
+	font-family: var(--g-font-family-monospace);
+	font-size: var(--g-text-body-1-font-size);
+	line-height: var(--g-text-body-1-line-height);
+}
+
+.gp-figure__body {
+	margin: 0;
+	padding: var(--g-spacing-3) var(--g-spacing-4);
+	overflow-x: auto;
+	font-family: var(--g-font-family-monospace);
+	font-size: var(--g-text-code-2-font-size);
+	line-height: 1.55;
+	tab-size: 4;
+}
+
+.gp-figure__body code {
+	font-family: inherit;
+}
+
+/* Shiki brings its own pre; the padding above is the one that counts. */
+.gp-figure__body > pre {
+	margin: 0;
+	padding: 0;
+}
+
+.gp-figure__comment {
+	color: var(--g-color-text-secondary);
+}
+
+/* Shiki emits both themes as custom properties and the theme class picks one,
+   so switching does not re-highlight anything. */
+.shiki,
+.shiki span {
+	color: var(--shiki-light);
+	background-color: transparent !important;
+}
+
+.g-root_theme_dark .shiki,
+.g-root_theme_dark .shiki span {
+	color: var(--shiki-dark);
+}
+
+/* ---- footer -------------------------------------------------------------- */
+
+.gp-footer {
+	border-top: 1px solid var(--g-color-line-generic);
+	padding-block: var(--g-spacing-6) var(--g-spacing-10);
+}
+
+.gp-footer p {
+	max-width: var(--gp-measure);
+	margin: 0;
+}
+
+/* ---- drawings ------------------------------------------------------------ */
+
+/* The drawings are inline SVG, and every colour in them is a token here, so
+   they follow the theme the way the text does. They scale with the column;
+   their text is set in the viewBox's units, 12px at the full width. */
+.gp-figure__drawing {
+	padding: var(--g-spacing-4);
+	overflow-x: auto;
+}
+
+/* Scaled with the column down to a width where its 11px labels still read,
+   and scrolled below that. */
+.gp-diagram {
+	display: block;
+	width: 100%;
+	min-width: 560px;
+	height: auto;
+	font-family: var(--g-font-family-monospace);
+	font-size: 12px;
+}
+
+.gp-d-box rect {
+	fill: var(--g-color-base-float);
+	stroke: var(--g-color-line-generic-accent);
+	stroke-width: 1;
+}
+
+.gp-d-box_actor rect {
+	fill: var(--g-color-base-info-light);
+	stroke: var(--g-color-line-info);
+}
+
+.gp-d-box_supervisor rect {
+	fill: var(--g-color-base-misc-light);
+	stroke: var(--g-color-line-misc);
+}
+
+.gp-d-box_platform rect {
+	fill: var(--g-color-base-generic);
+	stroke: var(--g-color-line-generic-accent);
+}
+
+.gp-d-box_contract rect {
+	fill: var(--g-color-base-positive-light);
+	stroke: var(--g-color-line-positive);
+}
+
+.gp-d-box_outside rect {
+	fill: transparent;
+	stroke: var(--g-color-line-generic-accent);
+	stroke-dasharray: 4 3;
+}
+
+.gp-d-title {
+	fill: var(--g-color-text-primary);
+}
+
+.gp-d-sub,
+.gp-d-note {
+	fill: var(--g-color-text-secondary);
+	font-size: 11px;
+}
+
+/* A label that crosses a line keeps a halo of the background around it, so
+   the line stops short of the text instead of striking through it. */
+.gp-d-note {
+	paint-order: stroke;
+	stroke: var(--g-color-base-background);
+	stroke-width: 4px;
+	stroke-linejoin: round;
+}
+
+.gp-d-frame rect {
+	fill: none;
+	stroke: var(--g-color-line-generic-accent);
+	stroke-width: 1.5;
+	stroke-dasharray: 6 4;
+}
+
+.gp-d-frame-title {
+	fill: var(--g-color-text-secondary);
+	font-size: 11px;
+}
+
+.gp-d-line {
+	fill: none;
+	stroke: var(--g-color-text-secondary);
+	stroke-width: 1.3;
+}
+
+.gp-d-line_dashed {
+	stroke-dasharray: 5 4;
+}
+
+.gp-d-line_tree {
+	stroke: var(--g-color-line-generic-accent);
+}
+
+.gp-d-head {
+	fill: var(--g-color-text-secondary);
+}
+
+.gp-d-lifeline {
+	stroke: var(--g-color-line-generic);
+	stroke-dasharray: 3 4;
+}
