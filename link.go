@@ -214,11 +214,7 @@ func (n *Node) lost(peer string, envs []*grpcprocv1.Envelope, unsent error) {
 
 // failCall ends a pending call with err, unless it has ended already.
 func (n *Node) failCall(ref uint64, err error) {
-	n.mu.Lock()
-	pc := n.pending[ref]
-	delete(n.pending, ref)
-	n.mu.Unlock()
-	if pc != nil {
+	if pc := n.takePending(ref); pc != nil {
 		pc.ch <- callResult{err: err}
 	}
 }

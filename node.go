@@ -170,7 +170,20 @@ type Node struct {
 
 type pendingCall struct {
 	node string
-	ch   chan callResult
+	// ch has room for the one answer. Whoever answers first removes the call
+	// from n.pending, under n.mu, so no one else can: takePending, nodeDown,
+	// Stop.
+	ch chan callResult
+}
+
+// takePending removes and returns the call waiting on ref, or nil: the
+// caller that gets it answers it.
+func (n *Node) takePending(ref uint64) *pendingCall {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	pc := n.pending[ref]
+	delete(n.pending, ref)
+	return pc
 }
 
 type callResult struct {
@@ -658,10 +671,17 @@ func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to dest, req 
 	n.mu.Lock()
 	n.pending[ref] = pc
 	n.mu.Unlock()
+	// Whatever answers the call removes it from pending first (see
+	// pendingCall), so only a call that ends unanswered does it here, and
+	// takes n.mu again: an encode or route error, ctx, or a panic on the way,
+	// such as a hook's.
+	answered := false
 	defer func() {
-		n.mu.Lock()
-		delete(n.pending, ref)
-		n.mu.Unlock()
+		if !answered {
+			n.mu.Lock()
+			delete(n.pending, ref)
+			n.mu.Unlock()
+		}
 	}()
 	if caller != nil {
 		caller.sent.Add(1)
@@ -687,6 +707,7 @@ func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to dest, req 
 	}
 	select {
 	case r := <-pc.ch:
+		answered = true
 		return r.body, r.err
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -844,10 +865,7 @@ func (n *Node) deliver(from, to PID, name string, body proto.Message, md Metadat
 }
 
 func (n *Node) deliverReply(ref uint64, body proto.Message, status grpcprocv1.Status, errText string) {
-	n.mu.Lock()
-	pc := n.pending[ref]
-	delete(n.pending, ref)
-	n.mu.Unlock()
+	pc := n.takePending(ref)
 	if pc == nil {
 		return // the caller gave up
 	}
