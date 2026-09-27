@@ -317,11 +317,11 @@ supervisor restarts: 1/3 in 1m0s
 
 A `ProcessInfo` has the state, mailbox depth and oldest wait, messages sent
 and received, calls in flight, last message type, watchers, monitors and log
-level; a `LinkInfo` its messages, bytes and reconnects, and for a peer whose
-dials fail, when it will be dialed again. `node.Inspect` adds what the
-process says about itself: a process busy in a handler answers when it next
-receives, and one that never does reports `busy for 12s`, which is the
-diagnosis. With a state machine that is one line:
+level; a `LinkInfo` its messages, bytes, reconnects and envelopes waiting to
+be written, and for a peer whose dials fail, when it will be dialed again.
+`node.Inspect` adds what the process says about itself: a process busy in a
+handler answers when it next receives, and one that never does reports `busy
+for 12s`, which is the diagnosis. With a state machine that is one line:
 
 ```go
 grpcproc.WithInspect(func() map[string]string { return map[string]string{"state": rec.state.String()} })

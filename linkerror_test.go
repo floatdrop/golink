@@ -86,3 +86,31 @@ func TestCallWithADoneContextSendsNothing(t *testing.T) {
 	default:
 	}
 }
+
+// A call still waiting on a peer when its node stops fails, rather than wait
+// for an answer that no link will bring.
+func TestStopFailsCallsWaitingOnPeers(t *testing.T) {
+	c := grpcproctest.New(t, "a", "b")
+	called := make(chan struct{})
+	if _, err := c.Node("b").Spawn(func(p *grpcproc.Process[*testpb.Ping]) error {
+		if _, err := p.Receive(); err != nil {
+			return err
+		}
+		close(called)
+		_, err := p.Receive() // never answers
+		return err
+	}, grpcproc.WithName("silent")); err != nil {
+		t.Fatal(err)
+	}
+	a := c.Node("a")
+	failed := make(chan error, 1)
+	go func() {
+		_, err := a.Call[*testpb.Ping](context.Background(), grpcproc.Named[*testpb.Ping]("b", "silent"), &testpb.Ping{})
+		failed <- err
+	}()
+	<-called
+	c.Stop("a")
+	if err := <-failed; !errors.Is(err, grpcproc.ErrNodeStopped) {
+		t.Fatalf("got %v", err)
+	}
+}

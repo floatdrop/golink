@@ -56,6 +56,8 @@ message Link {
   // Set on an outbound link that is down because dials to the peer failed:
   // sends to it fail at once until then (Config.DialBackoff).
   google.protobuf.Timestamp retry_at = 9;
+  // Outbound: envelopes waiting to be written.
+  uint32 queued = 10;
 }
 
 message NodeInfo {

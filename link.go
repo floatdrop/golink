@@ -66,6 +66,7 @@ func (s *linkStats) fill(li *LinkInfo) {
 // ---------- outbound ----------
 
 type outLink struct {
+	node     *Node
 	peer     NodeID
 	cc       *grpc.ClientConn
 	stream   grpc.BidiStreamingClient[grpcprocv1.Frame, grpcprocv1.Frame]
@@ -76,6 +77,7 @@ type outLink struct {
 	closing  atomic.Bool
 	drained  chan struct{} // closed by writeLoop once closing is set and the queue is empty
 	recvDone chan struct{} // closed when the server ends the stream
+	inflight atomic.Int64  // envelopes the writer has taken and not yet written
 	linkStats
 }
 
@@ -87,13 +89,14 @@ func (l *outLink) send(env *grpcprocv1.Envelope) error {
 }
 
 func (l *outLink) info() LinkInfo {
-	li := LinkInfo{Peer: l.peer, Outbound: true}
+	li := LinkInfo{Peer: l.peer, Outbound: true, Queued: l.q.len() + int(l.inflight.Load())}
 	l.fill(&li)
 	return li
 }
 
-func (l *outLink) start(n *Node) {
-	go l.writeLoop(n)
+func (l *outLink) start() {
+	n := l.node
+	go l.writeLoop()
 	go func() {
 		// The server never sends after Hello; Recv returning is the close signal.
 		_, err := l.stream.Recv()
@@ -105,7 +108,8 @@ func (l *outLink) start(n *Node) {
 	}()
 }
 
-func (l *outLink) writeLoop(n *Node) {
+func (l *outLink) writeLoop() {
+	n := l.node
 	for {
 		select {
 		case <-l.q.notify:
@@ -114,14 +118,27 @@ func (l *outLink) writeLoop(n *Node) {
 		}
 		// Everything queued since the last write goes out together: under
 		// load, many envelopes share one gRPC message.
-		for batch := l.q.drain(); len(batch) > 0; {
+		batch := l.q.drain()
+		l.inflight.Store(int64(len(batch)))
+		for len(batch) > 0 {
 			k, body := frameOf(batch)
 			if err := l.stream.Send(&grpcprocv1.Frame{Envelopes: batch[:k]}); err != nil {
+				l.inflight.Store(0)
+				// The frame may have gone out before the stream broke: its
+				// messages are dead letters, and its calls fail with the
+				// peer, as possibly handled. The rest of the batch never
+				// went: back on the queue, where closing the link fails its
+				// calls as unsent.
+				n.lost(l.peer.Name, batch[:k], nil)
+				if !l.q.putBack(batch[k:]) {
+					n.lost(l.peer.Name, batch[k:], err) // the link has closed meanwhile
+				}
 				n.connLost(l.peer.Name, l, nil, err, false)
 				return
 			}
 			l.messages.Add(uint64(k))
 			l.bytes.Add(uint64(body))
+			l.inflight.Add(-int64(k))
 			batch = batch[k:]
 		}
 		if l.closing.Load() && l.q.len() == 0 {
@@ -150,17 +167,60 @@ func (l *outLink) shutdown(ctx context.Context) {
 	case <-l.done:
 	case <-ctx.Done():
 	}
-	l.close(nil)
+	l.close(ErrNodeStopped)
 }
 
 func (l *outLink) close(err error) {
 	l.once.Do(func() {
 		l.fail(err)
 		close(l.done)
-		l.q.close() // undelivered envelopes; senders learn through Down / call failure
+		// What is still queued was never written: its messages are dead
+		// letters, and its calls fail now, as unsent.
+		cause := err
+		if cause == nil {
+			cause = ErrNoConnection
+		}
+		l.node.lost(l.peer.Name, l.q.close(), cause)
 		l.cancel()
 		_ = l.cc.Close()
 	})
+}
+
+// lost handles envelopes a link to peer failed to write. Their messages
+// are dead letters (ReasonNoConnection). If unsent is set, the envelopes
+// surely never left, and a call among them fails at once with it, as a
+// LinkError that says so; otherwise its call fails when the peer is
+// declared down, as one that may have been handled. The other envelopes are
+// left alone: the peer learns of a lost reply or Down when its link from
+// this node ends, a lost monitor fires when this node declares the peer
+// down, and a lost exit is lost, as in Erlang.
+func (n *Node) lost(peer string, envs []*grpcprocv1.Envelope, unsent error) {
+	for _, env := range envs {
+		switch env.GetKind() {
+		case grpcprocv1.Kind_KIND_SEND:
+		case grpcprocv1.Kind_KIND_CALL:
+			if unsent != nil {
+				n.failCall(env.GetRef(), &LinkError{Peer: peer, Err: unsent, Unsent: true})
+			}
+		default:
+			continue
+		}
+		body, _ := decodeBody(env)
+		from := PID{Node: n.id.Name, Incarnation: env.GetFromIncarnation(), ID: env.GetFromId()}
+		to := PID{Node: peer, Incarnation: env.GetToIncarnation(), ID: env.GetToId()}
+		n.deadLetter(from, to, body, ReasonNoConnection)
+	}
+}
+
+// failCall ends a pending call with err, unless it has ended already.
+func (n *Node) failCall(ref uint64, err error) {
+	n.mu.Lock()
+	pc := n.pending[ref]
+	delete(n.pending, ref)
+	n.mu.Unlock()
+	if pc != nil {
+		pc.ch <- callResult{err: err}
+	}
 }
 
 type dialOp struct {
@@ -271,6 +331,7 @@ func (n *Node) finishDial(peer string, d *dialOp) {
 	if err != nil {
 		why = err.Error() // outside n.mu: the Resolver's or an interceptor's error
 	}
+	var discard *outLink
 	n.mu.Lock()
 	delete(n.dialing, peer)
 	if err != nil {
@@ -281,15 +342,17 @@ func (n *Node) finishDial(peer string, d *dialOp) {
 	} else {
 		delete(n.backoff, peer)
 		if n.stopped {
-			l.close(ErrNodeStopped)
-			l, err = nil, ErrNodeStopped
+			discard, l, err = l, nil, ErrNodeStopped
 		} else {
 			n.out[peer] = l
 		}
 	}
 	n.mu.Unlock()
+	if discard != nil {
+		discard.close(ErrNodeStopped) // outside n.mu, as every close
+	}
 	if err == nil {
-		l.start(n)
+		l.start()
 		n.linkUp(l.peer)
 	}
 	d.l, d.err = l, err
@@ -354,6 +417,7 @@ func (n *Node) dial(peer string) (*outLink, error) {
 		return nil, err
 	}
 	l := &outLink{
+		node:        n,
 		established: time.Now(),
 		peer:        NodeID{Name: peer, Incarnation: inc},
 		cc:          cc,

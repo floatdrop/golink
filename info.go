@@ -73,6 +73,7 @@ type LinkInfo struct {
 	Reconnects    uint64
 	Messages      uint64 // envelopes: messages, calls, replies, monitors, downs
 	Bytes         uint64 // message bodies carried, not counting framing
+	Queued        int    // outbound: envelopes waiting to be written
 	LastError     string
 	// RetryAt is set on an outbound link that is down because dials to the
 	// peer failed: sends to the peer fail at once until then, and the first

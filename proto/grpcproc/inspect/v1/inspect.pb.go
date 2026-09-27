@@ -201,7 +201,9 @@ type Link struct {
 	LastError     string                 `protobuf:"bytes,8,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
 	// Set on an outbound link that is down because dials to the peer failed:
 	// sends to it fail at once until then (Config.DialBackoff).
-	RetryAt       *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=retry_at,json=retryAt,proto3" json:"retry_at,omitempty"`
+	RetryAt *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=retry_at,json=retryAt,proto3" json:"retry_at,omitempty"`
+	// Outbound: envelopes waiting to be written.
+	Queued        uint32 `protobuf:"varint,10,opt,name=queued,proto3" json:"queued,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -297,6 +299,13 @@ func (x *Link) GetRetryAt() *timestamppb.Timestamp {
 		return x.RetryAt
 	}
 	return nil
+}
+
+func (x *Link) GetQueued() uint32 {
+	if x != nil {
+		return x.Queued
+	}
+	return 0
 }
 
 type NodeInfo struct {
@@ -1766,7 +1775,7 @@ const file_grpcproc_inspect_v1_inspect_proto_rawDesc = "" +
 	"!grpcproc/inspect/v1/inspect.proto\x12\x13grpcproc.inspect.v1\x1a\x1agrpcproc/v1/grpcproc.proto\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\">\n" +
 	"\x06NodeID\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
-	"\vincarnation\x18\x02 \x01(\x04R\vincarnation\"\xf4\x02\n" +
+	"\vincarnation\x18\x02 \x01(\x04R\vincarnation\"\x8c\x03\n" +
 	"\x04Link\x12/\n" +
 	"\x04peer\x18\x01 \x01(\v2\x1b.grpcproc.inspect.v1.NodeIDR\x04peer\x12\x1a\n" +
 	"\boutbound\x18\x02 \x01(\bR\boutbound\x124\n" +
@@ -1779,7 +1788,9 @@ const file_grpcproc_inspect_v1_inspect_proto_rawDesc = "" +
 	"\x05bytes\x18\a \x01(\x04R\x05bytes\x12\x1d\n" +
 	"\n" +
 	"last_error\x18\b \x01(\tR\tlastError\x125\n" +
-	"\bretry_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\aretryAt\"\xb4\x02\n" +
+	"\bretry_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\aretryAt\x12\x16\n" +
+	"\x06queued\x18\n" +
+	" \x01(\rR\x06queued\"\xb4\x02\n" +
 	"\bNodeInfo\x12+\n" +
 	"\x02id\x18\x01 \x01(\v2\x1b.grpcproc.inspect.v1.NodeIDR\x02id\x12\x1c\n" +
 	"\tadvertise\x18\x02 \x01(\tR\tadvertise\x129\n" +

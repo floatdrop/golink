@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"slices"
 	"testing"
 	"time"
 
@@ -158,14 +159,13 @@ func TestDispatchMalformed(t *testing.T) {
 func TestConnLostStaleAndSendClosed(t *testing.T) {
 	n := newTestNode(t, "a")
 	// Stale links are just closed.
-	out := &outLink{peer: NodeID{Name: "b"}, q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}), drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
-	out.cc = nil
+	out := &outLink{node: n, peer: NodeID{Name: "b"}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}), drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
 	in := &inLink{peer: NodeID{Name: "b"}, closed: make(chan struct{})}
 	n.connLost("b", nil, in, nil, false)
 	if err := out.send(nil); err != nil {
 		t.Fatal(err)
 	}
-	out.closeNoConn(io.EOF)
+	out.close(io.EOF)
 	if le, ok := errors.AsType[*LinkError](out.send(nil)); !ok || !le.Unsent || !errors.Is(le, ErrNoConnection) {
 		t.Fatalf("send on closed: %v", le)
 	}
@@ -179,16 +179,6 @@ func TestConnLostStaleAndSendClosed(t *testing.T) {
 	if _, err := n.getOut(t.Context(), "b"); !errors.Is(err, ErrNodeStopped) {
 		t.Fatal(err)
 	}
-}
-
-// closeNoConn is close without a ClientConn to close (tests build outLinks by hand).
-func (l *outLink) closeNoConn(err error) {
-	l.once.Do(func() {
-		l.fail(err)
-		close(l.done)
-		l.q.close()
-		l.cancel()
-	})
 }
 
 // fakeStream is a server stream whose Send fails or whose Recv ends at will.
@@ -239,39 +229,88 @@ func TestLinkHandlerBranches(t *testing.T) {
 	}
 }
 
-func TestOutboundWriteFailure(t *testing.T) {
-	// A stream whose Send fails takes the link down.
-	n := newTestNode(t, "a")
+// testConn is a client connection that is never dialed, for links built by
+// hand.
+func testConn(t *testing.T) *grpc.ClientConn {
+	t.Helper()
 	cc, err := grpc.NewClient("passthrough:///x", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	l := &outLink{
-		peer: NodeID{Name: "b"}, cc: cc, q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
-		drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {},
-		stream: &fakeClientStream{sendErr: io.ErrClosedPipe},
+	return cc
+}
+
+// A stream whose Send fails takes the link down. The frame it was writing
+// may have gone out: its messages are dead letters and its call fails with
+// the peer, as possibly handled. The rest of the batch never went: its call
+// fails as unsent, whether the link was still open or had closed meanwhile.
+func TestOutboundWriteFailure(t *testing.T) {
+	for _, closedFirst := range []bool{false, true} {
+		n := newTestNode(t, "a")
+		entered, release := make(chan struct{}), make(chan struct{})
+		l := &outLink{
+			node: n, peer: NodeID{Name: "b"}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
+			drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {},
+		}
+		l.stream = &fakeClientStream{sendErr: io.ErrClosedPipe, onSend: func() {
+			close(entered)
+			<-release
+			if closedFirst {
+				l.close(io.EOF)
+			}
+		}}
+		n.mu.Lock()
+		n.out["b"] = l
+		written, unwritten := &pendingCall{node: "b", ch: make(chan callResult, 1)}, &pendingCall{node: "b", ch: make(chan callResult, 1)}
+		n.pending[9], n.pending[10] = written, unwritten
+		n.mu.Unlock()
+		// The first call fills a frame on its own, so the second waits for
+		// the next.
+		_ = l.send(&grpcprocv1.Envelope{Kind: grpcprocv1.Kind_KIND_CALL, Ref: 9, Body: make([]byte, 2*maxFrame)})
+		_ = l.send(&grpcprocv1.Envelope{Kind: grpcprocv1.Kind_KIND_CALL, Ref: 10})
+		go l.writeLoop()
+		<-entered
+		if q := l.info().Queued; q != 2 {
+			t.Fatalf("queued while writing: %d", q)
+		}
+		close(release)
+		<-l.done
+		le, ok := errors.AsType[*LinkError]((<-unwritten.ch).err)
+		if !ok || !le.Unsent {
+			t.Fatalf("closed first %v: the call never written: %v", closedFirst, le)
+		}
+		if n.deadLetters.Load() != 2 {
+			t.Fatalf("dead letters %d", n.deadLetters.Load())
+		}
+		if !closedFirst {
+			le, ok := errors.AsType[*LinkError]((<-written.ch).err)
+			if !ok || le.Unsent {
+				t.Fatalf("the call being written: %v", le)
+			}
+			n.mu.Lock()
+			_, still := n.out["b"]
+			n.mu.Unlock()
+			if still {
+				t.Fatal("link still registered")
+			}
+		}
+		// shutdown on a link that is already gone returns at once.
+		l.shutdown(t.Context())
 	}
-	n.out["b"] = l
-	go l.writeLoop(n)
-	_ = l.send(&grpcprocv1.Envelope{})
-	select {
-	case <-l.done:
-	case <-time.After(time.Second):
-		t.Fatal("link not closed")
-	}
-	if _, ok := n.out["b"]; ok {
-		t.Fatal("link still registered")
-	}
-	// shutdown on a link that is already gone returns at once.
-	l.shutdown(t.Context())
 }
 
 type fakeClientStream struct {
 	grpc.ClientStream
 	sendErr error
+	onSend  func()
 }
 
-func (f *fakeClientStream) Send(*grpcprocv1.Frame) error     { return f.sendErr }
+func (f *fakeClientStream) Send(*grpcprocv1.Frame) error {
+	if f.onSend != nil {
+		f.onSend()
+	}
+	return f.sendErr
+}
 func (f *fakeClientStream) Recv() (*grpcprocv1.Frame, error) { select {} }
 func (f *fakeClientStream) CloseSend() error                 { return nil }
 
@@ -285,7 +324,7 @@ func TestShutdownArms(t *testing.T) {
 	l.q.notify <- struct{}{} // notify already pending: the non-blocking push takes the default arm
 	expired, cancel := context.WithCancel(t.Context())
 	cancel()
-	l.once.Do(func() {}) // neutralise close (no ClientConn to close)
+	l.once.Do(func() {}) // neutralise close: these arms are about shutdown's waits
 	l.shutdown(expired)
 	// Drained, then the link dies before the peer ends the stream.
 	l = mk()
@@ -542,5 +581,62 @@ func TestFailedDialBackoff(t *testing.T) {
 	locked(func() { _, kept = n.backoff["c"] })
 	if kept {
 		t.Fatal("stale backoff kept")
+	}
+}
+
+// What a closing link never wrote: its messages are dead letters, and its
+// calls fail at once as unsent. The queue depth counts what waits.
+func TestLostEnvelopes(t *testing.T) {
+	n := newTestNode(t, "a")
+	pc := &pendingCall{node: "b", ch: make(chan callResult, 1)}
+	n.mu.Lock()
+	n.pending[7] = pc
+	n.mu.Unlock()
+	events := n.Subscribe(t.Context(), 8)
+	l := &outLink{node: n, peer: NodeID{Name: "b"}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
+		drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
+	send := wire(grpcprocv1.Kind_KIND_SEND, PID{Node: "a", Incarnation: 1, ID: 3}, PID{Node: "b", Incarnation: 2, ID: 4}, "")
+	if err := encodeBody(send, &grpcprocv1.Hello{Node: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	call := wire(grpcprocv1.Kind_KIND_CALL, PID{Node: "a", Incarnation: 1, ID: 3}, PID{Node: "b"}, "stock")
+	call.Ref = 7
+	for _, env := range []*grpcprocv1.Envelope{send, call, wire(grpcprocv1.Kind_KIND_MONITOR, PID{}, PID{}, "")} {
+		_ = l.send(env)
+	}
+	if q := l.info().Queued; q != 3 {
+		t.Fatalf("queued %d", q)
+	}
+
+	l.close(nil)
+	if le, ok := errors.AsType[*LinkError]((<-pc.ch).err); !ok || !le.Unsent || !errors.Is(le, ErrNoConnection) {
+		t.Fatalf("call: %v", le)
+	}
+	if got := n.deadLetters.Load(); got != 2 {
+		t.Fatalf("dead letters %d", got)
+	}
+	e := <-events
+	if e.Kind != EventDeadLetter || e.Reason != ReasonNoConnection || e.From != (PID{Node: "a", Incarnation: 1, ID: 3}) ||
+		e.To != (PID{Node: "b", Incarnation: 2, ID: 4}) || e.Type != "grpcproc.v1.Hello" {
+		t.Fatalf("%+v", e)
+	}
+	// A call already ended is left alone.
+	n.failCall(7, io.EOF)
+}
+
+// putBack returns items to the front of an open queue, and refuses a closed
+// one.
+func TestQueuePutBack(t *testing.T) {
+	q := newQueue[int](false)
+	q.push(3)
+	if !q.putBack([]int{1, 2}) || q.len() != 3 {
+		t.Fatal("put back refused")
+	}
+	if got := q.drain(); !slices.Equal(got, []int{1, 2, 3}) {
+		t.Fatalf("got %v", got)
+	}
+	q.close()
+	if q.putBack([]int{4}) {
+		t.Fatal("put back into a closed queue")
 	}
 }

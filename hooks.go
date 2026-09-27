@@ -50,9 +50,10 @@ type Hooks interface {
 	OnSend(s SendInfo, md Metadata) (Metadata, Done)
 	OnReceive(r ReceiveInfo, md Metadata) (Metadata, Done)
 	// OnDeadLetter runs when a message could not be delivered: no such
-	// process (ReasonNoProc), wrong type (ReasonType), node unreachable
-	// (ReasonNoConnection). body is nil for a message that could not be
-	// decoded.
+	// process (ReasonNoProc), wrong type (ReasonType), or queued on a link
+	// that broke before or while writing it (ReasonNoConnection). A message
+	// that could not be sent at all is not one: its sender gets the error.
+	// body is nil for a message that could not be decoded.
 	OnDeadLetter(from, to PID, body proto.Message, reason string)
 	OnLinkUp(peer NodeID)
 	OnLinkDown(peer NodeID, err error)

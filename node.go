@@ -332,6 +332,15 @@ func (n *Node) Stop(ctx context.Context) error {
 	for _, l := range ins {
 		l.close()
 	}
+	// Calls still waiting on a peer will get no answer, and nothing declares
+	// the peers down any more: fail them. They may have been handled.
+	n.mu.Lock()
+	pending := n.pending
+	n.pending = map[uint64]*pendingCall{}
+	n.mu.Unlock()
+	for _, pc := range pending {
+		pc.ch <- callResult{err: ErrNodeStopped}
+	}
 	// A dial that was in flight when the node stopped completes, and
 	// finishDial discards its link: wait for it to let go of the node.
 	if dialing {

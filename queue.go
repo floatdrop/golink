@@ -1,6 +1,7 @@
 package grpcproc
 
 import (
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -131,6 +132,20 @@ func (q *queue[T]) drain() []T {
 	q.popped.Store(q.popped.Load() + int64(len(q.out)))
 	q.mu.Unlock()
 	return q.out
+}
+
+// putBack returns items the consumer took but did not use to the front of
+// the queue, unless it is closed; it reports whether it did. Consumer only;
+// not for stamped queues.
+func (q *queue[T]) putBack(items []T) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.closed {
+		return false
+	}
+	q.in = append(slices.Clone(items), q.in...) // items may share the consumer's buffer
+	q.pushed += int64(len(items))
+	return true
 }
 
 // close stops accepting items and returns those not yet swapped to the

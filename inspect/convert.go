@@ -70,6 +70,7 @@ func nodeInfoTo(n grpcproc.NodeInfo) *inspectv1.NodeInfo {
 			Bytes:         l.Bytes,
 			LastError:     l.LastError,
 			RetryAt:       timeTo(l.RetryAt),
+			Queued:        uint32(l.Queued),
 		})
 	}
 	return out
@@ -141,6 +142,7 @@ func NodeInfo(n *inspectv1.NodeInfo) grpcproc.NodeInfo {
 			Messages:   l.GetMessages(),
 			Bytes:      l.GetBytes(),
 			LastError:  l.GetLastError(),
+			Queued:     int(l.GetQueued()),
 		}
 		if l.GetEstablishedAt() != nil {
 			li.EstablishedAt = l.GetEstablishedAt().AsTime()

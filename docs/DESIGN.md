@@ -133,9 +133,13 @@ message Envelope {                                   // one flat message, decode
   dispatched, in order), or when there is no inbound link at all; an outbound
   failure alone drops that link and the next send dials again. Then every
   monitor that crossed the link fires `Down{noconnection}` and every pending
-  call fails with `ErrNoConnection`: the peer may have handled it. Only a
-  `LinkError` whose `Unsent` is set is known safe to retry: the message never
-  left this node. A call that ends with its ctx may have been handled too.
+  call fails with `ErrNoConnection`: the peer may have handled it. Calls
+  still queued on the broken link, never written, fail at once as `Unsent`
+  instead, and their messages, like those in a frame being written, become
+  dead letters. Only a `LinkError` whose `Unsent` is set is known safe to
+  retry: the message never left this node. A call that ends with its ctx may
+  have been handled too, and so may one still waiting when its node stops,
+  which fails with `ErrNodeStopped`.
   `Unsent` is the field, not `Sent`, so that a `LinkError` built without it
   claims nothing. gRPC keepalive on both sides (client
   `keepalive.ClientParameters`, server `keepalive.ServerParameters`) is what
@@ -243,7 +247,8 @@ guarantee "a process's last message is seen before its `Down`" holds for typed
 processes too. Mailboxes are unbounded so that delivery never blocks a link
 (the Erlang choice; a bounded mailbox in one process would stall every other
 process behind it on the shared stream). Backpressure is an application
-concern; the mailbox depth is visible (see Observability) so it can be one.
+concern; the mailbox depth, and each link's queue, are visible (see
+Observability) so it can be one.
 
 Exit reasons: `normal`, `noproc`, `noconnection`, `shutdown`, `killed`, a
 panic (`panic: …` with the stack logged), or the error string the function
@@ -335,8 +340,9 @@ func (n *Node) Info() NodeInfo                   // name, incarnation, uptime, c
 ```
 
 `LinkInfo` per peer: state, established at, reconnects, messages and bytes in
-and out, last error, and when a peer whose dials fail is dialed again. Ergo's
-network charts are drawn from exactly these.
+and out, envelopes waiting to be written, last error, and when a peer whose
+dials fail is dialed again. Ergo's network charts are drawn from exactly
+these.
 
 ### Self-inspection
 
