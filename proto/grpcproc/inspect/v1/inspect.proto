@@ -53,6 +53,9 @@ message Link {
   uint64 messages = 6;
   uint64 bytes = 7;
   string last_error = 8;
+  // Set on an outbound link that is down because dials to the peer failed:
+  // sends to it fail at once until then (Config.DialBackoff).
+  google.protobuf.Timestamp retry_at = 9;
 }
 
 message NodeInfo {

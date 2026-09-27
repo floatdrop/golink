@@ -74,6 +74,12 @@ type LinkInfo struct {
 	Messages      uint64 // envelopes: messages, calls, replies, monitors, downs
 	Bytes         uint64 // message bodies carried, not counting framing
 	LastError     string
+	// RetryAt is set on an outbound link that is down because dials to the
+	// peer failed: sends to the peer fail at once until then, and the first
+	// send after it dials again (Config.DialBackoff). It may be in the past:
+	// nothing has been sent since, or that dial is under way. Such a link's
+	// Peer has no Incarnation, which only a dial that succeeds learns.
+	RetryAt time.Time
 }
 
 // NodeInfo is a snapshot of the node.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net"
 	"testing"
 	"time"
@@ -483,5 +484,63 @@ func TestNoDispatchAfterClose(t *testing.T) {
 	l.close()
 	if l.deliver(n, &grpcprocv1.Frame{Envelopes: []*grpcprocv1.Envelope{{}}}) {
 		t.Fatal("dispatched after close")
+	}
+}
+
+// The wait doubles from a 32nd of DialBackoff to DialBackoff, jittered by up
+// to a fifth; it does not overflow near the largest Duration; and an entry
+// whose wait ended more than DialBackoff ago is forgotten.
+func TestFailedDialBackoff(t *testing.T) {
+	n := newTestNode(t, "a")
+	boom := errors.New("boom")
+	// locked runs fn with n.mu held, as the node does.
+	locked := func(fn func()) {
+		n.mu.Lock()
+		defer n.mu.Unlock()
+		fn()
+	}
+	fail := func() (r *redial) {
+		locked(func() {
+			n.failedDial("b", boom, "boom")
+			r = n.backoff["b"]
+		})
+		return r
+	}
+
+	locked(func() { n.cfg.DialBackoff = 320 * time.Millisecond })
+	for i, want := range []time.Duration{10, 20, 40, 80, 160, 320, 320} {
+		want *= time.Millisecond
+		before := time.Now()
+		r := fail()
+		if r.wait != want || r.at.Before(before.Add(want*4/5)) || r.at.After(time.Now().Add(want)) {
+			t.Fatalf("failure %d: wait %v, at in %v; want %v", i, r.wait, time.Until(r.at), want)
+		}
+	}
+
+	locked(func() {
+		n.cfg.DialBackoff = math.MaxInt64
+		delete(n.backoff, "b")
+	})
+	var r *redial
+	for range 40 {
+		r = fail()
+	}
+	if r.wait != math.MaxInt64 || !r.at.After(time.Now()) {
+		t.Fatalf("wait %v, at %v", r.wait, r.at)
+	}
+
+	locked(func() {
+		n.cfg.DialBackoff = time.Second
+		n.backoff["c"] = &redial{at: time.Now().Add(-2 * time.Second), err: boom, why: "boom"}
+	})
+	for _, l := range n.Info().Links {
+		if l.Peer.Name == "c" {
+			t.Fatalf("stale backoff listed: %+v", l)
+		}
+	}
+	var kept bool
+	locked(func() { _, kept = n.backoff["c"] })
+	if kept {
+		t.Fatal("stale backoff kept")
 	}
 }

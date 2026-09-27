@@ -1,6 +1,10 @@
 // Package grpcproctest runs a grpcproc cluster inside one test binary. Nodes talk
 // over in-memory gRPC connections (bufconn), so a multi-node scenario,
 // including a partition or a node dying, needs no sockets and no registry.
+//
+// Its nodes dial a peer again at once after a dial to it failed
+// (Config.DialBackoff is negative), so the send right after Heal or Restart
+// reaches the peer. Set DialBackoff with WithConfig to test the backoff.
 package grpcproctest
 
 import (
@@ -181,7 +185,8 @@ func (c *Cluster) Heal(a, b string) {
 // Kill stops name abruptly, as a crash would: no Down{shutdown} reaches
 // anyone; peers see their links break. They have by the time Kill returns,
 // monitors fired and calls failed, so the next send to name fails, and after
-// Restart reaches the new node.
+// Restart reaches the new node (dials are not backed off; see the package
+// doc).
 func (c *Cluster) Kill(name string) {
 	c.t.Helper()
 	c.mu.Lock()
@@ -270,6 +275,7 @@ func (c *Cluster) start(name string) *grpcproc.Node {
 		Logger:      c.logger,
 		Hooks:       c.hooks,
 		DialTimeout: 2 * time.Second,
+		DialBackoff: -1,
 	}
 	for _, fn := range c.configure {
 		fn(name, &cfg)

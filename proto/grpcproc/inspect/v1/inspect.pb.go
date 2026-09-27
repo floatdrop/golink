@@ -199,6 +199,9 @@ type Link struct {
 	Messages      uint64                 `protobuf:"varint,6,opt,name=messages,proto3" json:"messages,omitempty"`
 	Bytes         uint64                 `protobuf:"varint,7,opt,name=bytes,proto3" json:"bytes,omitempty"`
 	LastError     string                 `protobuf:"bytes,8,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
+	// Set on an outbound link that is down because dials to the peer failed:
+	// sends to it fail at once until then (Config.DialBackoff).
+	RetryAt       *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=retry_at,json=retryAt,proto3" json:"retry_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -287,6 +290,13 @@ func (x *Link) GetLastError() string {
 		return x.LastError
 	}
 	return ""
+}
+
+func (x *Link) GetRetryAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.RetryAt
+	}
+	return nil
 }
 
 type NodeInfo struct {
@@ -1756,7 +1766,7 @@ const file_grpcproc_inspect_v1_inspect_proto_rawDesc = "" +
 	"!grpcproc/inspect/v1/inspect.proto\x12\x13grpcproc.inspect.v1\x1a\x1agrpcproc/v1/grpcproc.proto\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\">\n" +
 	"\x06NodeID\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
-	"\vincarnation\x18\x02 \x01(\x04R\vincarnation\"\xbd\x02\n" +
+	"\vincarnation\x18\x02 \x01(\x04R\vincarnation\"\xf4\x02\n" +
 	"\x04Link\x12/\n" +
 	"\x04peer\x18\x01 \x01(\v2\x1b.grpcproc.inspect.v1.NodeIDR\x04peer\x12\x1a\n" +
 	"\boutbound\x18\x02 \x01(\bR\boutbound\x124\n" +
@@ -1768,7 +1778,8 @@ const file_grpcproc_inspect_v1_inspect_proto_rawDesc = "" +
 	"\bmessages\x18\x06 \x01(\x04R\bmessages\x12\x14\n" +
 	"\x05bytes\x18\a \x01(\x04R\x05bytes\x12\x1d\n" +
 	"\n" +
-	"last_error\x18\b \x01(\tR\tlastError\"\xb4\x02\n" +
+	"last_error\x18\b \x01(\tR\tlastError\x125\n" +
+	"\bretry_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\aretryAt\"\xb4\x02\n" +
 	"\bNodeInfo\x12+\n" +
 	"\x02id\x18\x01 \x01(\v2\x1b.grpcproc.inspect.v1.NodeIDR\x02id\x12\x1c\n" +
 	"\tadvertise\x18\x02 \x01(\tR\tadvertise\x129\n" +
@@ -1946,57 +1957,58 @@ var file_grpcproc_inspect_v1_inspect_proto_depIdxs = []int32{
 	2,  // 0: grpcproc.inspect.v1.Link.peer:type_name -> grpcproc.inspect.v1.NodeID
 	0,  // 1: grpcproc.inspect.v1.Link.state:type_name -> grpcproc.inspect.v1.LinkState
 	27, // 2: grpcproc.inspect.v1.Link.established_at:type_name -> google.protobuf.Timestamp
-	2,  // 3: grpcproc.inspect.v1.NodeInfo.id:type_name -> grpcproc.inspect.v1.NodeID
-	27, // 4: grpcproc.inspect.v1.NodeInfo.started_at:type_name -> google.protobuf.Timestamp
-	3,  // 5: grpcproc.inspect.v1.NodeInfo.links:type_name -> grpcproc.inspect.v1.Link
-	28, // 6: grpcproc.inspect.v1.Mailbox.oldest_age:type_name -> google.protobuf.Duration
-	29, // 7: grpcproc.inspect.v1.ProcessInfo.pid:type_name -> grpcproc.v1.PID
-	29, // 8: grpcproc.inspect.v1.ProcessInfo.parent:type_name -> grpcproc.v1.PID
-	1,  // 9: grpcproc.inspect.v1.ProcessInfo.state:type_name -> grpcproc.inspect.v1.ProcessState
-	27, // 10: grpcproc.inspect.v1.ProcessInfo.started_at:type_name -> google.protobuf.Timestamp
-	5,  // 11: grpcproc.inspect.v1.ProcessInfo.mailbox:type_name -> grpcproc.inspect.v1.Mailbox
-	29, // 12: grpcproc.inspect.v1.Target.pid:type_name -> grpcproc.v1.PID
-	4,  // 13: grpcproc.inspect.v1.GetNodeResponse.node:type_name -> grpcproc.inspect.v1.NodeInfo
-	1,  // 14: grpcproc.inspect.v1.ListProcessesRequest.state:type_name -> grpcproc.inspect.v1.ProcessState
-	6,  // 15: grpcproc.inspect.v1.ListProcessesResponse.processes:type_name -> grpcproc.inspect.v1.ProcessInfo
-	7,  // 16: grpcproc.inspect.v1.GetProcessRequest.target:type_name -> grpcproc.inspect.v1.Target
-	28, // 17: grpcproc.inspect.v1.GetProcessRequest.inspect_timeout:type_name -> google.protobuf.Duration
-	6,  // 18: grpcproc.inspect.v1.GetProcessResponse.process:type_name -> grpcproc.inspect.v1.ProcessInfo
-	26, // 19: grpcproc.inspect.v1.GetProcessResponse.inspect:type_name -> grpcproc.inspect.v1.GetProcessResponse.InspectEntry
-	7,  // 20: grpcproc.inspect.v1.SetLogLevelRequest.target:type_name -> grpcproc.inspect.v1.Target
-	7,  // 21: grpcproc.inspect.v1.SendRequest.target:type_name -> grpcproc.inspect.v1.Target
-	30, // 22: grpcproc.inspect.v1.SendRequest.body:type_name -> google.protobuf.Any
-	7,  // 23: grpcproc.inspect.v1.ExitRequest.target:type_name -> grpcproc.inspect.v1.Target
-	22, // 24: grpcproc.inspect.v1.WatchResponse.event:type_name -> grpcproc.inspect.v1.Event
-	27, // 25: grpcproc.inspect.v1.Event.time:type_name -> google.protobuf.Timestamp
-	6,  // 26: grpcproc.inspect.v1.Event.spawned:type_name -> grpcproc.inspect.v1.ProcessInfo
-	23, // 27: grpcproc.inspect.v1.Event.exited:type_name -> grpcproc.inspect.v1.Exited
-	2,  // 28: grpcproc.inspect.v1.Event.link_up:type_name -> grpcproc.inspect.v1.NodeID
-	24, // 29: grpcproc.inspect.v1.Event.link_down:type_name -> grpcproc.inspect.v1.LinkDown
-	25, // 30: grpcproc.inspect.v1.Event.dead_letter:type_name -> grpcproc.inspect.v1.DeadLetter
-	6,  // 31: grpcproc.inspect.v1.Exited.process:type_name -> grpcproc.inspect.v1.ProcessInfo
-	2,  // 32: grpcproc.inspect.v1.LinkDown.peer:type_name -> grpcproc.inspect.v1.NodeID
-	29, // 33: grpcproc.inspect.v1.DeadLetter.from:type_name -> grpcproc.v1.PID
-	29, // 34: grpcproc.inspect.v1.DeadLetter.to:type_name -> grpcproc.v1.PID
-	8,  // 35: grpcproc.inspect.v1.Inspector.GetNode:input_type -> grpcproc.inspect.v1.GetNodeRequest
-	10, // 36: grpcproc.inspect.v1.Inspector.ListProcesses:input_type -> grpcproc.inspect.v1.ListProcessesRequest
-	12, // 37: grpcproc.inspect.v1.Inspector.GetProcess:input_type -> grpcproc.inspect.v1.GetProcessRequest
-	14, // 38: grpcproc.inspect.v1.Inspector.SetLogLevel:input_type -> grpcproc.inspect.v1.SetLogLevelRequest
-	16, // 39: grpcproc.inspect.v1.Inspector.Send:input_type -> grpcproc.inspect.v1.SendRequest
-	18, // 40: grpcproc.inspect.v1.Inspector.Exit:input_type -> grpcproc.inspect.v1.ExitRequest
-	20, // 41: grpcproc.inspect.v1.Inspector.Watch:input_type -> grpcproc.inspect.v1.WatchRequest
-	9,  // 42: grpcproc.inspect.v1.Inspector.GetNode:output_type -> grpcproc.inspect.v1.GetNodeResponse
-	11, // 43: grpcproc.inspect.v1.Inspector.ListProcesses:output_type -> grpcproc.inspect.v1.ListProcessesResponse
-	13, // 44: grpcproc.inspect.v1.Inspector.GetProcess:output_type -> grpcproc.inspect.v1.GetProcessResponse
-	15, // 45: grpcproc.inspect.v1.Inspector.SetLogLevel:output_type -> grpcproc.inspect.v1.SetLogLevelResponse
-	17, // 46: grpcproc.inspect.v1.Inspector.Send:output_type -> grpcproc.inspect.v1.SendResponse
-	19, // 47: grpcproc.inspect.v1.Inspector.Exit:output_type -> grpcproc.inspect.v1.ExitResponse
-	21, // 48: grpcproc.inspect.v1.Inspector.Watch:output_type -> grpcproc.inspect.v1.WatchResponse
-	42, // [42:49] is the sub-list for method output_type
-	35, // [35:42] is the sub-list for method input_type
-	35, // [35:35] is the sub-list for extension type_name
-	35, // [35:35] is the sub-list for extension extendee
-	0,  // [0:35] is the sub-list for field type_name
+	27, // 3: grpcproc.inspect.v1.Link.retry_at:type_name -> google.protobuf.Timestamp
+	2,  // 4: grpcproc.inspect.v1.NodeInfo.id:type_name -> grpcproc.inspect.v1.NodeID
+	27, // 5: grpcproc.inspect.v1.NodeInfo.started_at:type_name -> google.protobuf.Timestamp
+	3,  // 6: grpcproc.inspect.v1.NodeInfo.links:type_name -> grpcproc.inspect.v1.Link
+	28, // 7: grpcproc.inspect.v1.Mailbox.oldest_age:type_name -> google.protobuf.Duration
+	29, // 8: grpcproc.inspect.v1.ProcessInfo.pid:type_name -> grpcproc.v1.PID
+	29, // 9: grpcproc.inspect.v1.ProcessInfo.parent:type_name -> grpcproc.v1.PID
+	1,  // 10: grpcproc.inspect.v1.ProcessInfo.state:type_name -> grpcproc.inspect.v1.ProcessState
+	27, // 11: grpcproc.inspect.v1.ProcessInfo.started_at:type_name -> google.protobuf.Timestamp
+	5,  // 12: grpcproc.inspect.v1.ProcessInfo.mailbox:type_name -> grpcproc.inspect.v1.Mailbox
+	29, // 13: grpcproc.inspect.v1.Target.pid:type_name -> grpcproc.v1.PID
+	4,  // 14: grpcproc.inspect.v1.GetNodeResponse.node:type_name -> grpcproc.inspect.v1.NodeInfo
+	1,  // 15: grpcproc.inspect.v1.ListProcessesRequest.state:type_name -> grpcproc.inspect.v1.ProcessState
+	6,  // 16: grpcproc.inspect.v1.ListProcessesResponse.processes:type_name -> grpcproc.inspect.v1.ProcessInfo
+	7,  // 17: grpcproc.inspect.v1.GetProcessRequest.target:type_name -> grpcproc.inspect.v1.Target
+	28, // 18: grpcproc.inspect.v1.GetProcessRequest.inspect_timeout:type_name -> google.protobuf.Duration
+	6,  // 19: grpcproc.inspect.v1.GetProcessResponse.process:type_name -> grpcproc.inspect.v1.ProcessInfo
+	26, // 20: grpcproc.inspect.v1.GetProcessResponse.inspect:type_name -> grpcproc.inspect.v1.GetProcessResponse.InspectEntry
+	7,  // 21: grpcproc.inspect.v1.SetLogLevelRequest.target:type_name -> grpcproc.inspect.v1.Target
+	7,  // 22: grpcproc.inspect.v1.SendRequest.target:type_name -> grpcproc.inspect.v1.Target
+	30, // 23: grpcproc.inspect.v1.SendRequest.body:type_name -> google.protobuf.Any
+	7,  // 24: grpcproc.inspect.v1.ExitRequest.target:type_name -> grpcproc.inspect.v1.Target
+	22, // 25: grpcproc.inspect.v1.WatchResponse.event:type_name -> grpcproc.inspect.v1.Event
+	27, // 26: grpcproc.inspect.v1.Event.time:type_name -> google.protobuf.Timestamp
+	6,  // 27: grpcproc.inspect.v1.Event.spawned:type_name -> grpcproc.inspect.v1.ProcessInfo
+	23, // 28: grpcproc.inspect.v1.Event.exited:type_name -> grpcproc.inspect.v1.Exited
+	2,  // 29: grpcproc.inspect.v1.Event.link_up:type_name -> grpcproc.inspect.v1.NodeID
+	24, // 30: grpcproc.inspect.v1.Event.link_down:type_name -> grpcproc.inspect.v1.LinkDown
+	25, // 31: grpcproc.inspect.v1.Event.dead_letter:type_name -> grpcproc.inspect.v1.DeadLetter
+	6,  // 32: grpcproc.inspect.v1.Exited.process:type_name -> grpcproc.inspect.v1.ProcessInfo
+	2,  // 33: grpcproc.inspect.v1.LinkDown.peer:type_name -> grpcproc.inspect.v1.NodeID
+	29, // 34: grpcproc.inspect.v1.DeadLetter.from:type_name -> grpcproc.v1.PID
+	29, // 35: grpcproc.inspect.v1.DeadLetter.to:type_name -> grpcproc.v1.PID
+	8,  // 36: grpcproc.inspect.v1.Inspector.GetNode:input_type -> grpcproc.inspect.v1.GetNodeRequest
+	10, // 37: grpcproc.inspect.v1.Inspector.ListProcesses:input_type -> grpcproc.inspect.v1.ListProcessesRequest
+	12, // 38: grpcproc.inspect.v1.Inspector.GetProcess:input_type -> grpcproc.inspect.v1.GetProcessRequest
+	14, // 39: grpcproc.inspect.v1.Inspector.SetLogLevel:input_type -> grpcproc.inspect.v1.SetLogLevelRequest
+	16, // 40: grpcproc.inspect.v1.Inspector.Send:input_type -> grpcproc.inspect.v1.SendRequest
+	18, // 41: grpcproc.inspect.v1.Inspector.Exit:input_type -> grpcproc.inspect.v1.ExitRequest
+	20, // 42: grpcproc.inspect.v1.Inspector.Watch:input_type -> grpcproc.inspect.v1.WatchRequest
+	9,  // 43: grpcproc.inspect.v1.Inspector.GetNode:output_type -> grpcproc.inspect.v1.GetNodeResponse
+	11, // 44: grpcproc.inspect.v1.Inspector.ListProcesses:output_type -> grpcproc.inspect.v1.ListProcessesResponse
+	13, // 45: grpcproc.inspect.v1.Inspector.GetProcess:output_type -> grpcproc.inspect.v1.GetProcessResponse
+	15, // 46: grpcproc.inspect.v1.Inspector.SetLogLevel:output_type -> grpcproc.inspect.v1.SetLogLevelResponse
+	17, // 47: grpcproc.inspect.v1.Inspector.Send:output_type -> grpcproc.inspect.v1.SendResponse
+	19, // 48: grpcproc.inspect.v1.Inspector.Exit:output_type -> grpcproc.inspect.v1.ExitResponse
+	21, // 49: grpcproc.inspect.v1.Inspector.Watch:output_type -> grpcproc.inspect.v1.WatchResponse
+	43, // [43:50] is the sub-list for method output_type
+	36, // [36:43] is the sub-list for method input_type
+	36, // [36:36] is the sub-list for extension type_name
+	36, // [36:36] is the sub-list for extension extendee
+	0,  // [0:36] is the sub-list for field type_name
 }
 
 func init() { file_grpcproc_inspect_v1_inspect_proto_init() }

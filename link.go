@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -163,9 +164,10 @@ func (l *outLink) close(err error) {
 }
 
 type dialOp struct {
-	done chan struct{}
-	l    *outLink
-	err  error
+	done      chan struct{}
+	l         *outLink
+	err       error
+	forgotten bool // Disconnect or Membership's Up came during the dial; guarded by n.mu
 }
 
 // getOut returns the link to peer, dialing if there is none. Concurrent
@@ -186,6 +188,17 @@ func (n *Node) getOut(ctx context.Context, peer string) (*outLink, error) {
 		return nil, err // it would not wait for the dial, so it starts none
 	}
 	d := n.dialing[peer]
+	// While dials to peer fail, sends fail at once rather than wait for one.
+	// The first send after the wait starts the next dial, and waits for it
+	// alone: a hung peer then holds one sender at a time, not all of them.
+	if r := n.backedOff(peer); r != nil && (d != nil || time.Now().Before(r.at)) {
+		n.mu.Unlock()
+		next := "the next dial is under way"
+		if d == nil {
+			next = fmt.Sprintf("next dial in %v", max(time.Until(r.at), time.Millisecond).Round(time.Millisecond))
+		}
+		return nil, &LinkError{Peer: peer, Err: fmt.Errorf("dialing it failed, %s: %w", next, r.err)}
+	}
 	if d == nil {
 		d = &dialOp{done: make(chan struct{})}
 		n.dialing[peer] = d
@@ -201,12 +214,72 @@ func (n *Node) getOut(ctx context.Context, peer string) (*outLink, error) {
 	}
 }
 
+// redial is a peer whose last dial failed: sends to it fail at once until at.
+type redial struct {
+	at   time.Time
+	wait time.Duration // before jitter; the next failure doubles it
+	err  error         // why the last dial failed
+	why  string        // err's text, taken outside n.mu
+}
+
+// backedOff returns peer's backoff, or nil. One whose wait ended more than
+// DialBackoff ago is forgotten: nothing has been sent to the peer for that
+// long, so its next failure starts the doubling afresh. Called with n.mu held.
+func (n *Node) backedOff(peer string) *redial {
+	r := n.backoff[peer]
+	if r != nil && time.Since(r.at) > n.cfg.DialBackoff {
+		delete(n.backoff, peer)
+		return nil
+	}
+	return r
+}
+
+// failedDial backs off from peer after a dial to it failed. Called with n.mu
+// held.
+func (n *Node) failedDial(peer string, err error, why string) {
+	limit := n.cfg.DialBackoff
+	if limit < 0 {
+		return
+	}
+	wait := limit / 32
+	if r := n.backedOff(peer); r != nil {
+		wait = limit
+		if r.wait <= limit/2 { // not 2*r.wait > limit, which overflows near the largest Duration
+			wait = 2 * r.wait
+		}
+	}
+	// Up to a fifth shorter, so that nodes that lost the same peer do not
+	// all dial it again at the same moment.
+	jittered := wait - time.Duration(rand.Float64()*float64(wait)/5)
+	n.backoff[peer] = &redial{at: time.Now().Add(jittered), wait: wait, err: err, why: why}
+}
+
+// forget ends the backoff from peer, for Disconnect or Membership reporting
+// the peer up. A dial under way that fails anyway starts none, since it began
+// before the news. Called with n.mu held.
+func (n *Node) forget(peer string) {
+	delete(n.backoff, peer)
+	if d := n.dialing[peer]; d != nil {
+		d.forgotten = true
+	}
+}
+
 // finishDial dials peer for d's waiters and installs the link.
 func (n *Node) finishDial(peer string, d *dialOp) {
 	l, err := n.dial(peer)
+	var why string
+	if err != nil {
+		why = err.Error() // outside n.mu: the Resolver's or an interceptor's error
+	}
 	n.mu.Lock()
 	delete(n.dialing, peer)
-	if err == nil {
+	if err != nil {
+		if !n.stopped && !d.forgotten {
+			n.failedDial(peer, err, why)
+		}
+		err = &LinkError{Peer: peer, Err: err}
+	} else {
+		delete(n.backoff, peer)
 		if n.stopped {
 			l.close(ErrNodeStopped)
 			l, err = nil, ErrNodeStopped
@@ -231,11 +304,15 @@ func (n *Node) dial(peer string) (*outLink, error) {
 	defer cancel()
 	addr, err := n.cfg.Resolver.Resolve(ctx, peer)
 	if err != nil {
-		return nil, &LinkError{Peer: peer, Err: err}
+		if ctx.Err() != nil {
+			// The dial's deadline, not the caller's: do not wrap it.
+			err = fmt.Errorf("grpcproc: no address within DialTimeout (%v): %v", n.cfg.DialTimeout, err)
+		}
+		return nil, err
 	}
 	cc, err := grpc.NewClient(addr, n.cfg.DialOptions...)
 	if err != nil {
-		return nil, &LinkError{Peer: peer, Err: err}
+		return nil, err
 	}
 	// The stream outlives n.ctx: processes exiting on Stop still need it to
 	// deliver their Down{shutdown}. Stop closes it after they are gone.
@@ -274,7 +351,7 @@ func (n *Node) dial(peer string) (*outLink, error) {
 	if err != nil {
 		scancel()
 		_ = cc.Close()
-		return nil, &LinkError{Peer: peer, Err: err}
+		return nil, err
 	}
 	l := &outLink{
 		established: time.Now(),
@@ -324,6 +401,11 @@ type inLink struct {
 	peer   NodeID
 	closed chan struct{}
 	once   sync.Once
+	// cut is closed when this node cannot route a reply or a Down back to
+	// the peer (routeOrCut); cutErr says why.
+	cut     chan struct{}
+	cutErr  error
+	cutOnce sync.Once
 	// mu is held while a frame is dispatched and while the link closes, so
 	// nothing is dispatched after close returns: a Down{noconnection} that
 	// follows a close is never overtaken by a message from the same link.
@@ -336,6 +418,15 @@ func (l *inLink) info() LinkInfo {
 	li := LinkInfo{Peer: l.peer, Outbound: false}
 	l.fill(&li)
 	return li
+}
+
+// abort ends the link from its handler, which tells the peer why. It takes
+// no lock, so it may run while the link dispatches a frame.
+func (l *inLink) abort(err error) {
+	l.cutOnce.Do(func() {
+		l.cutErr = err
+		close(l.cut)
+	})
 }
 
 func (l *inLink) close() {
@@ -411,7 +502,7 @@ func (n *Node) serveLink(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcp
 		return err
 	}
 
-	l := &inLink{peer: peer, closed: make(chan struct{}), established: time.Now()}
+	l := &inLink{peer: peer, closed: make(chan struct{}), cut: make(chan struct{}), established: time.Now()}
 	l.state.Store(uint32(LinkUp))
 
 	// A new stream from a peer we already have one from means the peer lost
@@ -428,6 +519,12 @@ func (n *Node) serveLink(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcp
 		return status.Error(codes.Unavailable, ErrNodeStopped.Error())
 	}
 	n.in[peer.Name] = l
+	// The peer reached this node, which shows it is up, not that this node
+	// can reach it: the next send dials it at once, and the wait keeps
+	// doubling if that fails too.
+	if r := n.backoff[peer.Name]; r != nil {
+		n.backoff[peer.Name] = &redial{at: time.Now(), wait: r.wait, err: r.err, why: r.why}
+	}
 	n.mu.Unlock()
 	n.linkUp(peer)
 
@@ -454,6 +551,9 @@ func (n *Node) serveLink(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcp
 	case err = <-errs:
 	case <-l.closed:
 		err = errors.New("closed")
+	case <-l.cut:
+		n.connLost(peer.Name, nil, l, l.cutErr, false)
+		return status.Errorf(codes.Unavailable, "grpcproc: %s cannot reach %s back: %v", n.id.Name, peer.Name, l.cutErr)
 	}
 	if errors.Is(err, io.EOF) {
 		err = nil

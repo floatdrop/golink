@@ -204,7 +204,8 @@ in the process.
 | `Advertise`, `Registrar`, `Membership` | Where peers dial this node, what publishes it, and the cluster's view of who is alive; see [Discovery](#discovery). |
 | `Authorize func(ctx, peer NodeID) error` | Runs for every inbound link, with the peer's transport credentials in `ctx`. |
 | `Hooks`, `Logger` | The observability tap, and the logger (`slog.Default()`). |
-| `Incarnation`, `DialTimeout`, `CopyLocal` | This start of the node (the time, by default); how long a dial may take (5s); whether local messages are cloned rather than shared (off). |
+| `DialTimeout`, `DialBackoff` | How long a dial may take (5s). How long, at most, the node waits before dialing a peer again after dials to it failed (5s); meanwhile sends to it fail at once. |
+| `Incarnation`, `CopyLocal` | This start of the node (the time, by default); whether local messages are cloned rather than shared (off). |
 
 ## Actors and supervisors
 
@@ -316,10 +317,11 @@ supervisor restarts: 1/3 in 1m0s
 
 A `ProcessInfo` has the state, mailbox depth and oldest wait, messages sent
 and received, calls in flight, last message type, watchers, monitors and log
-level; a `LinkInfo` its messages, bytes and reconnects. `node.Inspect` adds
-what the process says about itself: a process busy in a handler answers when
-it next receives, and one that never does reports `busy for 12s`, which is
-the diagnosis. With a state machine that is one line:
+level; a `LinkInfo` its messages, bytes and reconnects, and for a peer whose
+dials fail, when it will be dialed again. `node.Inspect` adds what the
+process says about itself: a process busy in a handler answers when it next
+receives, and one that never does reports `busy for 12s`, which is the
+diagnosis. With a state machine that is one line:
 
 ```go
 grpcproc.WithInspect(func() map[string]string { return map[string]string{"state": rec.state.String()} })
@@ -423,6 +425,9 @@ func TestReserveAcrossNodes(t *testing.T) {
 ```
 
 `c.Stop(name)` stops a node gracefully, so watchers get `Down{shutdown}`.
+The cluster's nodes dial again at once after a failed dial, so the call
+right after `Heal` reaches the peer; with the default `DialBackoff`, sends
+would fail fast for a while instead.
 `grpcproctest.WithServices` registers extra services (an Inspector) on every
 node, and `c.Conn(name)` dials one.
 

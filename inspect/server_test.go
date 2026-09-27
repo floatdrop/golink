@@ -459,8 +459,12 @@ func TestEventConversions(t *testing.T) {
 			t.Errorf("%v: got %+v", ev.Kind, got)
 		}
 	}
-	// Zero times stay zero across the wire.
-	if n := inspect.NodeInfo(inspect.NodeInfoToProto(grpcproc.NodeInfo{Links: []grpcproc.LinkInfo{{}}})); !n.StartedAt.IsZero() || !n.Links[0].EstablishedAt.IsZero() {
+	// Zero times stay zero across the wire, and set ones cross it.
+	if n := inspect.NodeInfo(inspect.NodeInfoToProto(grpcproc.NodeInfo{Links: []grpcproc.LinkInfo{{}}})); !n.StartedAt.IsZero() || !n.Links[0].EstablishedAt.IsZero() || !n.Links[0].RetryAt.IsZero() {
 		t.Fatalf("%+v", n)
+	}
+	down := grpcproc.LinkInfo{Peer: grpcproc.NodeID{Name: "b"}, Outbound: true, State: grpcproc.LinkDown, LastError: "refused", RetryAt: now}
+	if n := inspect.NodeInfo(inspect.NodeInfoToProto(grpcproc.NodeInfo{Links: []grpcproc.LinkInfo{down}})); !n.Links[0].RetryAt.Equal(now) || n.Links[0].State != grpcproc.LinkDown {
+		t.Fatalf("%+v", n.Links[0])
 	}
 }

@@ -500,6 +500,7 @@ func TestDialTimeoutBoundsTheDial(t *testing.T) {
 					grpc.WithContextDialer(tc.dial),
 				}, tc.opts...),
 				DialTimeout: 100 * time.Millisecond,
+				DialBackoff: -1, // the process's send dials too
 			})
 			if err != nil {
 				t.Fatal(err)

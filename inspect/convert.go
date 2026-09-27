@@ -69,6 +69,7 @@ func nodeInfoTo(n grpcproc.NodeInfo) *inspectv1.NodeInfo {
 			Messages:      l.Messages,
 			Bytes:         l.Bytes,
 			LastError:     l.LastError,
+			RetryAt:       timeTo(l.RetryAt),
 		})
 	}
 	return out
@@ -143,6 +144,9 @@ func NodeInfo(n *inspectv1.NodeInfo) grpcproc.NodeInfo {
 		}
 		if l.GetEstablishedAt() != nil {
 			li.EstablishedAt = l.GetEstablishedAt().AsTime()
+		}
+		if l.GetRetryAt() != nil {
+			li.RetryAt = l.GetRetryAt().AsTime()
 		}
 		out.Links = append(out.Links, li)
 	}

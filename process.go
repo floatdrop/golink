@@ -299,8 +299,8 @@ func toMsg[M proto.Message](it item) Msg[M] {
 
 // Send delivers m to a typed address, local or remote. It carries the
 // metadata of the message the process is handling. A first send to a node
-// with no link yet waits for the dial, up to Config.DialTimeout. See
-// Node.Send.
+// with no link yet waits for the dial, up to Config.DialTimeout, unless dials
+// to it are failing (Config.DialBackoff). See Node.Send.
 func (p *Process[M]) Send[N proto.Message](to Addr[N], m N) error {
 	return p.n.send(context.Background(), p.pid, p.proc, to.dest(), m, p.outgoing(nil))
 }
@@ -394,8 +394,7 @@ func (p *Process[M]) Reply(m Msg[M], resp proto.Message, err error) error {
 }
 
 // Exit asks another process, anywhere, to terminate with reason. A first
-// exit to a node with no link yet waits for the dial, up to
-// Config.DialTimeout.
+// exit to a node with no link yet waits for the dial as Send does.
 func (p *proc) Exit(to Target, reason string) error {
 	return p.n.exit(context.Background(), p.pid, to, reason)
 }

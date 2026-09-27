@@ -137,6 +137,26 @@ message Envelope {                                   // one flat message, decode
   `keepalive.ClientParameters`, server `keepalive.ServerParameters`) is what
   turns a silent partition into a stream error in seconds; the library does
   not set it, the application's gRPC configuration does.
+- **A failed dial backs off.** `Config.DialTimeout` bounds a dial, and after
+  one fails, everything routed to that peer fails at once with
+  `ErrNoConnection` for a while, rather than each wait out a dial of its own:
+  a process sending to a dead or hung node would otherwise stall for
+  `DialTimeout` per send. The wait starts at a 32nd of `Config.DialBackoff`
+  and doubles to it, with jitter. Then one send dials again while the others
+  keep failing, so a hung peer holds one sender at a time: a half-open
+  breaker. `Membership` reporting the peer up ends the wait. A link the peer
+  opens lets the next send dial at once but keeps the doubling: it shows the
+  peer is up, not that this node can reach it, and in a one-way partition
+  every reply would otherwise wait out a dial again. `LinkInfo` shows the peer
+  as a down outbound link with its `RetryAt`. Retries are not part of it,
+  since delivery stays at-most-once.
+- **A reply or a `Down` that cannot be routed cuts the peer's link.** The peer
+  waits for those over its own link to this node, which stays up when this
+  node cannot reach it back, so it would never learn that one was lost: a
+  monitor that never fires. Ending the peer's link, with a status that says
+  this node cannot reach it back, makes it see this node as unreachable, as
+  Erlang's single connection would: its calls fail and its monitors fire with
+  `noconnection`.
 - **A graceful `Stop` flushes before it closes.** Processes exit first and
   their `Down{shutdown}` envelopes are queued, each outbound link is
   half-closed and waited on until the peer ends it, and only then are
@@ -261,6 +281,9 @@ c.Kill("b")                              // node gone; incarnation changes on Re
 c.Restart("b")
 ```
 
+Its nodes dial again at once after a failed dial (`DialBackoff` is negative),
+so the send right after `Heal` or `Restart` reaches the peer.
+
 ## Observability (v0.1 core surface, v0.2 tools)
 
 This is the part taken from ergo. Its Observer, REST API and MCP server are
@@ -308,7 +331,8 @@ func (n *Node) Info() NodeInfo                   // name, incarnation, uptime, c
 ```
 
 `LinkInfo` per peer: state, established at, reconnects, messages and bytes in
-and out, last error — ergo's network charts are drawn from exactly these.
+and out, last error, and when a peer whose dials fail is dialed again. Ergo's
+network charts are drawn from exactly these.
 
 ### Self-inspection
 

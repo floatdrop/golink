@@ -114,6 +114,20 @@ type Config struct {
 	// long as the Resolver and any interceptors in DialOptions honour their
 	// ctx. Default 5s.
 	DialTimeout time.Duration
+	// DialBackoff is the longest a node waits before dialing a peer again
+	// once dials to it have failed. Meanwhile everything routed to the peer
+	// fails at once with ErrNoConnection rather than wait for a dial that
+	// would likely fail too: sends, calls, exits, replies, Downs; a Monitor
+	// gets Down{noconnection} at once. The first send after the wait dials
+	// again, and the others keep failing while it does. The first wait is a
+	// 32nd of DialBackoff, up to a fifth less for jitter. Each further failure
+	// doubles it, unless the peer was left alone for longer than DialBackoff,
+	// and a dial that succeeds starts over. A link the peer opens lets the
+	// next send dial at once, without starting over, since it shows the peer
+	// is up but not that this node can reach it. Membership reporting the peer
+	// up, or Disconnect, ends the wait. Default 5s; negative dials again at
+	// once.
+	DialBackoff time.Duration
 }
 
 // Node hosts processes and links to peers. It is a plain value the
@@ -142,9 +156,10 @@ type Node struct {
 	out      map[string]*outLink
 	in       map[string]*inLink
 	dialing  map[string]*dialOp
-	dials    map[string]uint64 // per peer, for LinkInfo.Reconnects
-	stopping bool              // Stop began: no new processes
-	stopped  bool              // links closed: no new links
+	backoff  map[string]*redial // peers whose last dial failed
+	dials    map[string]uint64  // per peer, for LinkInfo.Reconnects
+	stopping bool               // Stop began: no new processes
+	stopped  bool               // links closed: no new links
 	wg       sync.WaitGroup
 
 	spawned, exited, deadLetters atomic.Uint64
@@ -172,6 +187,7 @@ func NewNode(cfg Config) (*Node, error) {
 	cfg.Incarnation = cmp.Or(cfg.Incarnation, uint64(time.Now().UnixNano()))
 	cfg.Logger = cmp.Or(cfg.Logger, slog.Default())
 	cfg.DialTimeout = cmp.Or(cfg.DialTimeout, 5*time.Second)
+	cfg.DialBackoff = cmp.Or(cfg.DialBackoff, 5*time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 	n := &Node{
 		cfg:     cfg,
@@ -185,6 +201,7 @@ func NewNode(cfg Config) (*Node, error) {
 		out:     map[string]*outLink{},
 		in:      map[string]*inLink{},
 		dialing: map[string]*dialOp{},
+		backoff: map[string]*redial{},
 		dials:   map[string]uint64{},
 	}
 	n.log = cfg.Logger.With("node", cfg.Name)
@@ -258,6 +275,9 @@ func (n *Node) watchMembers(events <-chan MemberEvent) {
 func (n *Node) memberEvent(ev MemberEvent) {
 	name := ev.Member.Name
 	n.mu.Lock()
+	if ev.Up {
+		n.forget(name) // it is back: dial it at once
+	}
 	var linked uint64
 	if l := n.out[name]; l != nil {
 		linked = l.peer.Incarnation
@@ -409,6 +429,14 @@ func (n *Node) Info() NodeInfo {
 	for _, l := range n.out {
 		info.Links = append(info.Links, l.info())
 	}
+	for peer := range n.backoff {
+		if r := n.backedOff(peer); r != nil {
+			info.Links = append(info.Links, LinkInfo{
+				Peer: NodeID{Name: peer}, Outbound: true, State: LinkDown,
+				Reconnects: n.dials[peer], LastError: r.why, RetryAt: r.at,
+			})
+		}
+	}
 	for _, l := range n.in {
 		info.Links = append(info.Links, l.info())
 	}
@@ -419,10 +447,14 @@ func (n *Node) Info() NodeInfo {
 	return info
 }
 
-// Disconnect drops every link with peer, as if the network had. Monitors
-// across it fire Down{noconnection} and pending calls fail; the next send
-// dials again. It reports whether there was a link to drop.
+// Disconnect drops every link with peer, as if the network had, and
+// forgets that dials to it failed (Config.DialBackoff). Monitors across it
+// fire Down{noconnection} and pending calls fail; the next send dials again.
+// It reports whether there was a link to drop.
 func (n *Node) Disconnect(peer string) bool {
+	n.mu.Lock()
+	n.forget(peer)
+	n.mu.Unlock()
 	return n.disconnect(peer, errors.New("disconnected"))
 }
 
@@ -479,9 +511,10 @@ func (n *Node) lookup(pid PID, name string) *proc {
 // Send delivers m to a typed address, local or remote, with the node as
 // sender and the metadata carried by ctx. It returns once m is queued; ctx
 // bounds only the wait for a connection to a peer this node has no link to
-// yet. Sending to a process that does not exist is not an error (it is a
-// dead letter); an error means m could not be encoded, the node could not be
-// reached, or ctx ended first.
+// yet, and while dials to the peer are failing it does not wait at all (see
+// Config.DialBackoff). Sending to a process that does not exist is not an
+// error (it is a dead letter); an error means m could not be encoded, the
+// node could not be reached, or ctx ended first.
 func (n *Node) Send[N proto.Message](ctx context.Context, to Addr[N], m N) error {
 	return n.send(ctx, n.PID(), nil, to.dest(), m, MetadataFrom(ctx))
 }
@@ -611,7 +644,25 @@ func (n *Node) reply(from, to PID, ref uint64, body proto.Message, status grpcpr
 			return err
 		}
 	}
-	return n.route(context.Background(), to.Node, env)
+	return n.routeOrCut(to.Node, env)
+}
+
+// routeOrCut routes a reply or a Down. The peer waits for those over a link
+// of its own, which stays up when this node cannot reach it back, so it would
+// never learn that one was lost. When one cannot be routed, that link goes
+// too, told why: the peer sees this node as unreachable, its calls fail and
+// its monitors fire, as if the connection had broken both ways.
+func (n *Node) routeOrCut(node string, env *grpcprocv1.Envelope) error {
+	err := n.route(context.Background(), node, env)
+	if le, ok := errors.AsType[*LinkError](err); ok {
+		n.mu.Lock()
+		in := n.in[node]
+		n.mu.Unlock()
+		if in != nil {
+			in.abort(le.Err)
+		}
+	}
+	return err
 }
 
 func (n *Node) monitor(from PID, to Target, ref uint64) error {
@@ -643,7 +694,7 @@ func (n *Node) down(from, to PID, ref uint64, reason string) error {
 	}
 	env := wire(grpcprocv1.Kind_KIND_DOWN, from, to, "")
 	env.Ref, env.Reason = ref, reason
-	return n.route(context.Background(), to.Node, env)
+	return n.routeOrCut(to.Node, env)
 }
 
 func (n *Node) exit(ctx context.Context, from PID, to Target, reason string) error {
@@ -661,6 +712,7 @@ func (n *Node) exit(ctx context.Context, from PID, to Target, reason string) err
 // wait for the dial. Everything but Node.Send, Node.SendTo, Node.Exit and
 // calls passes context.Background(): replies, monitors, Downs, process sends
 // and exits, and timers wait for the dial, which Config.DialTimeout bounds.
+// While dials to node are backed off, route fails at once.
 func (n *Node) route(ctx context.Context, node string, env *grpcprocv1.Envelope) error {
 	if node == "" {
 		return errors.New("grpcproc: empty destination node")

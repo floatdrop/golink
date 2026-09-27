@@ -320,8 +320,10 @@ export const content: Content = {
 					{f.clusterTree}
 					<p>
 						Here the peers are a static list. A link that breaks fires a <C>Down</C> for every
-						process monitored across it and fails the calls waiting on it. For nodes that come
-						and go,{' '}
+						process monitored across it and fails the calls waiting on it. While dials to a node
+						fail, calls to it fail at once, and it is dialed again within five seconds, so a
+						restarted warehouse is back in the front's orders soon after it starts. For nodes
+						that come and go,{' '}
 						<Link href={`${REPO}/tree/main/etcd`}>
 							<C>grpcproc/etcd</C>
 						</Link>{' '}
