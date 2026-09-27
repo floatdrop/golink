@@ -169,6 +169,15 @@ type Node struct {
 	dials    map[string]uint64  // per peer, for LinkInfo.Reconnects
 	stopping bool               // Stop began: no new processes
 	stopped  bool               // links closed: no new links
+	// settling counts, per peer, the changes to its links that were decided
+	// under mu and are still being carried out: a teardown until the peer is
+	// declared down, a new inbound link until it is announced. A new inbound
+	// link waits for none to be under way (settled, on mu), so nothing it
+	// carries overtakes the old session's Downs, and the peer's inbound link
+	// events come in order. (A dial is not held up: its link carries nothing
+	// in.)
+	settling map[string]int
+	settled  *sync.Cond
 	wg       sync.WaitGroup
 
 	// halted is closed, once, by the Stop that set stopping, when it fails
@@ -230,21 +239,23 @@ func NewNode(cfg Config) (*Node, error) {
 	cfg.DialBackoff = cmp.Or(cfg.DialBackoff, 5*time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 	n := &Node{
-		cfg:     cfg,
-		id:      NodeID{Name: cfg.Name, Incarnation: cfg.Incarnation},
-		hooks:   cfg.Hooks,
-		ctx:     ctx,
-		cancel:  cancel,
-		procs:   map[uint64]*proc{},
-		names:   map[string]*proc{},
-		pending: map[uint64]*pendingCall{},
-		halted:  make(chan struct{}),
-		out:     map[string]*outLink{},
-		in:      map[string]*inLink{},
-		dialing: map[string]*dialOp{},
-		backoff: map[string]*redial{},
-		dials:   map[string]uint64{},
+		cfg:      cfg,
+		id:       NodeID{Name: cfg.Name, Incarnation: cfg.Incarnation},
+		hooks:    cfg.Hooks,
+		ctx:      ctx,
+		cancel:   cancel,
+		procs:    map[uint64]*proc{},
+		names:    map[string]*proc{},
+		pending:  map[uint64]*pendingCall{},
+		halted:   make(chan struct{}),
+		out:      map[string]*outLink{},
+		in:       map[string]*inLink{},
+		dialing:  map[string]*dialOp{},
+		backoff:  map[string]*redial{},
+		dials:    map[string]uint64{},
+		settling: map[string]int{},
 	}
+	n.settled = sync.NewCond(&n.mu)
 	n.log = cfg.Logger.With("node", cfg.Name)
 	return n, nil
 }
@@ -356,7 +367,7 @@ func (n *Node) watchMembers(events <-chan MemberEvent) {
 // memberEvent drops the links to a peer that left, or that came back as
 // another incarnation: either way, whatever crossed those links is gone.
 func (n *Node) memberEvent(ev MemberEvent) {
-	name := ev.Member.Name
+	name, inc := ev.Member.Name, ev.Member.Incarnation
 	n.mu.Lock()
 	if ev.Up {
 		n.forget(name) // it is back: dial it at once
@@ -367,14 +378,24 @@ func (n *Node) memberEvent(ev MemberEvent) {
 	} else if l := n.in[name]; l != nil {
 		linked = l.peer.Incarnation
 	}
-	n.mu.Unlock()
+	var cause error
 	switch {
-	case linked == 0:
-		return // no link, nothing to settle
-	case !ev.Up && (ev.Member.Incarnation == linked || ev.Member.Incarnation == 0):
-		n.disconnect(name, errors.New("left the cluster"))
-	case ev.Up && ev.Member.Incarnation != linked:
-		n.disconnect(name, errors.New("restarted as incarnation "+itoa(ev.Member.Incarnation)))
+	case linked == 0: // no link, nothing to settle
+	case !ev.Up && (inc == linked || inc == 0):
+		cause = errors.New("left the cluster")
+	case ev.Up && inc != linked:
+		cause = errors.New("restarted as incarnation " + itoa(inc))
+	}
+	// The links judged are the links dropped: taken in the same critical
+	// section, not one that may have replaced them since.
+	var out *outLink
+	var in *inLink
+	if cause != nil {
+		out, in = n.takeLinks(name)
+	}
+	n.mu.Unlock()
+	if cause != nil {
+		n.linksLost(out, in, cause)
 	}
 }
 
@@ -570,18 +591,12 @@ func (n *Node) Info() NodeInfo {
 func (n *Node) Disconnect(peer string) bool {
 	n.mu.Lock()
 	n.forget(peer)
-	n.mu.Unlock()
-	return n.disconnect(peer, errors.New("disconnected"))
-}
-
-func (n *Node) disconnect(peer string, cause error) bool {
-	n.mu.Lock()
-	out, in := n.out[peer], n.in[peer]
+	out, in := n.takeLinks(peer)
 	n.mu.Unlock()
 	if out == nil && in == nil {
 		return false
 	}
-	n.connLost(peer, out, in, cause, true)
+	n.linksLost(out, in, errors.New("disconnected"))
 	return true
 }
 
@@ -842,6 +857,11 @@ func (n *Node) routeOrCut(node string, env *grpcprocv1.Envelope, dispatching boo
 			var d *dialOp
 			if d, err = n.dialFor(node); err == nil {
 				d.answers = append(d.answers, env)
+				// The frame came by n.in[node], unless that is being torn
+				// down (see settling): the link to cut if the answer fails.
+				if in := n.in[node]; in != nil && !slices.Contains(d.cut, in) {
+					d.cut = append(d.cut, in)
+				}
 				n.mu.Unlock()
 				return nil
 			}

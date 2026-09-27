@@ -41,26 +41,16 @@ type linkStats struct {
 	messages, bytes atomic.Uint64
 	established     time.Time
 	reconnects      uint64
-	lastErr         atomic.Pointer[string]
-	state           atomic.Uint32
 }
 
-func (s *linkStats) fail(err error) {
-	if err != nil {
-		s.lastErr.Store(new(err.Error()))
-	}
-	s.state.Store(uint32(LinkDown))
-}
-
+// fill reports a link that is up: a link leaves n.out or n.in, under n.mu,
+// before it closes, and Info reads only those.
 func (s *linkStats) fill(li *LinkInfo) {
-	li.State = LinkState(s.state.Load())
+	li.State = LinkUp
 	li.EstablishedAt = s.established
 	li.Reconnects = s.reconnects
 	li.Messages = s.messages.Load()
 	li.Bytes = s.bytes.Load()
-	if e := s.lastErr.Load(); e != nil {
-		li.LastError = *e
-	}
 }
 
 // ---------- outbound ----------
@@ -75,9 +65,7 @@ type outLink struct {
 	done     chan struct{}
 	once     sync.Once
 	closing  atomic.Bool
-	drained  chan struct{} // closed by writeLoop once closing is set and the queue is empty
-	recvDone chan struct{} // closed when the server ends the stream
-	inflight atomic.Int64  // envelopes the writer has taken and not yet written
+	inflight atomic.Int64 // envelopes the writer has taken and not yet written
 	linkStats
 }
 
@@ -100,11 +88,10 @@ func (l *outLink) start() {
 	go func() {
 		// The server never sends after Hello; Recv returning is the close signal.
 		_, err := l.stream.Recv()
-		close(l.recvDone)
 		if errors.Is(err, io.EOF) {
 			err = nil
 		}
-		n.connLost(l.peer.Name, l, nil, err, false)
+		n.outLost(l, err)
 	}()
 }
 
@@ -133,7 +120,7 @@ func (l *outLink) writeLoop() {
 				if !l.q.putBack(batch[k:]) {
 					n.lost(l.peer.Name, batch[k:], err) // the link has closed meanwhile
 				}
-				n.connLost(l.peer.Name, l, nil, err, false)
+				n.outLost(l, err)
 				return
 			}
 			l.messages.Add(uint64(k))
@@ -145,7 +132,6 @@ func (l *outLink) writeLoop() {
 		// unsent, rather than wait in a queue nothing will write.
 		if l.closing.Load() && l.q.sealIfEmpty() {
 			_ = l.stream.CloseSend()
-			close(l.drained)
 			return
 		}
 	}
@@ -153,9 +139,9 @@ func (l *outLink) writeLoop() {
 
 // shutdown starts flushing what is queued, after which the writer
 // half-closes the stream. finish then waits for the peer to end it, so that
-// nothing sent is lost to a cancel racing with the data, and closes the link.
-// Stop starts every link's shutdown before it waits for any: a peer that
-// never ends its stream costs the others nothing.
+// nothing sent is lost to a cancel racing with the data: the stream's reader
+// then closes the link (outLost). Stop starts every link's shutdown before it
+// waits for any: a peer that never ends its stream costs the others nothing.
 func (l *outLink) shutdown() {
 	l.closing.Store(true)
 	select {
@@ -167,13 +153,6 @@ func (l *outLink) shutdown() {
 // finish reports whether ctx cut the flush short.
 func (l *outLink) finish(ctx context.Context) (cut bool) {
 	select {
-	case <-l.drained:
-		select {
-		case <-l.recvDone:
-		case <-l.done:
-		case <-ctx.Done():
-			cut = true
-		}
 	case <-l.done:
 	case <-ctx.Done():
 		cut = true
@@ -184,7 +163,6 @@ func (l *outLink) finish(ctx context.Context) (cut bool) {
 
 func (l *outLink) close(err error) {
 	l.once.Do(func() {
-		l.fail(err)
 		close(l.done)
 		// What is still queued was never written: its messages are dead
 		// letters, and its calls fail now, as unsent.
@@ -246,8 +224,10 @@ type dialOp struct {
 	err       error
 	forgotten bool // Disconnect or Membership's Up came during the dial; guarded by n.mu
 	// answers are replies and Downs that dispatch made while the dial was
-	// under way, written first once the link is up; guarded by n.mu.
+	// under way, written first once the link is up, and cut the inbound
+	// links they answer, to be cut if they cannot go; guarded by n.mu.
 	answers []*grpcprocv1.Envelope
+	cut     []*inLink
 }
 
 // getOut returns the link to peer, dialing if there is none. Concurrent
@@ -366,8 +346,8 @@ func (n *Node) finishDial(peer string, d *dialOp) {
 	var discard *outLink
 	n.mu.Lock()
 	delete(n.dialing, peer)
-	answers := d.answers
-	d.answers = nil
+	answers, cut := d.answers, d.cut
+	d.answers, d.cut = nil, nil
 	if err != nil {
 		if !n.stopped && !d.forgotten {
 			n.failedDial(peer, err, why)
@@ -386,15 +366,15 @@ func (n *Node) finishDial(peer string, d *dialOp) {
 			n.out[peer] = l
 		}
 	}
-	// Answers that will not go: the peer waits for them over its link to
-	// this node, which is cut, as routeOrCut does.
-	var cut *inLink
-	if _, ok := errors.AsType[*LinkError](err); ok && len(answers) > 0 {
-		cut = n.in[peer]
+	// Answers that will not go: the peer waits for them over its links to
+	// this node they answer, which are cut, as routeOrCut does. Not a link
+	// that has replaced them since: its session is owed nothing.
+	if _, ok := errors.AsType[*LinkError](err); !ok || len(answers) == 0 {
+		cut = nil
 	}
 	n.mu.Unlock()
-	if cut != nil {
-		cut.abort(errors.Unwrap(err))
+	for _, in := range cut {
+		in.abort(errors.Unwrap(err))
 	}
 	if discard != nil {
 		discard.close(ErrNodeStopped) // outside n.mu, as every close
@@ -473,14 +453,11 @@ func (n *Node) dial(peer string) (*outLink, error) {
 		cancel:      scancel,
 		q:           newQueue[*grpcprocv1.Envelope](false),
 		done:        make(chan struct{}),
-		drained:     make(chan struct{}),
-		recvDone:    make(chan struct{}),
 	}
 	n.mu.Lock()
 	l.reconnects = n.dials[peer]
 	n.dials[peer]++
 	n.mu.Unlock()
-	l.state.Store(uint32(LinkUp))
 	return l, nil
 }
 
@@ -510,14 +487,13 @@ func handshake(peer string, stream grpc.BidiStreamingClient[grpcprocv1.Frame, gr
 // ---------- inbound ----------
 
 type inLink struct {
-	peer   NodeID
-	closed chan struct{}
-	once   sync.Once
-	// cut is closed when this node cannot route a reply or a Down back to
-	// the peer (routeOrCut); cutErr says why.
-	cut     chan struct{}
-	cutErr  error
-	cutOnce sync.Once
+	peer NodeID
+	// done is closed when the link ends from this side: closed (why is nil),
+	// or cut, when this node cannot route a reply or a Down back to the peer
+	// (routeOrCut; why says why).
+	done chan struct{}
+	once sync.Once
+	why  error
 	// mu is held while a frame is dispatched and while the link closes, so
 	// nothing is dispatched after close returns: a Down{noconnection} that
 	// follows a close is never overtaken by a message from the same link.
@@ -532,22 +508,22 @@ func (l *inLink) info() LinkInfo {
 	return li
 }
 
-// abort ends the link from its handler, which tells the peer why. It takes
-// no lock, so it may run while the link dispatches a frame.
-func (l *inLink) abort(err error) {
-	l.cutOnce.Do(func() {
-		l.cutErr = err
-		close(l.cut)
+func (l *inLink) end(why error) {
+	l.once.Do(func() {
+		l.why = why
+		close(l.done)
 	})
 }
 
+// abort ends the link from its handler, which tells the peer why. It takes
+// no lock, so it may run while the link dispatches a frame.
+func (l *inLink) abort(err error) { l.end(err) }
+
 func (l *inLink) close() {
-	l.once.Do(func() {
-		l.mu.Lock()
-		l.stopped = true
-		l.mu.Unlock()
-		close(l.closed)
-	})
+	l.mu.Lock()
+	l.stopped = true
+	l.mu.Unlock()
+	l.end(nil)
 }
 
 // deliver dispatches a frame's envelopes in order, unless the link has
@@ -614,23 +590,32 @@ func (n *Node) serveLink(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcp
 		return err
 	}
 
-	l := &inLink{peer: peer, closed: make(chan struct{}), cut: make(chan struct{}), established: time.Now()}
-	l.state.Store(uint32(LinkUp))
-
+	l := &inLink{peer: peer, done: make(chan struct{}), established: time.Now()}
 	// A new stream from a peer we already have one from means the peer lost
-	// its session with us (it restarted, or its side broke): end the old one.
+	// its session with us (it restarted, or its side broke): the old one ends
+	// first. The new link goes in only once no change to the peer's links is
+	// under way, so the old session's Downs are queued, and its link events
+	// published, before anything from the new one.
 	n.mu.Lock()
-	old := n.in[peer.Name]
-	n.mu.Unlock()
-	if old != nil {
-		n.connLost(peer.Name, nil, old, errors.New("replaced by a new link"), false)
-	}
-	n.mu.Lock()
-	if n.stopped {
+	for {
+		if n.stopped {
+			n.mu.Unlock()
+			return status.Error(codes.Unavailable, ErrNodeStopped.Error())
+		}
+		if n.settling[peer.Name] > 0 {
+			n.settled.Wait()
+			continue
+		}
+		if n.in[peer.Name] == nil {
+			break
+		}
+		oldOut, oldIn := n.takeLinks(peer.Name)
 		n.mu.Unlock()
-		return status.Error(codes.Unavailable, ErrNodeStopped.Error())
+		n.linksLost(oldOut, oldIn, errors.New("replaced by a new link"))
+		n.mu.Lock()
 	}
 	n.in[peer.Name] = l
+	n.settling[peer.Name]++ // until it is announced
 	// The peer reached this node, which shows it is up, not that this node
 	// can reach it: the next send dials it at once, and the wait keeps
 	// doubling if that fails too.
@@ -638,7 +623,10 @@ func (n *Node) serveLink(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcp
 		n.backoff[peer.Name] = &redial{at: time.Now(), wait: r.wait, err: r.err, why: r.why}
 	}
 	n.mu.Unlock()
-	n.linkUp(peer)
+	func() {
+		defer n.settle(peer.Name) // even if a hook panics and an interceptor recovers
+		n.linkUp(peer)
+	}()
 
 	// Recv cannot be interrupted, so it runs on its own goroutine, which also
 	// dispatches what it reads (no hop through a channel), and the handler
@@ -661,68 +649,116 @@ func (n *Node) serveLink(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcp
 	var err error
 	select {
 	case err = <-errs:
-	case <-l.closed:
+	case <-l.done:
+		if l.why != nil {
+			n.inLost(l, l.why)
+			return status.Errorf(codes.Unavailable, "grpcproc: %s cannot reach %s back: %v", n.id.Name, peer.Name, l.why)
+		}
 		err = errors.New("closed")
-	case <-l.cut:
-		n.connLost(peer.Name, nil, l, l.cutErr, false)
-		return status.Errorf(codes.Unavailable, "grpcproc: %s cannot reach %s back: %v", n.id.Name, peer.Name, l.cutErr)
 	}
 	if errors.Is(err, io.EOF) {
 		err = nil
 	}
-	n.connLost(peer.Name, nil, l, err, false)
+	n.inLost(l, err)
 	return nil
 }
 
-// connLost is called when a link to or from peer breaks.
+// outLost handles the outbound link l breaking.
 //
 // The two directions are independent streams, so an envelope the peer sent
 // can still be in flight on the inbound link when the outbound one fails.
 // The peer is therefore declared down only once the inbound link has ended
 // (everything it sent has then been dispatched, in order), or when there is
 // no inbound link at all. An outbound failure alone just drops that link; the
-// next send dials again. force (Disconnect) tears both down at once.
-func (n *Node) connLost(peer string, out *outLink, in *inLink, err error, force bool) {
+// next send dials again.
+func (n *Node) outLost(l *outLink, err error) {
+	peer := l.peer.Name
 	n.mu.Lock()
-	if (out != nil && n.out[peer] != out) || (in != nil && n.in[peer] != in) {
-		n.mu.Unlock()
-		if out != nil {
-			out.close(err)
-		}
-		if in != nil {
-			in.fail(err)
-			in.close()
-		}
-		return // stale; already handled
-	}
-	if in == nil && !force {
-		curIn := n.in[peer]
+	current := n.out[peer] == l
+	in := n.in[peer]
+	down := current && in == nil
+	if current {
 		delete(n.out, peer)
-		n.mu.Unlock()
-		out.close(err)
-		if curIn != nil {
-			n.log.Debug("outbound link lost; waiting for inbound", "peer", peer, "err", err)
-			return
-		}
-		n.nodeDown(peer, err)
-		n.linkDown(out.peer, err)
+	}
+	if down {
+		n.settling[peer]++
+	}
+	n.mu.Unlock()
+	if down {
+		defer n.settle(peer)
+	}
+	l.close(err)
+	switch {
+	case down:
+		n.peerDown(l.peer, err)
+	case current:
+		n.log.Debug("outbound link lost; waiting for inbound", "peer", peer, "err", err)
+	}
+}
+
+// inLost handles the inbound link l ending: the peer is down, and the link
+// to it goes too.
+func (n *Node) inLost(l *inLink, err error) {
+	peer := l.peer.Name
+	n.mu.Lock()
+	current := n.in[peer] == l
+	var out *outLink
+	if current {
+		out, _ = n.takeLinks(peer)
+	}
+	n.mu.Unlock()
+	if !current {
+		l.close() // already handled
 		return
 	}
-	curOut, curIn := n.out[peer], n.in[peer]
-	delete(n.out, peer)
-	delete(n.in, peer)
-	n.mu.Unlock()
+	n.linksLost(out, l, err)
+}
+
+// takeLinks removes both links with peer, in the critical section that
+// judged them. If it took any, the peer's links are settling until
+// linksLost has declared it down. Called with n.mu held.
+func (n *Node) takeLinks(peer string) (*outLink, *inLink) {
+	out, in := n.out[peer], n.in[peer]
+	if out != nil || in != nil {
+		delete(n.out, peer)
+		delete(n.in, peer)
+		n.settling[peer]++
+	}
+	return out, in
+}
+
+// linksLost closes links taken with takeLinks, at least one of them, and
+// declares their peer down.
+func (n *Node) linksLost(out *outLink, in *inLink, err error) {
 	var id NodeID
-	if curOut != nil {
-		id = curOut.peer
-		curOut.close(err)
+	if out != nil {
+		id = out.peer
 	}
-	if curIn != nil {
-		id = curIn.peer
-		curIn.fail(err)
-		curIn.close()
+	if in != nil {
+		id = in.peer
 	}
-	n.nodeDown(peer, err)
+	defer n.settle(id.Name)
+	if out != nil {
+		out.close(err)
+	}
+	if in != nil {
+		in.close()
+	}
+	n.peerDown(id, err)
+}
+
+// settle ends a change to peer's links begun under n.mu (see settling).
+func (n *Node) settle(peer string) {
+	n.mu.Lock()
+	if n.settling[peer]--; n.settling[peer] == 0 {
+		delete(n.settling, peer)
+	}
+	n.mu.Unlock()
+	n.settled.Broadcast()
+}
+
+func (n *Node) peerDown(id NodeID, err error) {
+	n.nodeDown(id.Name, err)
 	n.linkDown(id, err)
 }
 

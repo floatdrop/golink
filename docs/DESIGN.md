@@ -133,7 +133,9 @@ message Envelope {                                   // one flat message, decode
   dispatched, in order), or when there is no inbound link at all; an outbound
   failure alone drops that link and the next send dials again. Then every
   monitor that crossed the link fires `Down{noconnection}` and every pending
-  call fails with `ErrNoConnection`: the peer may have handled it. Calls
+  call fails with `ErrNoConnection`: the peer may have handled it. A new
+  inbound stream from the peer waits until then, so the old session's
+  `Down`s come before anything the new one carries. Calls
   still queued on the broken link, never written, fail at once as `Unsent`
   instead, and their messages, like those in a frame being written, become
   dead letters. Only a `LinkError` whose `Unsent` is set is known safe to

@@ -92,13 +92,6 @@ func TestProtoHelpers(t *testing.T) {
 	if first(metadata.MD{}, "k") != "" {
 		t.Fatal("first")
 	}
-	var s linkStats
-	s.fail(errors.New("boom"))
-	var li LinkInfo
-	s.fill(&li)
-	if li.State != LinkDown || li.LastError != "boom" {
-		t.Fatalf("%+v", li)
-	}
 }
 
 func newTestNode(t *testing.T, name string) *Node {
@@ -166,12 +159,16 @@ func TestDispatchMalformed(t *testing.T) {
 	delete(n.procs, 5)
 }
 
-func TestConnLostStaleAndSendClosed(t *testing.T) {
+func TestLostStaleAndSendClosed(t *testing.T) {
 	n := newTestNode(t, "a")
-	// Stale links are just closed.
-	out := &outLink{node: n, peer: NodeID{Name: "b"}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}), drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
-	in := &inLink{peer: NodeID{Name: "b"}, closed: make(chan struct{})}
-	n.connLost("b", nil, in, nil, false)
+	// Links no longer registered are just closed.
+	out := &outLink{node: n, peer: NodeID{Name: "b"}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}), cancel: func() {}}
+	in := &inLink{peer: NodeID{Name: "b"}, done: make(chan struct{})}
+	pc := &pendingCall{node: "b", ch: make(chan callResult, 1)}
+	n.pendingMu.Lock()
+	n.pending[5] = pc // b is not declared down for them
+	n.pendingMu.Unlock()
+	n.inLost(in, nil)
 	if err := out.send(nil); err != nil {
 		t.Fatal(err)
 	}
@@ -179,8 +176,10 @@ func TestConnLostStaleAndSendClosed(t *testing.T) {
 	if le, ok := errors.AsType[*LinkError](out.send(nil)); !ok || !le.Unsent || !errors.Is(le, ErrNoConnection) {
 		t.Fatalf("send on closed: %v", le)
 	}
-	n.connLost("b", out, nil, io.EOF, false)
-	n.connLost("b", out, in, io.EOF, true)
+	n.outLost(out, io.EOF)
+	if len(pc.ch) != 0 {
+		t.Fatal("losing links that were no longer registered failed a call to their peer")
+	}
 	if n.Disconnect("nobody") {
 		t.Fatal("disconnect unknown must be false")
 	}
@@ -260,7 +259,7 @@ func TestOutboundWriteFailure(t *testing.T) {
 		entered, release := make(chan struct{}), make(chan struct{})
 		l := &outLink{
 			node: n, peer: NodeID{Name: "b"}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
-			drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {},
+			cancel: func() {},
 		}
 		l.stream = &fakeClientStream{sendErr: io.ErrClosedPipe, onSend: func() {
 			close(entered)
@@ -336,29 +335,26 @@ func (f *fakeClientStream) CloseSend() error {
 func TestFinishArms(t *testing.T) {
 	mk := func() *outLink {
 		return &outLink{peer: NodeID{Name: "b"}, q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
-			drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
+			cancel: func() {}}
 	}
-	// Caller's ctx expires before anything drains.
+	// Caller's ctx expires before the peer ends the stream.
 	l := mk()
 	l.q.notify <- struct{}{} // notify already pending: the non-blocking push takes the default arm
 	expired, cancel := context.WithCancel(t.Context())
 	cancel()
 	l.once.Do(func() {}) // neutralise close: these arms are about finish's waits
 	l.shutdown()
-	l.finish(expired)
-	// Drained, then the link dies before the peer ends the stream.
+	if !l.finish(expired) {
+		t.Fatal("an expired ctx did not cut the flush")
+	}
+	// The link closes first: the peer ended the stream, or it broke.
 	l = mk()
 	l.once.Do(func() {})
-	close(l.drained)
 	close(l.done)
 	l.shutdown()
-	l.finish(t.Context())
-	// Drained, peer never answers, ctx expires.
-	l = mk()
-	l.once.Do(func() {})
-	close(l.drained)
-	l.shutdown()
-	l.finish(expired)
+	if l.finish(t.Context()) {
+		t.Fatal("cut a flush that ended")
+	}
 }
 
 func TestInspectNowOnExited(t *testing.T) {
@@ -373,13 +369,13 @@ func TestInspectNowOnExited(t *testing.T) {
 func TestOutboundLostWhileInboundAlive(t *testing.T) {
 	n := newTestNode(t, "a")
 	out := &outLink{peer: NodeID{Name: "b"}, q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
-		drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
+		cancel: func() {}}
 	out.once.Do(func() {})
-	in := &inLink{peer: NodeID{Name: "b"}, closed: make(chan struct{})}
+	in := &inLink{peer: NodeID{Name: "b"}, done: make(chan struct{})}
 	n.out["b"], n.in["b"] = out, in
 	pc := &pendingCall{node: "b", ch: make(chan callResult, 1)}
 	n.pending[1] = pc
-	n.connLost("b", out, nil, io.EOF, false)
+	n.outLost(out, io.EOF)
 	if _, ok := n.in["b"]; !ok {
 		t.Fatal("inbound link must survive an outbound failure")
 	}
@@ -391,7 +387,7 @@ func TestOutboundLostWhileInboundAlive(t *testing.T) {
 		t.Fatal("pending call failed while the peer may still answer")
 	default:
 	}
-	n.connLost("b", nil, in, io.EOF, false)
+	n.inLost(in, io.EOF)
 	if r := <-pc.ch; !errors.Is(r.err, ErrNoConnection) {
 		t.Fatal(r.err)
 	}
@@ -541,7 +537,7 @@ func TestFrameSplitting(t *testing.T) {
 // A frame arriving after the link closed is not dispatched.
 func TestNoDispatchAfterClose(t *testing.T) {
 	n := newTestNode(t, "a")
-	l := &inLink{peer: NodeID{Name: "b"}, closed: make(chan struct{})}
+	l := &inLink{peer: NodeID{Name: "b"}, done: make(chan struct{})}
 	l.close()
 	if l.deliver(n, &grpcprocv1.Frame{Envelopes: []*grpcprocv1.Envelope{{}}}) {
 		t.Fatal("dispatched after close")
@@ -616,7 +612,7 @@ func TestLostEnvelopes(t *testing.T) {
 	n.pendingMu.Unlock()
 	events := n.Subscribe(t.Context(), 8)
 	l := &outLink{node: n, peer: NodeID{Name: "b"}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
-		drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
+		cancel: func() {}}
 	send := wire(grpcprocv1.Kind_KIND_SEND, PID{Node: "a", Incarnation: 1, ID: 3}, PID{Node: "b", Incarnation: 2, ID: 4}, "")
 	if err := encodeBody(send, &grpcprocv1.Hello{Node: "x"}); err != nil {
 		t.Fatal(err)
@@ -702,7 +698,7 @@ func TestSubscribeLetsGoWhenItEnds(t *testing.T) {
 func TestDemonitorSendsOneEnvelope(t *testing.T) {
 	n := newTestNode(t, "a")
 	l := &outLink{node: n, peer: NodeID{Name: "b"}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
-		drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
+		cancel: func() {}}
 	n.mu.Lock()
 	n.out["b"] = l // no writer: what is sent stays queued
 	n.mu.Unlock()
@@ -750,7 +746,7 @@ func TestStopFlushesEveryLinkAtOnce(t *testing.T) {
 	var links []*outLink
 	for _, peer := range []string{"b", "c", "d"} {
 		l := &outLink{node: n, peer: NodeID{Name: peer}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
-			drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
+			cancel: func() {}}
 		l.stream = &fakeClientStream{onCloseSend: func() {
 			mu.Lock()
 			closedSend[peer] = time.Since(start)
@@ -816,7 +812,7 @@ func TestStopWithdrawsAfterALongFlush(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := &outLink{node: n, peer: NodeID{Name: "b"}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
-		drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}, stream: &fakeClientStream{}}
+		cancel: func() {}, stream: &fakeClientStream{}}
 	n.mu.Lock()
 	n.out["b"] = l // its peer never ends the stream
 	n.mu.Unlock()
