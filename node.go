@@ -39,7 +39,8 @@ type Registrar interface {
 	// Register returns once self is published, and keeps it published
 	// until withdraw is called. Start calls Register; Stop calls withdraw
 	// last, after the node's processes have exited and their Down notices
-	// have reached its peers.
+	// have reached its peers. An error must leave self unpublished: Start
+	// may call Register again.
 	Register(ctx context.Context, self Member) (withdraw func(context.Context) error, err error)
 }
 
@@ -144,7 +145,8 @@ type Node struct {
 
 	nextID   atomic.Uint64
 	nextRef  atomic.Uint64
-	started  atomic.Int64                // unix nanos, 0 before Start
+	started  atomic.Int64                // unix nanos, 0 before Start succeeds
+	startMu  sync.Mutex                  // one Start at a time
 	withdraw func(context.Context) error // from Registrar; guarded by mu
 
 	// mu guards the fields below, through stopped. A process's lock may be
@@ -238,27 +240,69 @@ func (n *Node) PID() PID { return PID{Node: n.id.Name, Incarnation: n.id.Incarna
 
 // Start watches Membership and publishes the node with its Registrar, when
 // configured. Processes may be spawned before Start and run immediately;
-// Start only makes the node known. A second call does nothing.
+// Start only makes the node known. ctx bounds it. A call after one that
+// succeeded does nothing; after one that failed, Start tries again;
+// concurrent calls wait for the one in progress; after Stop began, Start
+// fails with ErrNodeStopped.
 func (n *Node) Start(ctx context.Context) error {
-	if !n.started.CompareAndSwap(0, time.Now().UnixNano()) {
+	n.startMu.Lock()
+	defer n.startMu.Unlock()
+	if n.started.Load() != 0 {
 		return nil
 	}
-	if m := n.cfg.Membership; m != nil {
-		events, err := m.Watch(n.ctx)
-		if err != nil {
-			return fmt.Errorf("grpcproc: membership: %w", err)
+	n.mu.Lock()
+	stopping := n.stopping
+	n.mu.Unlock()
+	if stopping {
+		return ErrNodeStopped
+	}
+	now := time.Now()
+	// A Start that fails undoes itself: it stops watching and waits for the
+	// watcher to finish, so that no event from it lands after a retry.
+	watching, unwatch := context.WithCancel(n.ctx)
+	watched := make(chan struct{})
+	failed := func(err error) error {
+		unwatch()
+		select {
+		case <-watched:
+		case <-ctx.Done():
 		}
-		go n.watchMembers(events)
+		return err
+	}
+	if m := n.cfg.Membership; m != nil {
+		stop := context.AfterFunc(ctx, unwatch) // ctx bounds the Watch call too
+		events, err := m.Watch(watching)
+		if !stop() && err == nil {
+			err = context.Cause(ctx)
+		}
+		if err != nil {
+			close(watched)
+			return failed(fmt.Errorf("grpcproc: membership: %w", err))
+		}
+		go func() {
+			defer close(watched)
+			n.watchMembers(events)
+		}()
+	} else {
+		close(watched)
 	}
 	if r := n.cfg.Registrar; r != nil {
 		withdraw, err := r.Register(ctx, Member{Name: n.id.Name, Incarnation: n.id.Incarnation, Addr: n.cfg.Advertise})
 		if err != nil {
-			return fmt.Errorf("grpcproc: register: %w", err)
+			return failed(fmt.Errorf("grpcproc: register: %w", err))
 		}
 		n.mu.Lock()
-		n.withdraw = withdraw
+		stopping := n.stopping
+		if !stopping {
+			n.withdraw = withdraw
+		}
 		n.mu.Unlock()
+		if stopping {
+			// Stop began while this registered: it would not withdraw it.
+			return failed(errors.Join(ErrNodeStopped, withdraw(ctx)))
+		}
 	}
+	n.started.Store(now.UnixNano())
 	return nil
 }
 

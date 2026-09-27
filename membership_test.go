@@ -49,9 +49,13 @@ type fakeRegistrar struct {
 	err         error
 	withdrawErr error
 	onWithdraw  func()
+	onRegister  func()
 }
 
 func (f *fakeRegistrar) Register(_ context.Context, self grpcproc.Member) (func(context.Context) error, error) {
+	if f.onRegister != nil {
+		f.onRegister()
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -186,20 +190,102 @@ func TestRegistrarLifecycle(t *testing.T) {
 
 func TestStartAndStopErrors(t *testing.T) {
 	boom := errors.New("etcd down")
-	n, _ := grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Membership: &fakeMembership{err: boom}})
+	down := &fakeMembership{err: boom, events: make(chan grpcproc.MemberEvent)}
+	n, _ := grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Membership: down})
 	if err := n.Start(t.Context()); !errors.Is(err, boom) || !strings.Contains(err.Error(), "membership") {
 		t.Fatalf("got %v", err)
 	}
+	down.err = nil
+	if err := n.Start(t.Context()); err != nil || n.Info().StartedAt.IsZero() {
+		t.Fatalf("the retry: %v", err)
+	}
+	_ = n.Stop(t.Context())
 	n, _ = grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Registrar: &fakeRegistrar{err: boom}})
 	if err := n.Start(t.Context()); !errors.Is(err, boom) || !strings.Contains(err.Error(), "register") {
 		t.Fatalf("got %v", err)
 	}
+	// A Start that failed stops the watch it began, and the next Start tries
+	// again.
+	var watches []context.Context
+	watch := membershipFunc(func(ctx context.Context) (<-chan grpcproc.MemberEvent, error) {
+		watches = append(watches, ctx)
+		out := make(chan grpcproc.MemberEvent)
+		context.AfterFunc(ctx, func() { close(out) })
+		return out, nil
+	})
+	flaky := &fakeRegistrar{err: boom}
+	n, _ = grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Membership: watch, Registrar: flaky})
+	if err := n.Start(t.Context()); !errors.Is(err, boom) {
+		t.Fatalf("got %v", err)
+	}
+	if watches[0].Err() == nil {
+		t.Fatal("a failed Start left its watch running")
+	}
+	flaky.err = nil
+	if err := n.Start(t.Context()); err != nil || len(flaky.members) != 1 || len(watches) != 2 || watches[1].Err() != nil {
+		t.Fatalf("the second Start: %v, registered %d times, watched %d times", err, len(flaky.members), len(watches))
+	}
+	if n.Info().StartedAt.IsZero() {
+		t.Fatal("a started node has no start time")
+	}
+	_ = n.Stop(t.Context())
+
 	r := &fakeRegistrar{withdrawErr: boom}
 	n, _ = grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Registrar: r})
 	if err := n.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if err := n.Stop(t.Context()); !errors.Is(err, boom) || !strings.Contains(err.Error(), "withdraw") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// membershipFunc adapts a function to grpcproc.Membership.
+type membershipFunc func(ctx context.Context) (<-chan grpcproc.MemberEvent, error)
+
+func (f membershipFunc) Watch(ctx context.Context) (<-chan grpcproc.MemberEvent, error) {
+	return f(ctx)
+}
+
+// Start after Stop refuses, and a registration that completes while Stop
+// runs is withdrawn by Start itself: Stop has already withdrawn what it knew.
+func TestStartAndStopTogether(t *testing.T) {
+	n, _ := grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}})
+	_ = n.Stop(t.Context())
+	if err := n.Start(t.Context()); !errors.Is(err, grpcproc.ErrNodeStopped) {
+		t.Fatalf("got %v", err)
+	}
+
+	entered, release := make(chan struct{}), make(chan struct{})
+	r := &fakeRegistrar{onRegister: func() { close(entered); <-release }}
+	n, _ = grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Registrar: r})
+	started := make(chan error, 1)
+	go func() { started <- n.Start(t.Context()) }()
+	<-entered
+	if err := n.Stop(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if err := <-started; !errors.Is(err, grpcproc.ErrNodeStopped) || r.withdrawn != 1 {
+		t.Fatalf("got %v, withdrawn %d times", err, r.withdrawn)
+	}
+}
+
+// Start's ctx bounds Membership.Watch: a Watch that returns only after it
+// ended fails Start, and its watch is stopped.
+func TestStartBoundsTheWatch(t *testing.T) {
+	var watching context.Context
+	slow := membershipFunc(func(ctx context.Context) (<-chan grpcproc.MemberEvent, error) {
+		watching = ctx
+		<-ctx.Done() // ended by Start's deadline
+		out := make(chan grpcproc.MemberEvent)
+		close(out)
+		return out, nil
+	})
+	n, _ := grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Membership: slow})
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if err := n.Start(ctx); !errors.Is(err, context.DeadlineExceeded) || watching.Err() == nil {
 		t.Fatalf("got %v", err)
 	}
 }
