@@ -8,6 +8,7 @@ go 1.27.1
 replace github.com/floatdrop/grpcproc => ../
 
 require (
+	ergo.services/ergo v1.999.330
 	github.com/anthdm/hollywood v1.0.5
 	github.com/asynkron/protoactor-go v0.0.0-20260118094027-288962e52f3f
 	github.com/floatdrop/grpcproc v0.0.3
