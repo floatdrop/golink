@@ -88,23 +88,3 @@ cd benchmarks
 go test -run '^$' -bench . -count=6 ./... | sed 's|pkg: .*/benchmarks/|pkg: |' > new.txt
 benchstat -table goos,goarch,cpu -col pkg -row .name new.txt
 ```
-
-## History
-
-The same benchmarks, v0.0.0 (published as golink) against the commits after it:
-
-| | v0.0.0 | now |
-| --- | --- | --- |
-| Local send | 201 ns, 2 allocs | 93 ns, 0 allocs |
-| Local request | 812 ns, 5 allocs | 726 ns, 2 allocs |
-| Remote send | 1570 ns, 29 allocs | 374 ns, 6 allocs |
-| Remote request | 47.5 µs, 72 allocs | 41.8 µs, 52 allocs |
-| Remote request, parallel | 9.6 µs, 63 allocs | 7.1 µs, 28 allocs |
-
-Mailboxes swap batches between producers and the consumer instead of
-growing a slice, read the clock once per batch, and share no counter
-between sides; links write one gRPC message per batch of envelopes and
-dispatch what they read without a hop through a channel; the wire envelope
-is one flat message, without node names or an `Any`; and a local call waits
-on a channel of its own, with no node-wide table of calls or lock between
-callers.
