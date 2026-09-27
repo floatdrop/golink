@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -466,5 +468,48 @@ func TestEventConversions(t *testing.T) {
 	down := grpcproc.LinkInfo{Peer: grpcproc.NodeID{Name: "b"}, Outbound: true, State: grpcproc.LinkDown, LastError: "refused", RetryAt: now, Queued: 5}
 	if n := inspect.NodeInfo(inspect.NodeInfoToProto(grpcproc.NodeInfo{Links: []grpcproc.LinkInfo{down}})); !n.Links[0].RetryAt.Equal(now) || n.Links[0].State != grpcproc.LinkDown || n.Links[0].Queued != 5 {
 		t.Fatalf("%+v", n.Links[0])
+	}
+}
+
+// The client picks a watch's buffer, and the server allocates it: it is
+// capped, and a relayed watch is capped before it reaches a peer, which may
+// predate the cap. Before, the largest request allocated 1.8 TB.
+func TestWatchCapsItsBuffer(t *testing.T) {
+	for _, node := range []string{"", "b"} {
+		t.Run("node="+node, func(t *testing.T) {
+			c := cluster(t, nil, "a", "b")
+			watched := c.Node("a")
+			if node != "" {
+				watched = c.Node(node)
+			}
+			var before, after runtime.MemStats
+			runtime.ReadMemStats(&before)
+			stream, err := client(c, "a").Watch(t.Context(), &inspectv1.WatchRequest{Node: node, Buffer: math.MaxUint32})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := make(chan error, 1)
+			go func() {
+				_, err := stream.Recv()
+				got <- err
+			}()
+			for deadline := time.After(5 * time.Second); ; {
+				_, _ = watched.Spawn(func(p *grpcproc.Process[*testpb.Ping]) error { return nil })
+				select {
+				case err := <-got:
+					if err != nil {
+						t.Fatal(err)
+					}
+					runtime.ReadMemStats(&after)
+					if grew := after.TotalAlloc - before.TotalAlloc; grew > 16<<20 {
+						t.Fatalf("the watch allocated %d MB", grew>>20)
+					}
+					return
+				case <-deadline:
+					t.Fatal("no event")
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
+		})
 	}
 }

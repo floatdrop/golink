@@ -359,7 +359,9 @@ process publishes through `WithInspect`), `SetLogLevel`, `Send`, `Exit` and
 `Watch`. Every request names a node; one that is not this node is forwarded
 to that node's Inspector, so one endpoint inspects the whole cluster.
 `inspect.ReadOnly()` refuses the three writes; anything finer is the job of
-the interceptors that guard your other services.
+the interceptors that guard your other services. A watch holds a buffer of
+up to 4096 events, about 1.7 MB, so limit how many streams a client may
+open, with `grpc.MaxConcurrentStreams` or an interceptor.
 
 [`grpcprocctl`](tools/README.md) is its command line, and serves it to AI
 agents over MCP:

@@ -183,7 +183,7 @@ message ExitResponse {}
 message WatchRequest {
   string node = 1;
   // Events buffered for this watcher; beyond it events are dropped and
-  // counted in Event.missed. Default 256.
+  // counted in Event.missed. Default 256, at most 4096.
   uint32 buffer = 2;
 }
 

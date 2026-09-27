@@ -1354,7 +1354,7 @@ type WatchRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Node  string                 `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
 	// Events buffered for this watcher; beyond it events are dropped and
-	// counted in Event.missed. Default 256.
+	// counted in Event.missed. Default 256, at most 4096.
 	Buffer        uint32 `protobuf:"varint,2,opt,name=buffer,proto3" json:"buffer,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

@@ -85,6 +85,7 @@ func (s *Server) Register(r grpc.ServiceRegistrar) { inspectv1.RegisterInspector
 const (
 	defaultInspectTimeout = time.Second
 	defaultWatchBuffer    = 256
+	maxWatchBuffer        = 4096 // a client picks the size, and the server allocates it
 )
 
 // remote returns the Inspector to forward to, or nil when the request is
@@ -275,6 +276,7 @@ func (s *Server) Watch(req *inspectv1.WatchRequest, stream grpc.ServerStreamingS
 		return err
 	}
 	if c != nil {
+		req.Buffer = min(req.GetBuffer(), maxWatchBuffer) // the peer may predate the cap
 		upstream, err := c.Watch(ctx, req)
 		if err != nil {
 			return peerErr(node, err)
@@ -294,7 +296,9 @@ func (s *Server) Watch(req *inspectv1.WatchRequest, stream grpc.ServerStreamingS
 			}
 		}
 	}
-	events := s.node.Subscribe(ctx, cmp.Or(int(req.GetBuffer()), defaultWatchBuffer))
+	// Clamped as a uint32: converted first, a large value would wrap where
+	// int is 32 bits.
+	events := s.node.Subscribe(ctx, int(min(cmp.Or(req.GetBuffer(), defaultWatchBuffer), maxWatchBuffer)))
 	for ev := range events {
 		if err := stream.Send(&inspectv1.WatchResponse{Event: eventTo(ev)}); err != nil {
 			return err
