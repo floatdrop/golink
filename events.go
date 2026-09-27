@@ -19,9 +19,9 @@ const (
 	EventDeadLetter
 )
 
-func (k EventKind) String() string {
-	return [...]string{"", "spawn", "exit", "link-up", "link-down", "dead-letter"}[k]
-}
+var eventKinds = [...]string{"", "spawn", "exit", "link-up", "link-down", "dead-letter"}
+
+func (k EventKind) String() string { return enumName(eventKinds[:], int(k), "EventKind") }
 
 // Event is something that happened on a node. Which fields are set depends
 // on Kind:

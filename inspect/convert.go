@@ -2,6 +2,7 @@ package inspect
 
 import (
 	"log/slog"
+	"math"
 	"time"
 
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -47,6 +48,24 @@ func stateTo(s grpcproc.ProcessState) inspectv1.ProcessState {
 
 func linkStateTo(s grpcproc.LinkState) inspectv1.LinkState {
 	return inspectv1.LinkState(s + 1)
+}
+
+// stateFrom and linkStateFrom invert stateTo and linkStateTo. A wire value
+// that no state has (unspecified, or from a newer node) becomes 255, which
+// is none either, rather than wrap around into one that is.
+func stateFrom(s inspectv1.ProcessState) grpcproc.ProcessState {
+	return grpcproc.ProcessState(enumFrom(int32(s)))
+}
+
+func linkStateFrom(s inspectv1.LinkState) grpcproc.LinkState {
+	return grpcproc.LinkState(enumFrom(int32(s)))
+}
+
+func enumFrom(v int32) uint8 {
+	if v < 1 || v > math.MaxUint8 {
+		return math.MaxUint8
+	}
+	return uint8(v - 1)
 }
 
 func nodeInfoTo(n grpcproc.NodeInfo) *inspectv1.NodeInfo {
@@ -137,7 +156,7 @@ func NodeInfo(n *inspectv1.NodeInfo) grpcproc.NodeInfo {
 		li := grpcproc.LinkInfo{
 			Peer:       nodeIDFrom(l.GetPeer()),
 			Outbound:   l.GetOutbound(),
-			State:      grpcproc.LinkState(l.GetState() - 1),
+			State:      linkStateFrom(l.GetState()),
 			Reconnects: l.GetReconnects(),
 			Messages:   l.GetMessages(),
 			Bytes:      l.GetBytes(),
@@ -162,7 +181,7 @@ func ProcessInfo(p *inspectv1.ProcessInfo) grpcproc.ProcessInfo {
 		Name:  p.GetName(),
 		Label: p.GetLabel(),
 		Type:  p.GetType(),
-		State: grpcproc.ProcessState(p.GetState() - 1),
+		State: stateFrom(p.GetState()),
 		Mailbox: grpcproc.MailboxInfo{
 			Depth:     int(p.GetMailbox().GetDepth()),
 			Peak:      int(p.GetMailbox().GetPeak()),

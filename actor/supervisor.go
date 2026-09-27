@@ -26,9 +26,9 @@ const (
 	RestForOne
 )
 
-func (s Strategy) String() string {
-	return [...]string{"one_for_one", "one_for_all", "rest_for_one"}[s]
-}
+var strategies = [...]string{"one_for_one", "one_for_all", "rest_for_one"}
+
+func (s Strategy) String() string { return enumName(strategies[:], int(s), "Strategy") }
 
 // Restart says when a child is restarted.
 type Restart uint8
@@ -43,7 +43,18 @@ const (
 	Temporary
 )
 
-func (r Restart) String() string { return [...]string{"permanent", "transient", "temporary"}[r] }
+var restarts = [...]string{"permanent", "transient", "temporary"}
+
+func (r Restart) String() string { return enumName(restarts[:], int(r), "Restart") }
+
+// enumName is v's entry in names, or type(v) for a value outside them: a
+// String must not panic, whatever a Spec holds.
+func enumName(names []string, v int, typ string) string {
+	if v < len(names) {
+		return names[v]
+	}
+	return typ + "(" + strconv.Itoa(v) + ")"
+}
 
 // ReasonMaxRestarts is the exit reason of a supervisor that restarted its
 // children more often than Spec allows. It is abnormal, so the supervisor's
@@ -116,6 +127,9 @@ type Spec struct {
 }
 
 func (s Spec) validate() error {
+	if int(s.Strategy) >= len(strategies) {
+		return fmt.Errorf("actor: unknown %v", s.Strategy)
+	}
 	seen := map[string]bool{}
 	for i, c := range s.Children {
 		switch {
@@ -125,6 +139,8 @@ func (s Spec) validate() error {
 			return fmt.Errorf("actor: child %d has no name", i)
 		case seen[c.Name]:
 			return fmt.Errorf("actor: two children named %q", c.Name)
+		case int(c.Restart) >= len(restarts):
+			return fmt.Errorf("actor: child %q: unknown %v", c.Name, c.Restart)
 		}
 		seen[c.Name] = true
 	}

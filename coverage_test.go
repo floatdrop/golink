@@ -40,6 +40,11 @@ func TestAddrForms(t *testing.T) {
 	if (grpcproc.Ref{Node: "n", ID: 4}).String() != "#n.4" || (grpcproc.NodeID{Name: "n", Incarnation: 2}).String() != "n#2" {
 		t.Fatal("String")
 	}
+	// A value outside the enum, as a peer or a newer Inspector may send, is
+	// named by its number rather than a panic.
+	if s := grpcproc.ProcessState(255).String() + grpcproc.LinkState(9).String() + grpcproc.EventKind(0).String() + grpcproc.EventKind(9).String(); s != "ProcessState(255)LinkState(9)EventKind(0)EventKind(9)" {
+		t.Fatal(s)
+	}
 	if grpcproc.StateIdle.String() != "idle" || grpcproc.StateExiting.String() != "exiting" || grpcproc.LinkUp.String() != "up" {
 		t.Fatal("state strings")
 	}

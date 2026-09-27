@@ -18,9 +18,9 @@ const (
 	StateExiting
 )
 
-func (s ProcessState) String() string {
-	return [...]string{"idle", "running", "waiting-reply", "exiting"}[s]
-}
+var processStates = [...]string{"idle", "running", "waiting-reply", "exiting"}
+
+func (s ProcessState) String() string { return enumName(processStates[:], int(s), "ProcessState") }
 
 // MailboxInfo is a snapshot of a mailbox.
 type MailboxInfo struct {
@@ -62,7 +62,18 @@ const (
 	LinkDown
 )
 
-func (s LinkState) String() string { return [...]string{"connecting", "up", "down"}[s] }
+var linkStates = [...]string{"connecting", "up", "down"}
+
+func (s LinkState) String() string { return enumName(linkStates[:], int(s), "LinkState") }
+
+// enumName is v's entry in names, or type(v) for a value outside them: a
+// peer or a newer Inspector can send one, and a String must not panic.
+func enumName(names []string, v int, typ string) string {
+	if v < len(names) && names[v] != "" {
+		return names[v]
+	}
+	return typ + "(" + strconv.Itoa(v) + ")"
+}
 
 // LinkInfo describes one direction of traffic with a peer.
 type LinkInfo struct {

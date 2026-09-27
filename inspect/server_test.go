@@ -461,6 +461,18 @@ func TestEventConversions(t *testing.T) {
 			t.Errorf("%v: got %+v", ev.Kind, got)
 		}
 	}
+	// A wire state no state has, unspecified or from a newer node, becomes
+	// 255 rather than wrap around into a real one.
+	for _, wire := range []int32{0, 257, -1} {
+		p := inspect.ProcessInfo(&inspectv1.ProcessInfo{State: inspectv1.ProcessState(wire)})
+		n := inspect.NodeInfo(&inspectv1.NodeInfo{Links: []*inspectv1.Link{{State: inspectv1.LinkState(wire)}}})
+		if p.State != 255 || n.Links[0].State != 255 {
+			t.Errorf("wire state %d: process %v, link %v", wire, p.State, n.Links[0].State)
+		}
+	}
+	if p := inspect.ProcessInfo(&inspectv1.ProcessInfo{State: inspectv1.ProcessState_PROCESS_STATE_EXITING}); p.State != grpcproc.StateExiting {
+		t.Errorf("exiting became %v", p.State)
+	}
 	// Zero times stay zero across the wire, and set ones cross it.
 	if n := inspect.NodeInfo(inspect.NodeInfoToProto(grpcproc.NodeInfo{Links: []grpcproc.LinkInfo{{}}})); !n.StartedAt.IsZero() || !n.Links[0].EstablishedAt.IsZero() || !n.Links[0].RetryAt.IsZero() {
 		t.Fatalf("%+v", n)

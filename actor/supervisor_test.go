@@ -303,10 +303,15 @@ func TestSpecValidation(t *testing.T) {
 		{Children: []actor.ChildSpec{{Name: "raw"}}},
 		{Children: []actor.ChildSpec{actor.ChildFunc("", worker)}},
 		{Children: []actor.ChildSpec{actor.ChildFunc("x", worker), actor.ChildFunc("x", worker)}},
+		{Strategy: 9},
+		{Children: []actor.ChildSpec{actor.ChildFunc("x", worker).WithRestart(9)}},
 	} {
 		if _, err := actor.Supervise(n, spec); err == nil {
 			t.Errorf("accepted %+v", spec)
 		}
+	}
+	if s := actor.Strategy(9).String() + actor.Restart(9).String(); s != "Strategy(9)Restart(9)" {
+		t.Fatal(s)
 	}
 	c.Stop("a")
 	if _, err := actor.Supervise(n, actor.Spec{}); err == nil {
