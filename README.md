@@ -72,7 +72,7 @@ func main() {
 
 	// A process on warehouse. Its mailbox holds *shoppb.Reserve and
 	// nothing else; it answers each call with *shoppb.Reserved.
-	_, err := grpcproc.Spawn(warehouse, func(p *grpcproc.Process[*shoppb.Reserve]) error {
+	_, err := warehouse.Spawn(func(p *grpcproc.Process[*shoppb.Reserve]) error {
 		left := map[string]int64{"apple": 3}
 		for {
 			m, err := p.Receive()
@@ -107,7 +107,7 @@ func main() {
 	// arrives with the reason, as it would for a crash or a lost node. It
 	// expects no messages, so its mailbox is untyped: proto.Message.
 	done := make(chan grpcproc.Down)
-	_, err = grpcproc.Spawn(shop, func(p *grpcproc.Process[proto.Message]) error {
+	_, err = shop.Spawn(func(p *grpcproc.Process[proto.Message]) error {
 		p.Monitor(stock)
 		if err := p.Exit(stock, "closing"); err != nil {
 			return err
@@ -293,7 +293,7 @@ func main() {
 	}
 	defer func() { _ = node.Stop(ctx) }()
 
-	inventory, err := actor.Spawn(node, &Inventory{ledger: &Ledger{}}, grpcproc.WithName("inventory"))
+	inventory, err := node.Spawn(actor.Run(&Inventory{ledger: &Ledger{}}), grpcproc.WithName("inventory"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -562,7 +562,7 @@ a, err := p.CallTo[*shoppb.Reserved](ctx, m.From, &shoppb.Reserve{…})
 | `p.Exit(target, reason)` | asks another process to exit; its `Receive` returns an `*ExitError` |
 | `p.Log()` | `*slog.Logger` with pid and label; threshold settable at runtime |
 | `p.SendAfter(d, to, m)` | a `*Timer`; cancelled if the process exits first; carries the metadata of when it was scheduled |
-| `p.SpawnMonitor[N](fn, …)` | a child on the same node, monitored before it runs |
+| `p.Spawn[N](fn, …)` / `p.SpawnMonitor[N](fn, …)` | a child on the same node, with `p` as its parent; the second monitored before it runs |
 
 Exit reasons and the type check on delivery are the whole error model: a
 message of the wrong type is a dead letter with reason `type` (and `ErrType`
@@ -666,7 +666,7 @@ func TestReserveAcrossNodes(t *testing.T) {
 	// Two nodes over in-memory gRPC connections, stopped when the test ends.
 	c := grpcproctest.New(t, "shop", "warehouse")
 	shop := c.Node("shop")
-	if _, err := grpcproc.Spawn(c.Node("warehouse"), Stock(map[string]int64{"apple": 3}), grpcproc.WithName("stock")); err != nil {
+	if _, err := c.Node("warehouse").Spawn(Stock(map[string]int64{"apple": 3}), grpcproc.WithName("stock")); err != nil {
 		t.Fatal(err)
 	}
 	stock := grpcproc.Named[*shoppb.Reserve]("warehouse", "stock")

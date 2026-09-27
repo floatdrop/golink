@@ -95,7 +95,7 @@ func TestGetNodeLocalAndForwarded(t *testing.T) {
 		t.Fatalf("%+v", info)
 	}
 	// Asking a about b forwards to b's Inspector.
-	e, _ := grpcproc.Spawn(c.Node("b"), func(p *grpcproc.Process[*testpb.Ping]) error { _, err := p.Receive(); return err })
+	e, _ := c.Node("b").Spawn(func(p *grpcproc.Process[*testpb.Ping]) error { _, err := p.Receive(); return err })
 	if _, err := c.Node("a").Call[*testpb.Pong](t.Context(), e, &testpb.Ping{}); err == nil {
 		t.Fatal("expected no reply")
 	}
@@ -115,11 +115,11 @@ func TestListProcessesFilters(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
 	fn, insp := worker(release)
-	busy, _ := grpcproc.Spawn(n, fn, grpcproc.WithName("orders-busy"), grpcproc.WithLabel("order"), insp)
+	busy, _ := n.Spawn(fn, grpcproc.WithName("orders-busy"), grpcproc.WithLabel("order"), insp)
 	fn2, insp2 := worker(release)
-	_, _ = grpcproc.Spawn(n, fn2, grpcproc.WithName("orders-idle"), grpcproc.WithLabel("order"), insp2)
+	_, _ = n.Spawn(fn2, grpcproc.WithName("orders-idle"), grpcproc.WithLabel("order"), insp2)
 	fn3, insp3 := worker(release)
-	_, _ = grpcproc.Spawn(n, fn3, grpcproc.WithName("billing"), grpcproc.WithLabel("bill"), insp3)
+	_, _ = n.Spawn(fn3, grpcproc.WithName("billing"), grpcproc.WithLabel("bill"), insp3)
 	_ = n.Send(busy, &testpb.Ping{N: 7})
 	_ = n.Send(busy, &testpb.Ping{N: 1})
 	_ = n.Send(busy, &testpb.Ping{N: 1})
@@ -164,8 +164,15 @@ func TestGetProcess(t *testing.T) {
 	b := c.Node("b")
 	release := make(chan struct{})
 	fn, insp := worker(release)
-	parent := grpcproc.PID{Node: "b", Incarnation: b.ID().Incarnation, ID: 42}
-	pid, _ := grpcproc.Spawn(b, fn, grpcproc.WithName("w"), insp, grpcproc.WithParent(parent))
+	parents := make(chan *grpcproc.Process[proto.Message], 1)
+	_, _ = b.Spawn(func(p *grpcproc.Process[proto.Message]) error {
+		parents <- p
+		_, err := p.Receive()
+		return err
+	})
+	spawner := <-parents
+	parent := spawner.PID()
+	pid, _ := spawner.Spawn(fn, grpcproc.WithName("w"), insp)
 	_ = b.Send(pid, &testpb.Ping{N: 1})
 	time.Sleep(20 * time.Millisecond)
 
@@ -206,12 +213,12 @@ func TestGetProcess(t *testing.T) {
 func TestWrites(t *testing.T) {
 	c := cluster(t, nil, "a", "b")
 	a, b := client(c, "a"), c.Node("b")
-	w, _ := grpcproc.Spawn[proto.Message](c.Node("a"), func(p *grpcproc.Process[proto.Message]) error {
+	w, _ := c.Node("a").Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
 		_, err := p.Receive()
 		return err
 	})
 	col := make(chan *testpb.Ping, 1)
-	target, _ := grpcproc.Spawn[*testpb.Ping](b, func(p *grpcproc.Process[*testpb.Ping]) error {
+	target, _ := b.Spawn[*testpb.Ping](func(p *grpcproc.Process[*testpb.Ping]) error {
 		for {
 			m, err := p.Receive()
 			if err != nil {
@@ -254,7 +261,7 @@ func TestWrites(t *testing.T) {
 
 	// Exit by name, default reason; a watcher on a sees it.
 	watchDone := make(chan grpcproc.Down, 1)
-	_, _ = grpcproc.Spawn[proto.Message](c.Node("a"), func(p *grpcproc.Process[proto.Message]) error {
+	_, _ = c.Node("a").Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
 		p.Monitor(target)
 		for {
 			m, err := p.Receive()
@@ -364,7 +371,7 @@ func TestWatchLocalAndForwarded(t *testing.T) {
 			}()
 			deadline := time.After(5 * time.Second)
 			for {
-				e, _ := grpcproc.Spawn(target, func(p *grpcproc.Process[*testpb.Ping]) error { return nil })
+				e, _ := target.Spawn(func(p *grpcproc.Process[*testpb.Ping]) error { return nil })
 				select {
 				case ev := <-seen:
 					if ev.Kind == grpcproc.EventSpawn && ev.Process.PID.Node == target.Name() {
@@ -395,7 +402,7 @@ func TestWatchEndsWhenNodeStops(t *testing.T) {
 			case <-live:
 				return
 			case <-time.After(10 * time.Millisecond):
-				_, _ = grpcproc.Spawn(c.Node("a"), func(p *grpcproc.Process[*testpb.Ping]) error { return nil })
+				_, _ = c.Node("a").Spawn(func(p *grpcproc.Process[*testpb.Ping]) error { return nil })
 			}
 		}
 	}()

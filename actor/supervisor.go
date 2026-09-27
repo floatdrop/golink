@@ -72,7 +72,7 @@ func (c ChildSpec) WithRestart(r Restart) ChildSpec {
 // ChildFunc is a child that runs fn, registered as name.
 func ChildFunc[M proto.Message](name string, fn func(*grpcproc.Process[M]) error, opts ...grpcproc.SpawnOption) ChildSpec {
 	return ChildSpec{Name: name, start: func(sup *grpcproc.Process[proto.Message]) (grpcproc.PID, grpcproc.Ref, error) {
-		a, ref, err := sup.SpawnMonitor[M](fn, childOpts(sup, name, opts)...)
+		a, ref, err := sup.SpawnMonitor[M](fn, childOpts(name, opts)...)
 		return a.PID(), ref, err
 	}}
 }
@@ -88,15 +88,15 @@ func Child[M proto.Message, H Handler[M]](name string, newHandler func() H, opts
 // ChildSupervisor is a child that is itself a supervisor.
 func ChildSupervisor(name string, spec Spec, opts ...grpcproc.SpawnOption) ChildSpec {
 	return ChildSpec{Name: name, start: func(sup *grpcproc.Process[proto.Message]) (grpcproc.PID, grpcproc.Ref, error) {
-		return startSupervisor(spec, childOpts(sup, name, opts), func(fn func(*grpcproc.Process[proto.Message]) error, o []grpcproc.SpawnOption) (grpcproc.PID, grpcproc.Ref, error) {
+		return startSupervisor(spec, childOpts(name, opts), func(fn func(*grpcproc.Process[proto.Message]) error, o []grpcproc.SpawnOption) (grpcproc.PID, grpcproc.Ref, error) {
 			a, ref, err := sup.SpawnMonitor[proto.Message](fn, o...)
 			return a.PID(), ref, err
 		})
 	}}
 }
 
-func childOpts(sup *grpcproc.Process[proto.Message], name string, opts []grpcproc.SpawnOption) []grpcproc.SpawnOption {
-	return append([]grpcproc.SpawnOption{grpcproc.WithName(name), grpcproc.WithParent(sup.PID())}, opts...)
+func childOpts(name string, opts []grpcproc.SpawnOption) []grpcproc.SpawnOption {
+	return append([]grpcproc.SpawnOption{grpcproc.WithName(name)}, opts...)
 }
 
 // Spec describes a supervisor.
@@ -136,7 +136,7 @@ func (s Spec) validate() error {
 // already started. opts apply to the supervisor itself (a name, a label).
 func Supervise(n *grpcproc.Node, spec Spec, opts ...grpcproc.SpawnOption) (grpcproc.PID, error) {
 	pid, _, err := startSupervisor(spec, opts, func(fn func(*grpcproc.Process[proto.Message]) error, o []grpcproc.SpawnOption) (grpcproc.PID, grpcproc.Ref, error) {
-		a, err := grpcproc.Spawn(n, fn, o...)
+		a, err := n.Spawn(fn, o...)
 		return a.PID(), grpcproc.Ref{}, err
 	})
 	return pid, err

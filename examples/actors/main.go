@@ -95,7 +95,7 @@ func main() {
 	}
 	defer func() { _ = node.Stop(ctx) }()
 
-	inventory, err := actor.Spawn(node, &Inventory{ledger: &Ledger{}}, grpcproc.WithName("inventory"))
+	inventory, err := node.Spawn(actor.Run(&Inventory{ledger: &Ledger{}}), grpcproc.WithName("inventory"))
 	if err != nil {
 		log.Fatal(err)
 	}

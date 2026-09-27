@@ -95,7 +95,7 @@ func TestMetadataFlowsThroughProcesses(t *testing.T) {
 	sink, got := collector(t, b)
 	// relay forwards what it receives: its sends inherit the message's
 	// metadata (tenant) and the span OnReceive stamped.
-	relay, _ := grpcproc.Spawn[*testpb.Ping](a, func(p *grpcproc.Process[*testpb.Ping]) error {
+	relay, _ := a.Spawn[*testpb.Ping](func(p *grpcproc.Process[*testpb.Ping]) error {
 		for {
 			m, err := p.Receive()
 			if err != nil {
@@ -145,7 +145,7 @@ func TestInheritanceEndsWithHandling(t *testing.T) {
 	a := c.Node("a")
 	sink, got := collector(t, a)
 	// After a ReceiveTimeout, nothing is being handled: sends inherit nothing.
-	p, _ := grpcproc.Spawn[*testpb.Ping](a, func(p *grpcproc.Process[*testpb.Ping]) error {
+	p, _ := a.Spawn[*testpb.Ping](func(p *grpcproc.Process[*testpb.Ping]) error {
 		if _, err := p.Receive(); err != nil {
 			return err
 		}
@@ -173,7 +173,7 @@ func TestDoneReportsOutcomes(t *testing.T) {
 	tr := &tracer{name: "d"}
 	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithHooks(tr)}, "a")
 	a := c.Node("a")
-	e, _ := grpcproc.Spawn(a, echo, grpcproc.WithLabel("echo"))
+	e, _ := a.Spawn(echo, grpcproc.WithLabel("echo"))
 	// A call ends with its error.
 	if _, err := a.Call[*testpb.Pong](t.Context(), e, &testpb.Ping{N: -1}); err == nil {
 		t.Fatal("expected error")

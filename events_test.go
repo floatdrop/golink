@@ -37,7 +37,7 @@ func TestSubscribe(t *testing.T) {
 	a := c.Node("a")
 	events := a.Subscribe(t.Context(), 64)
 
-	e, _ := grpcproc.Spawn(a, echo, grpcproc.WithLabel("echo"))
+	e, _ := a.Spawn(echo, grpcproc.WithLabel("echo"))
 	if ev := nextEvent(t, events, grpcproc.EventSpawn); ev.Process.PID != e.PID() || ev.Process.Label != "echo" || ev.Time.IsZero() {
 		t.Fatalf("%+v", ev)
 	}
@@ -49,7 +49,7 @@ func TestSubscribe(t *testing.T) {
 	if ev := nextEvent(t, events, grpcproc.EventExit); ev.Process.PID != e.PID() || ev.Reason != "boom" {
 		t.Fatalf("%+v", ev)
 	}
-	e2, _ := grpcproc.Spawn(c.Node("b"), echo)
+	e2, _ := c.Node("b").Spawn(echo)
 	if _, err := a.Call[*testpb.Pong](t.Context(), e2, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestLinkDownWithoutError(t *testing.T) {
 	c := grpcproctest.New(t, "a", "b")
 	a := c.Node("a")
 	events := a.Subscribe(t.Context(), 64)
-	e, _ := grpcproc.Spawn(c.Node("b"), echo)
+	e, _ := c.Node("b").Spawn(echo)
 	if _, err := a.Call[*testpb.Pong](t.Context(), e, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
@@ -130,16 +130,16 @@ func TestExitReportedBeforeItsConsequences(t *testing.T) {
 	// spawn, however long reporting it takes.
 	h := &orderHooks{}
 	a := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithHooks(h)}, "a").Node("a")
-	victim, _ := grpcproc.Spawn(a, echo, grpcproc.WithLabel("victim"))
+	victim, _ := a.Spawn(echo, grpcproc.WithLabel("victim"))
 	done := make(chan struct{})
-	_, _ = grpcproc.Spawn(a, func(p *grpcproc.Process[proto.Message]) error {
+	_, _ = a.Spawn(func(p *grpcproc.Process[proto.Message]) error {
 		defer close(done)
 		p.Monitor(victim)
 		_ = p.Exit(victim, "boom")
 		if _, err := p.Receive(); err != nil {
 			return err
 		}
-		_, err := grpcproc.Spawn(a, echo, grpcproc.WithLabel("replacement"))
+		_, err := a.Spawn(echo, grpcproc.WithLabel("replacement"))
 		return err
 	}, grpcproc.WithLabel("watcher"))
 	<-done

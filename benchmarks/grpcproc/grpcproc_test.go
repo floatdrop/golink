@@ -54,7 +54,7 @@ func glLocal(b *testing.B) *grpcproc.Node {
 }
 
 func glEcho(b *testing.B, n *grpcproc.Node) grpcproc.Addr[*shared.Msg] {
-	e, err := grpcproc.Spawn(n, func(p *grpcproc.Process[*shared.Msg]) error {
+	e, err := n.Spawn(func(p *grpcproc.Process[*shared.Msg]) error {
 		for {
 			m, err := p.Receive()
 			if err != nil {
@@ -73,7 +73,7 @@ func glSend(b *testing.B, from, to *grpcproc.Node) {
 	var got atomic.Int64
 	want := int64(b.N)
 	done := make(chan struct{})
-	sink, _ := grpcproc.Spawn(to, func(p *grpcproc.Process[*shared.Msg]) error {
+	sink, _ := to.Spawn(func(p *grpcproc.Process[*shared.Msg]) error {
 		for {
 			if _, err := p.Receive(); err != nil {
 				return err

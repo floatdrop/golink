@@ -276,7 +276,7 @@ func TestStartFailures(t *testing.T) {
 	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	// A name already taken: Supervise fails and stops what it started.
-	_, _ = grpcproc.Spawn(n, worker, grpcproc.WithName("taken"))
+	_, _ = n.Spawn(worker, grpcproc.WithName("taken"))
 	_, err := actor.Supervise(n, actor.Spec{Children: []actor.ChildSpec{
 		actor.ChildFunc("first", worker), actor.ChildFunc("taken", worker),
 	}})

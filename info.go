@@ -39,7 +39,7 @@ type ProcessInfo struct {
 	Names         []string
 	Label         string // WithLabel; the low-cardinality key for metrics
 	Type          string // the Go type of M, for display
-	Parent        PID
+	Parent        PID    // the spawning process, for Process.Spawn and SpawnMonitor; zero for Node.Spawn
 	State         ProcessState
 	StartedAt     time.Time
 	Mailbox       MailboxInfo

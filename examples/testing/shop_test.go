@@ -13,7 +13,7 @@ func TestReserveAcrossNodes(t *testing.T) {
 	// Two nodes over in-memory gRPC connections, stopped when the test ends.
 	c := grpcproctest.New(t, "shop", "warehouse")
 	shop := c.Node("shop")
-	if _, err := grpcproc.Spawn(c.Node("warehouse"), Stock(map[string]int64{"apple": 3}), grpcproc.WithName("stock")); err != nil {
+	if _, err := c.Node("warehouse").Spawn(Stock(map[string]int64{"apple": 3}), grpcproc.WithName("stock")); err != nil {
 		t.Fatal(err)
 	}
 	stock := grpcproc.Named[*shoppb.Reserve]("warehouse", "stock")

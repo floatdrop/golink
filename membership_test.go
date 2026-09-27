@@ -78,7 +78,7 @@ func TestMembershipDropsLinks(t *testing.T) {
 	})}, "a", "b", "c")
 	a, b := c.Node("a"), c.Node("b")
 	w, ch := watcher(t, a)
-	silent, _ := grpcproc.Spawn[*testpb.Ping](b, func(p *grpcproc.Process[*testpb.Ping]) error {
+	silent, _ := b.Spawn[*testpb.Ping](func(p *grpcproc.Process[*testpb.Ping]) error {
 		for {
 			if _, err := p.Receive(); err != nil {
 				return err
@@ -144,7 +144,7 @@ func waitNoPeer(t *testing.T, n *grpcproc.Node, peer string) {
 
 func mustEcho(t *testing.T, n *grpcproc.Node) grpcproc.Addr[*testpb.Ping] {
 	t.Helper()
-	e, err := grpcproc.Spawn(n, echo)
+	e, err := n.Spawn(echo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestRegistrarLifecycle(t *testing.T) {
 	}
 	// Withdrawing comes last: by then a's processes are gone and b has seen
 	// their Down{shutdown}.
-	e, _ := grpcproc.Spawn(a, echo)
+	e, _ := a.Spawn(echo)
 	w, ch := watcher(t, b)
 	w.Monitor(e)
 	if _, err := w.Call[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); err != nil {

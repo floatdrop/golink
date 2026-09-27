@@ -67,7 +67,7 @@ func TestWatchSendFailures(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- srv.Watch(&inspectv1.WatchRequest{}, stream) }()
 	for {
-		_, _ = grpcproc.Spawn(n, func(p *grpcproc.Process[*testpb.Ping]) error { return nil })
+		_, _ = n.Spawn(func(p *grpcproc.Process[*testpb.Ping]) error { return nil })
 		select {
 		case err := <-done:
 			if err == nil || err.Error() != "client gone" {
@@ -125,7 +125,7 @@ func TestDialerErrors(t *testing.T) {
 
 func TestListProcessesForwarded(t *testing.T) {
 	c := cluster(t, nil, "a", "b")
-	_, _ = grpcproc.Spawn(c.Node("b"), func(p *grpcproc.Process[*testpb.Ping]) error { _, err := p.Receive(); return err }, grpcproc.WithLabel("remote"))
+	_, _ = c.Node("b").Spawn(func(p *grpcproc.Process[*testpb.Ping]) error { _, err := p.Receive(); return err }, grpcproc.WithLabel("remote"))
 	resp, err := client(c, "a").ListProcesses(t.Context(), &inspectv1.ListProcessesRequest{Node: "b", Label: "remote"})
 	if err != nil || len(resp.GetProcesses()) != 1 || resp.GetProcesses()[0].GetPid().GetNode() != "b" {
 		t.Fatalf("%v %v", resp, err)

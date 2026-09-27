@@ -39,7 +39,7 @@ node.Start(ctx)
 defer node.Stop(ctx)
 
 // A typed process: it receives *orderspb.OrderMsg (a oneof) and nothing else.
-addr, _ := grpcproc.Spawn[*orderspb.OrderMsg](node, func(p *grpcproc.Process[*orderspb.OrderMsg]) error {
+addr, _ := node.Spawn[*orderspb.OrderMsg](func(p *grpcproc.Process[*orderspb.OrderMsg]) error {
     for {
         m, err := p.Receive()
         if err != nil { return err }              // Exit, node stop, …
@@ -165,7 +165,7 @@ network boundary and every send is checked by the compiler:
 ```go
 type Addr[M proto.Message] struct { /* PID or Name, plus the phantom type M */ }
 
-func Spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts ...SpawnOption) (Addr[M], error)
+func (n *Node) Spawn[M proto.Message](fn func(*Process[M]) error, opts ...SpawnOption) (Addr[M], error)
 func Named[M proto.Message](node, name string) Addr[M]   // remote by name; checked on delivery
 func (a Addr[M]) PID() PID
 
@@ -427,7 +427,8 @@ them. Two primitives went into the core because they need process internals:
   scheduled, so a timer set while handling one request is not attributed to
   whichever request is being handled when it fires. For that, inheritance
   moved from the send internals to the public `Send`/`Call` methods.
-- `p.SpawnMonitor[N](fn, …) (Addr[N], Ref, error)`: Erlang's `spawn_monitor`.
+- `p.Spawn[N](fn, …)` / `p.SpawnMonitor[N](fn, …)`: a child recorded with
+  `p` as its parent, for inspection; the second is Erlang's `spawn_monitor`.
   The monitor exists before the child runs, so a child that exits at once is
   reported with its real reason instead of `noproc`. A supervisor that
   monitored after spawning would misread a transient child's instant normal
@@ -435,9 +436,10 @@ them. Two primitives went into the core because they need process internals:
 
 `grpcproc/actor`:
 
-- `actor.Run(h)` / `actor.Spawn(n, h)`: the handler loop. `Handler[M]` has
-  `HandleMessage`; `CallHandler`, `DownHandler`, `Initializer`, `Terminator`
-  are optional interfaces, found by type assertion once. An error from
+- `actor.Run(h)`, spawned as `n.Spawn(actor.Run(h))`: the handler loop.
+  `Handler[M]` has `HandleMessage`; `CallHandler`, `DownHandler`,
+  `Initializer`, `Terminator` are optional interfaces, found by type assertion
+  once. An error from
   `HandleCall` is the reply and the actor carries on; from `HandleMessage` it
   is the exit reason. `ErrStop` ends normally (replying first, from a call);
   `ErrNoReply` defers the answer. `Terminate` also runs on a panic, which then

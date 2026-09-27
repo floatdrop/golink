@@ -42,24 +42,59 @@ func TestSpawnMonitorSeesInstantExit(t *testing.T) {
 	}
 }
 
-func TestSpawnMonitorFailures(t *testing.T) {
+func TestSpawnRecordsParent(t *testing.T) {
 	c := grpcproctest.New(t, "a")
 	a := c.Node("a")
 	w, _ := parent(t, a)
-	_, _ = grpcproc.Spawn(a, echo, grpcproc.WithName("taken"))
+	orphan, err1 := a.Spawn(echo)
+	child, err2 := w.Spawn(echo)
+	watched, _, err3 := w.SpawnMonitor(echo)
+	if err := errors.Join(err1, err2, err3); err != nil {
+		t.Fatal(err)
+	}
+	// Only SpawnMonitor monitors: one watcher, on one child.
+	for _, tc := range []struct {
+		addr     grpcproc.Addr[*testpb.Ping]
+		parent   grpcproc.PID
+		watchers int
+	}{{orphan, grpcproc.PID{}, 0}, {child, w.PID(), 0}, {watched, w.PID(), 1}} {
+		info, ok := a.Process(tc.addr.PID())
+		if !ok || info.Parent != tc.parent || info.Watchers != tc.watchers {
+			t.Errorf("%v: %+v, want parent %v and %d watchers", tc.addr, info, tc.parent, tc.watchers)
+		}
+	}
+	if info, _ := a.Process(w.PID()); info.Monitors != 1 {
+		t.Fatalf("monitors: %d", info.Monitors)
+	}
+}
+
+func TestSpawnMonitorFailures(t *testing.T) {
+	c := grpcproctest.New(t, "a")
+	a := c.Node("a")
+	w, downs := parent(t, a)
+	_, _ = a.Spawn(echo, grpcproc.WithName("taken"))
 	if _, _, err := w.SpawnMonitor[*testpb.Ping](echo, grpcproc.WithName("taken")); !errors.Is(err, grpcproc.ErrNameTaken) {
 		t.Fatalf("got %v", err)
 	}
 	if info, _ := a.Process(w.PID()); info.Monitors != 0 {
 		t.Fatalf("a failed spawn left a monitor: %d", info.Monitors)
 	}
-	// A watcher that has exited cannot monitor anything.
+	// A process that has exited spawns nothing.
 	gone := make(chan *grpcproc.Process[proto.Message], 1)
-	_, _ = grpcproc.Spawn[proto.Message](a, func(p *grpcproc.Process[proto.Message]) error { gone <- p; return nil })
+	_, _, _ = w.SpawnMonitor[proto.Message](func(p *grpcproc.Process[proto.Message]) error { gone <- p; return nil })
 	dead := <-gone
-	time.Sleep(20 * time.Millisecond)
+	if m := recv(t, downs); m.Down == nil {
+		t.Fatalf("got %+v", m)
+	}
+	spawned := a.Info().Spawned
 	if _, _, err := dead.SpawnMonitor[*testpb.Ping](echo); !errors.Is(err, grpcproc.ErrNoProc) {
 		t.Fatalf("got %v", err)
+	}
+	if _, err := dead.Spawn[*testpb.Ping](echo); !errors.Is(err, grpcproc.ErrNoProc) {
+		t.Fatalf("got %v", err)
+	}
+	if n := a.Info().Spawned; n != spawned {
+		t.Fatalf("spawned %d, then %d", spawned, n)
 	}
 	c.Stop("a")
 	if _, _, err := w.SpawnMonitor[*testpb.Ping](echo); err == nil {
@@ -76,7 +111,7 @@ func TestSendAfter(t *testing.T) {
 		late                 *grpcproc.Timer
 	}
 	res := make(chan result, 1)
-	p, _ := grpcproc.Spawn[*testpb.Ping](a, func(p *grpcproc.Process[*testpb.Ping]) error {
+	p, _ := a.Spawn[*testpb.Ping](func(p *grpcproc.Process[*testpb.Ping]) error {
 		if _, err := p.Receive(); err != nil { // carries tenant=first
 			return err
 		}
@@ -129,7 +164,7 @@ func TestSendAfterFromExitedProcess(t *testing.T) {
 	c := grpcproctest.New(t, "a")
 	a := c.Node("a")
 	gone := make(chan *grpcproc.Process[*testpb.Ping], 1)
-	_, _ = grpcproc.Spawn[*testpb.Ping](a, func(p *grpcproc.Process[*testpb.Ping]) error { gone <- p; return nil })
+	_, _ = a.Spawn[*testpb.Ping](func(p *grpcproc.Process[*testpb.Ping]) error { gone <- p; return nil })
 	p := <-gone
 	time.Sleep(20 * time.Millisecond)
 	if p.SendAfter(time.Millisecond, p.Addr(), &testpb.Ping{}).Stop() {

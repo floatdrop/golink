@@ -37,7 +37,7 @@ func main() {
 
 	// A process on warehouse. Its mailbox holds *shoppb.Reserve and
 	// nothing else; it answers each call with *shoppb.Reserved.
-	_, err := grpcproc.Spawn(warehouse, func(p *grpcproc.Process[*shoppb.Reserve]) error {
+	_, err := warehouse.Spawn(func(p *grpcproc.Process[*shoppb.Reserve]) error {
 		left := map[string]int64{"apple": 3}
 		for {
 			m, err := p.Receive()
@@ -72,7 +72,7 @@ func main() {
 	// arrives with the reason, as it would for a crash or a lost node. It
 	// expects no messages, so its mailbox is untyped: proto.Message.
 	done := make(chan grpcproc.Down)
-	_, err = grpcproc.Spawn(shop, func(p *grpcproc.Process[proto.Message]) error {
+	_, err = shop.Spawn(func(p *grpcproc.Process[proto.Message]) error {
 		p.Monitor(stock)
 		if err := p.Exit(stock, "closing"); err != nil {
 			return err

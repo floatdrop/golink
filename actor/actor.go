@@ -10,7 +10,7 @@
 //	func (o *Orders) HandleMessage(p *grpcproc.Process[*orderspb.Order], m grpcproc.Msg[*orderspb.Order]) error { … }
 //	func (o *Orders) HandleCall(p *grpcproc.Process[*orderspb.Order], m grpcproc.Msg[*orderspb.Order]) (proto.Message, error) { … }
 //
-//	addr, err := actor.Spawn(node, &Orders{repo: repo}, grpcproc.WithName("orders"))
+//	addr, err := node.Spawn(actor.Run(&Orders{repo: repo}), grpcproc.WithName("orders"))
 package actor
 
 import (
@@ -68,7 +68,8 @@ var (
 	ErrNoReply = errors.New("actor: reply later")
 )
 
-// Run turns a Handler into a process function for grpcproc.Spawn.
+// Run turns a Handler into a process function, for Node.Spawn,
+// Process.Spawn or Process.SpawnMonitor.
 func Run[M proto.Message](h Handler[M]) func(*grpcproc.Process[M]) error {
 	calls, _ := h.(CallHandler[M])
 	downs, _ := h.(DownHandler[M])
@@ -129,9 +130,4 @@ func call[M proto.Message](p *grpcproc.Process[M], calls CallHandler[M], m grpcp
 	}
 	_ = p.Reply(m, resp, err)
 	return nil
-}
-
-// Spawn starts h as a process on n: grpcproc.Spawn(n, Run(h), opts...).
-func Spawn[M proto.Message](n *grpcproc.Node, h Handler[M], opts ...grpcproc.SpawnOption) (grpcproc.Addr[M], error) {
-	return grpcproc.Spawn(n, Run(h), opts...)
 }

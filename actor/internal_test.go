@@ -46,7 +46,7 @@ func TestFailedRestartEndsSupervisor(t *testing.T) {
 				return err
 			}
 			return errors.New("crash")
-		}, grpcproc.WithParent(sup.PID()))
+		})
 		return a.PID(), ref, err
 	}}
 	sup, err := Supervise(n, Spec{MaxRestarts: 2, Children: []ChildSpec{flaky}})
@@ -54,7 +54,7 @@ func TestFailedRestartEndsSupervisor(t *testing.T) {
 		t.Fatal(err)
 	}
 	done := make(chan grpcproc.Down, 1)
-	_, _ = grpcproc.Spawn[proto.Message](n, func(p *grpcproc.Process[proto.Message]) error {
+	_, _ = n.Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
 		p.Monitor(sup)
 		for {
 			m, err := p.Receive()

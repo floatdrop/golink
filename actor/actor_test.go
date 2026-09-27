@@ -98,7 +98,7 @@ func watch(t *testing.T, n *grpcproc.Node, target grpcproc.Target) <-chan grpcpr
 	t.Helper()
 	ch := make(chan grpcproc.Down, 16)
 	ready := make(chan struct{})
-	_, err := grpcproc.Spawn[proto.Message](n, func(p *grpcproc.Process[proto.Message]) error {
+	_, err := n.Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
 		p.Monitor(target)
 		close(ready)
 		for {
@@ -133,7 +133,7 @@ func TestRunLifecycle(t *testing.T) {
 	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	h := &counter{}
-	addr, err := actor.Spawn[*testpb.Ping](n, h)
+	addr, err := n.Spawn(actor.Run[*testpb.Ping](h))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestRunExits(t *testing.T) {
 			c := grpcproctest.New(t, "a")
 			n := c.Node("a")
 			h := &counter{}
-			addr, _ := actor.Spawn[*testpb.Ping](n, h)
+			addr, _ := n.Spawn(actor.Run[*testpb.Ping](h))
 			downs := watch(t, n, addr)
 			tc.act(n, addr)
 			if d := down(t, downs); d.Reason != tc.reason {
@@ -198,7 +198,7 @@ func TestInitFailureSkipsTerminate(t *testing.T) {
 	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	h := &counter{failInit: true}
-	addr, _ := actor.Spawn[*testpb.Ping](n, h)
+	addr, _ := n.Spawn(actor.Run[*testpb.Ping](h))
 	downs := watch(t, n, addr)
 	if d := down(t, downs); d.Reason != "init failed" && d.Reason != grpcproc.ReasonNoProc {
 		t.Fatalf("%+v", d)
@@ -214,8 +214,8 @@ func TestDownsAndOptionalInterfaces(t *testing.T) {
 	n := c.Node("a")
 	// With a DownHandler, Downs reach it.
 	h := &counter{}
-	target, _ := grpcproc.Spawn[*testpb.Ping](n, func(p *P) error { _, err := p.Receive(); return err })
-	_, _ = actor.Spawn[*testpb.Ping](n, &monitoring{target: target, counter: h})
+	target, _ := n.Spawn[*testpb.Ping](func(p *P) error { _, err := p.Receive(); return err })
+	_, _ = n.Spawn(actor.Run[*testpb.Ping](&monitoring{target: target, counter: h}))
 	time.Sleep(10 * time.Millisecond)
 	_ = n.Exit(target, "gone")
 	deadline := time.Now().Add(2 * time.Second)
@@ -227,7 +227,7 @@ func TestDownsAndOptionalInterfaces(t *testing.T) {
 	}
 	// Without a CallHandler, calls are answered with an error.
 	seen := make(chan int64, 4)
-	pa, _ := actor.Spawn[*testpb.Ping](n, plain{seen: seen})
+	pa, _ := n.Spawn(actor.Run[*testpb.Ping](plain{seen: seen}))
 	if _, err := n.Call[*testpb.Pong](t.Context(), pa, &testpb.Ping{}); err == nil || !strings.Contains(err.Error(), "does not handle calls") {
 		t.Fatalf("got %v", err)
 	}
@@ -248,8 +248,8 @@ func TestPlainIgnoresDowns(t *testing.T) {
 	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	seen := make(chan int64, 4)
-	target, _ := grpcproc.Spawn[*testpb.Ping](n, func(p *P) error { _, err := p.Receive(); return err })
-	pa, _ := actor.Spawn[*testpb.Ping](n, &monitoringPlain{plain: plain{seen: seen}, target: target})
+	target, _ := n.Spawn[*testpb.Ping](func(p *P) error { _, err := p.Receive(); return err })
+	pa, _ := n.Spawn(actor.Run[*testpb.Ping](&monitoringPlain{plain: plain{seen: seen}, target: target}))
 	_ = n.Exit(target, "gone")
 	time.Sleep(20 * time.Millisecond)
 	_ = n.Send(pa, &testpb.Ping{N: 9})

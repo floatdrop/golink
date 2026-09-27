@@ -81,13 +81,12 @@ type monitorTarget struct {
 	name string
 }
 
-// SpawnOption configures Spawn.
+// SpawnOption configures Node.Spawn, Process.Spawn and Process.SpawnMonitor.
 type SpawnOption func(*spawnOpts)
 
 type spawnOpts struct {
 	name    string
 	label   string
-	parent  PID
 	inspect func() map[string]string
 }
 
@@ -98,14 +97,18 @@ func WithName(name string) SpawnOption { return func(o *spawnOpts) { o.name = na
 // aggregate by. Defaults to the type of M.
 func WithLabel(label string) SpawnOption { return func(o *spawnOpts) { o.label = label } }
 
-// WithParent records which process spawned this one, for inspection.
-func WithParent(pid PID) SpawnOption { return func(o *spawnOpts) { o.parent = pid } }
-
 // WithInspect lets the process publish what it currently believes. fn runs
 // on the process's own goroutine, inside Receive, so it may read the
 // process's state without locking. See Node.Inspect.
 func WithInspect(fn func() map[string]string) SpawnOption {
 	return func(o *spawnOpts) { o.inspect = fn }
+}
+
+func parentPID(p *proc) PID {
+	if p == nil {
+		return PID{}
+	}
+	return p.pid
 }
 
 // Process is a goroutine with a mailbox of M and a cluster-wide PID.
@@ -139,20 +142,32 @@ func (m Msg[M]) Context(parent context.Context) context.Context {
 //
 // M may be a concrete type (one contract per process), an interface the
 // accepted types implement, or proto.Message for an untyped process.
-func Spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts ...SpawnOption) (Addr[M], error) {
-	a, _, err := spawn(n, fn, opts, nil)
+func (n *Node) Spawn[M proto.Message](fn func(*Process[M]) error, opts ...SpawnOption) (Addr[M], error) {
+	a, _, err := spawn(n, fn, opts, nil, false)
 	return a, err
 }
 
-// SpawnMonitor starts a process on p's node, like Spawn, and monitors it
-// from p before it runs: however soon the child exits, p receives its Down
-// with the real reason, never noproc. It is Erlang's spawn_monitor, and what
-// a supervisor needs.
-func (p *Process[M]) SpawnMonitor[N proto.Message](fn func(*Process[N]) error, opts ...SpawnOption) (Addr[N], Ref, error) {
-	return spawn(p.n, fn, opts, p.proc)
+// Spawn starts fn as a process on p's node, like Node.Spawn, with p
+// recorded as its parent. That is for inspection only: p does not monitor
+// the child, and neither exits when the other does. A process that has
+// exited spawns nothing: the error is ErrNoProc.
+func (p *Process[M]) Spawn[N proto.Message](fn func(*Process[N]) error, opts ...SpawnOption) (Addr[N], error) {
+	a, _, err := spawn(p.n, fn, opts, p.proc, false)
+	return a, err
 }
 
-func spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts []SpawnOption, watcher *proc) (Addr[M], Ref, error) {
+// SpawnMonitor is Spawn, with the child monitored from p before it runs:
+// however soon the child exits, p receives its Down with the real reason,
+// never noproc. It is Erlang's spawn_monitor, and what a supervisor needs.
+// A process that has exited spawns nothing: the error is ErrNoProc.
+func (p *Process[M]) SpawnMonitor[N proto.Message](fn func(*Process[N]) error, opts ...SpawnOption) (Addr[N], Ref, error) {
+	return spawn(p.n, fn, opts, p.proc, true)
+}
+
+// spawn starts fn on n. parent, when set, is recorded as the child's parent,
+// and monitors the child from before it runs if monitor is set.
+func spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts []SpawnOption, parent *proc, monitor bool) (Addr[M], Ref, error) {
+	monitor = monitor && parent != nil
 	var o spawnOpts
 	for _, opt := range opts {
 		opt(&o)
@@ -168,7 +183,7 @@ func spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts []SpawnOpt
 		pid:     PID{Node: n.id.Name, Incarnation: n.id.Incarnation, ID: id},
 		label:   o.label,
 		typ:     typ,
-		parent:  o.parent,
+		parent:  parentPID(parent),
 		mbox:    newQueue[item](true),
 		sys:     make(chan inspectReq),
 		inspect: o.inspect,
@@ -180,27 +195,30 @@ func spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts []SpawnOpt
 	p.log = slog.New(&levelHandler{h: n.log.Handler(), p: p}).With(
 		"pid", p.pid.String(), "label", o.label)
 
-	// The monitor exists before the process does, so its Down cannot be missed.
+	// A process that has exited spawns nothing. A monitoring parent's
+	// monitor exists before the child does, so its Down cannot be missed.
 	var ref Ref
-	if watcher != nil {
-		ref = Ref{Node: n.id.Name, ID: n.nextRef.Add(1)}
-		watcher.mu.Lock()
-		if watcher.exited {
-			watcher.mu.Unlock()
+	if parent != nil {
+		parent.mu.Lock()
+		if parent.exited {
+			parent.mu.Unlock()
 			cancel(nil)
 			return Addr[M]{}, Ref{}, ErrNoProc
 		}
-		if watcher.monitors == nil {
-			watcher.monitors = map[Ref]monitorTarget{}
+		if monitor {
+			ref = Ref{Node: n.id.Name, ID: n.nextRef.Add(1)}
+			if parent.monitors == nil {
+				parent.monitors = map[Ref]monitorTarget{}
+			}
+			parent.monitors[ref] = monitorTarget{pid: p.pid}
+			p.watchers = map[Ref]PID{ref: parent.pid}
 		}
-		watcher.monitors[ref] = monitorTarget{pid: p.pid}
-		watcher.mu.Unlock()
-		p.watchers = map[Ref]PID{ref: watcher.pid}
+		parent.mu.Unlock()
 	}
 	fail := func(err error) (Addr[M], Ref, error) {
 		cancel(nil)
-		if watcher != nil {
-			watcher.dropMonitor(ref)
+		if monitor {
+			parent.dropMonitor(ref)
 		}
 		return Addr[M]{}, Ref{}, err
 	}
