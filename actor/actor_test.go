@@ -176,7 +176,7 @@ func TestRunExits(t *testing.T) {
 		{"message error", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Send(t.Context(), a, &testpb.Ping{N: -1}) }, "bad message", "init; terminate: bad message"},
 		{"stop", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Send(t.Context(), a, &testpb.Ping{N: -2}) }, grpcproc.ReasonNormal, "init; terminate"},
 		{"panic", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Send(t.Context(), a, &testpb.Ping{N: -3}) }, "panic: kaboom", "init; terminate: panic: kaboom"},
-		{"exit", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Exit(a, "bye") }, "bye", "init; terminate: grpcproc: exit: bye"},
+		{"exit", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Exit(t.Context(), a, "bye") }, "bye", "init; terminate: grpcproc: exit: bye"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -219,7 +219,7 @@ func TestDownsAndOptionalInterfaces(t *testing.T) {
 	target, _ := n.Spawn[*testpb.Ping](func(p *P) error { _, err := p.Receive(); return err })
 	_, _ = n.Spawn(actor.Run[*testpb.Ping](&monitoring{target: target, counter: h}))
 	time.Sleep(10 * time.Millisecond)
-	_ = n.Exit(target, "gone")
+	_ = n.Exit(t.Context(), target, "gone")
 	deadline := time.Now().Add(2 * time.Second)
 	for !strings.Contains(h.Log(), "down gone") {
 		if time.Now().After(deadline) {
@@ -252,7 +252,7 @@ func TestPlainIgnoresDowns(t *testing.T) {
 	seen := make(chan int64, 4)
 	target, _ := n.Spawn[*testpb.Ping](func(p *P) error { _, err := p.Receive(); return err })
 	pa, _ := n.Spawn(actor.Run[*testpb.Ping](&monitoringPlain{plain: plain{seen: seen}, target: target}))
-	_ = n.Exit(target, "gone")
+	_ = n.Exit(t.Context(), target, "gone")
 	time.Sleep(20 * time.Millisecond)
 	_ = n.Send(t.Context(), pa, &testpb.Ping{N: 9})
 	if got := <-seen; got != 9 {

@@ -186,7 +186,7 @@ func TestProcessAccessorsAndNames(t *testing.T) {
 	}
 	// The exit event is published once the process is gone and its name free.
 	events := a.Subscribe(t.Context(), 16)
-	if err := a.Exit(addr, grpcproc.ReasonKilled); err != nil {
+	if err := a.Exit(t.Context(), addr, grpcproc.ReasonKilled); err != nil {
 		t.Fatal(err)
 	}
 	for e := range events {
@@ -223,7 +223,7 @@ func TestReceiveTimeoutAndExitError(t *testing.T) {
 		t.Fatalf("timeout: %v", err)
 	}
 	time.Sleep(10 * time.Millisecond)
-	_ = a.Exit(addr, "bye")
+	_ = a.Exit(t.Context(), addr, "bye")
 	if err := <-results; err == nil {
 		t.Fatal("want exit error")
 	} else if ee, ok := errors.AsType[*grpcproc.ExitError](err); !ok || ee.Reason != "bye" {

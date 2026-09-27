@@ -552,6 +552,7 @@ a, err := p.CallTo[*shoppb.Reserved](ctx, m.From, &shoppb.Reserve{…})
 
 // Node has the same four, and each takes a ctx: its metadata goes with the
 // message. It bounds a whole Call, but for Send only the first connection.
+// Node.Exit takes a ctx too, for the first connection only.
 ```
 
 | Call | Returns |

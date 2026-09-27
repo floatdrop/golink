@@ -503,8 +503,12 @@ func (n *Node) CallTo[R proto.Message](ctx context.Context, to Target, req proto
 	return typed[R](n.doCall(ctx, n.PID(), nil, destOf(to), req, MetadataFrom(ctx)))
 }
 
-// Exit asks a process anywhere to terminate with reason.
-func (n *Node) Exit(to Target, reason string) error { return n.exit(n.PID(), to, reason) }
+// Exit asks a process anywhere to terminate with reason. As for Send, ctx
+// bounds only the wait for a connection to a peer this node has no link to
+// yet.
+func (n *Node) Exit(ctx context.Context, to Target, reason string) error {
+	return n.exit(ctx, n.PID(), to, reason)
+}
 
 // ---------- the operations; each has a local and a remote path ----------
 
@@ -638,7 +642,7 @@ func (n *Node) down(from, to PID, ref uint64, reason string) error {
 	return n.route(context.Background(), to.Node, env)
 }
 
-func (n *Node) exit(from PID, to Target, reason string) error {
+func (n *Node) exit(ctx context.Context, from PID, to Target, reason string) error {
 	pid, name := to.target()
 	if pid.Node == n.id.Name {
 		n.deliverExit(pid, name, reason)
@@ -646,13 +650,13 @@ func (n *Node) exit(from PID, to Target, reason string) error {
 	}
 	env := wire(grpcprocv1.Kind_KIND_EXIT, from, pid, name)
 	env.Reason = reason
-	return n.route(context.Background(), pid.Node, env)
+	return n.route(ctx, pid.Node, env)
 }
 
 // route queues env on the link to node, dialing it if needed. ctx bounds the
-// wait for the dial. Everything but Node.Send, Node.SendTo and calls passes
-// context.Background(): replies, monitors, Downs, exits, process sends and
-// timers wait for the dial, which Config.DialTimeout bounds.
+// wait for the dial. Everything but Node.Send, Node.SendTo, Node.Exit and
+// calls passes context.Background(): replies, monitors, Downs, process sends
+// and exits, and timers wait for the dial, which Config.DialTimeout bounds.
 func (n *Node) route(ctx context.Context, node string, env *grpcprocv1.Envelope) error {
 	if node == "" {
 		return errors.New("grpcproc: empty destination node")

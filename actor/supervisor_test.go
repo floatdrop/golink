@@ -231,7 +231,7 @@ func TestSupervisorExitStopsChildren(t *testing.T) {
 		t.Fatal("a supervisor answered a call")
 	}
 	_ = n.SendTo(t.Context(), sup, &testpb.Ping{})
-	_ = n.Exit(grpcproc.Name{Node: "a", Name: "sup"}, grpcproc.ReasonKilled)
+	_ = n.Exit(t.Context(), grpcproc.Name{Node: "a", Name: "sup"}, grpcproc.ReasonKilled)
 	for _, ch := range []<-chan grpcproc.Down{w1, w2} {
 		if d := down(t, ch); d.Reason != grpcproc.ReasonShutdown {
 			t.Fatalf("child exited with %q", d.Reason)

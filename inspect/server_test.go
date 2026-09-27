@@ -308,6 +308,17 @@ func TestReadOnly(t *testing.T) {
 	}
 }
 
+func TestExitThatCannotRoute(t *testing.T) {
+	// Naming this node with a PID on another routes the exit there; a node
+	// that cannot be reached is Unavailable, not silently dropped.
+	c := cluster(t, nil, "a")
+	_, err := client(c, "a").Exit(t.Context(), &inspectv1.ExitRequest{
+		Node:   "a",
+		Target: byPID(grpcproc.PID{Node: "nowhere", Incarnation: 1, ID: 1}),
+	})
+	code(t, err, codes.Unavailable)
+}
+
 func TestRoutingErrors(t *testing.T) {
 	// No way to reach other nodes: another node is FailedPrecondition, for
 	// every method.

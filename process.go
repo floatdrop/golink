@@ -393,8 +393,12 @@ func (p *Process[M]) Reply(m Msg[M], resp proto.Message, err error) error {
 	return p.n.reply(p.pid, m.From, m.ref, resp, grpcprocv1.Status_STATUS_OK, "")
 }
 
-// Exit asks another process, anywhere, to terminate with reason.
-func (p *proc) Exit(to Target, reason string) error { return p.n.exit(p.pid, to, reason) }
+// Exit asks another process, anywhere, to terminate with reason. A first
+// exit to a node with no link yet waits for the dial, up to
+// Config.DialTimeout.
+func (p *proc) Exit(to Target, reason string) error {
+	return p.n.exit(context.Background(), p.pid, to, reason)
+}
 
 // Monitor watches target. When it exits, or its node becomes unreachable,
 // this process receives a Msg with Down set and the returned Ref. Monitoring

@@ -148,7 +148,7 @@ func TestSendAfter(t *testing.T) {
 		t.Fatalf("Stop: before firing %v, after firing %v", r.stopped, r.stoppedLate)
 	}
 	// The process exits: its pending timer goes with it.
-	_ = a.Exit(p, grpcproc.ReasonKilled)
+	_ = a.Exit(t.Context(), p, grpcproc.ReasonKilled)
 	time.Sleep(20 * time.Millisecond)
 	if r.late.Stop() {
 		t.Fatal("timer of an exited process still pending")
@@ -214,7 +214,7 @@ func TestSpawnMonitorRacesParentExit(t *testing.T) {
 				ps = append(ps, k.PID())
 			}
 		}()
-		_ = a.Exit(pa, grpcproc.ReasonKilled)
+		_ = a.Exit(t.Context(), pa, grpcproc.ReasonKilled)
 		ps := <-kids
 		recv(t, downs)
 		deadline := time.Now().Add(200 * time.Millisecond)
@@ -229,7 +229,7 @@ func TestSpawnMonitorRacesParentExit(t *testing.T) {
 				}
 				time.Sleep(time.Millisecond)
 			}
-			_ = a.Exit(k, grpcproc.ReasonKilled)
+			_ = a.Exit(t.Context(), k, grpcproc.ReasonKilled)
 		}
 	}
 }

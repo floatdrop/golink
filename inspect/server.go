@@ -265,8 +265,11 @@ func (s *Server) Exit(ctx context.Context, req *inspectv1.ExitRequest) (*inspect
 	if err != nil {
 		return nil, err
 	}
-	// Exit is local here, so it cannot fail to route.
-	_ = s.node.Exit(to, cmp.Or(req.GetReason(), grpcproc.ReasonKilled))
+	// A request naming this node with a PID on another routes there, and
+	// can fail to.
+	if err := s.node.Exit(ctx, to, cmp.Or(req.GetReason(), grpcproc.ReasonKilled)); err != nil {
+		return nil, status.Errorf(codes.Unavailable, "inspect: %v", err)
+	}
 	return &inspectv1.ExitResponse{}, nil
 }
 

@@ -175,8 +175,9 @@ func (p *Process[M]) Send[N proto.Message](to Addr[N], m N) error
 func (p *Process[M]) Call[R, N proto.Message](ctx, to Addr[N], req N) (R, error)
 func (p *Process[M]) CallTo[R proto.Message](ctx, to Target, req proto.Message) (R, error)
 func (p *Process[M]) SendTo(to Target, m proto.Message) error
-// Node has the same Send / SendTo / Call / CallTo, with the node as sender;
-// its Send and SendTo take a ctx too, for metadata and the dial.
+// Node has the same Send / SendTo / Call / CallTo / Exit, with the node as
+// sender; its Send, SendTo and Exit take a ctx too, for the dial (Send and
+// SendTo also carry its metadata).
 func (p *Process[M]) Reply(m Msg[M], resp proto.Message, err error) error   // may be deferred
 func (p *Process[M]) Monitor(to Target) Ref
 func (p *Process[M]) Demonitor(ref Ref)

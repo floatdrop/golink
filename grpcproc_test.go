@@ -724,6 +724,9 @@ func TestContextBoundsTheDial(t *testing.T) {
 	if err := ping(done, 0); !errors.Is(err, context.Canceled) || resolves.Load() != 0 {
 		t.Fatalf("got %v after %d resolves", err, resolves.Load())
 	}
+	if err := a.Exit(done, sink, grpcproc.ReasonKilled); !errors.Is(err, context.Canceled) || resolves.Load() != 0 {
+		t.Fatalf("exit: got %v after %d resolves", err, resolves.Load())
+	}
 	// One whose ctx ends stops waiting for the dial, and its message is not sent...
 	short, cancelShort := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancelShort()
