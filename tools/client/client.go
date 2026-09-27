@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -90,7 +91,11 @@ func (c *Client) Node(ctx context.Context, node string) (NodeView, error) {
 }
 
 // Cluster describes every node reachable from this one by following links,
-// in the order found. A node that cannot be reached is reported with Error.
+// in the order found. A node that cannot be reached is reported with Error,
+// and so is a peer a node only fails to dial (a down link), which this
+// Inspector may reach all the same. Those peers are asked last, and
+// together: they are the likeliest to hang until ctx ends, and one that does
+// must not use up the time the others need.
 func (c *Client) Cluster(ctx context.Context) ([]NodeView, error) {
 	first, err := c.Node(ctx, "")
 	if err != nil {
@@ -98,20 +103,44 @@ func (c *Client) Cluster(ctx context.Context) ([]NodeView, error) {
 	}
 	out := []NodeView{first}
 	seen := map[string]bool{first.Name: true}
-	for i := 0; i < len(out); i++ {
-		for _, l := range out[i].Links {
-			if seen[l.Peer] {
-				continue
+	var later []string // peers seen only over down links
+	for i := 0; ; {
+		for ; i < len(out); i++ {
+			for _, l := range out[i].Links {
+				switch {
+				case seen[l.Peer]:
+				case l.State == "down":
+					if !slices.Contains(later, l.Peer) {
+						later = append(later, l.Peer)
+					}
+				default:
+					seen[l.Peer] = true
+					out = append(out, c.probe(ctx, l.Peer))
+				}
 			}
-			seen[l.Peer] = true
-			v, err := c.Node(ctx, l.Peer)
-			if err != nil {
-				v = NodeView{Name: l.Peer, Error: err.Error()}
-			}
-			out = append(out, v)
 		}
+		later = slices.DeleteFunc(later, func(peer string) bool { return seen[peer] })
+		if len(later) == 0 {
+			return out, nil
+		}
+		found := make([]NodeView, len(later))
+		var wg sync.WaitGroup
+		for j, peer := range later {
+			seen[peer] = true
+			wg.Go(func() { found[j] = c.probe(ctx, peer) })
+		}
+		wg.Wait()
+		out, later = append(out, found...), nil
 	}
-	return out, nil
+}
+
+// probe describes node, or says why it could not.
+func (c *Client) probe(ctx context.Context, node string) NodeView {
+	v, err := c.Node(ctx, node)
+	if err != nil {
+		return NodeView{Name: node, Error: err.Error()}
+	}
+	return v
 }
 
 // Filter narrows Processes; zero fields match everything.

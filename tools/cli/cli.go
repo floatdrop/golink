@@ -277,9 +277,14 @@ func cmdNode(ctx context.Context, a *app, args []string) error {
 		n.Name, n.Incarnation, n.Advertise, n.Uptime, n.Processes, n.Spawned, n.Exited, n.DeadLetters)
 	rows := make([][]string, 0, len(n.Links))
 	for _, l := range n.Links {
-		rows = append(rows, []string{l.Peer + "#" + u(l.Incarnation), l.Direction, l.State, l.Age, u(l.Messages), u(l.Bytes), u(l.Reconnects), l.LastError})
+		queued := "" // only an out link has a queue
+		if l.Direction == "out" {
+			queued = strconv.Itoa(l.Queued)
+		}
+		rows = append(rows, []string{l.Peer + "#" + u(l.Incarnation), l.Direction, l.State, l.Age, queued,
+			u(l.Messages), u(l.Bytes), u(l.Reconnects), l.RetryIn, l.LastError})
 	}
-	return a.table("PEER\tDIR\tSTATE\tAGE\tMESSAGES\tBYTES\tRECONNECTS\tLAST ERROR", rows)
+	return a.table("PEER\tDIR\tSTATE\tAGE\tQUEUED\tMESSAGES\tBYTES\tRECONNECTS\tRETRY IN\tLAST ERROR", rows)
 }
 
 func cmdNodes(ctx context.Context, a *app, args []string) error {
@@ -298,9 +303,17 @@ func cmdNodes(ctx context.Context, a *app, args []string) error {
 	rows := make([][]string, 0, len(nodes))
 	for _, n := range nodes {
 		peers := make([]string, 0, len(n.Links))
+		down := map[string]bool{} // every link with the peer is down
 		for _, l := range n.Links {
 			if !slices.Contains(peers, l.Peer) {
 				peers = append(peers, l.Peer)
+				down[l.Peer] = true
+			}
+			down[l.Peer] = down[l.Peer] && l.State == "down"
+		}
+		for i, peer := range peers {
+			if down[peer] {
+				peers[i] = peer + "(down)"
 			}
 		}
 		rows = append(rows, []string{n.Name, n.Advertise, n.Uptime, strconv.Itoa(n.Processes), u(n.DeadLetters), strings.Join(peers, ","), n.Error})
@@ -482,11 +495,13 @@ func cmdDot(ctx context.Context, a *app, args []string) error {
 	}); err != nil {
 		return err
 	}
-	ctx, cancel := a.request(ctx)
-	defer cancel()
+	// Each request has its own time limit: a walk that a dead peer holds to
+	// its limit leaves the others theirs.
 	var names []string
+	rctx, cancel := a.request(ctx)
 	if cluster {
-		nodes, err := a.client.Cluster(ctx)
+		nodes, err := a.client.Cluster(rctx)
+		cancel()
 		if err != nil {
 			return err
 		}
@@ -496,7 +511,8 @@ func cmdDot(ctx context.Context, a *app, args []string) error {
 			}
 		}
 	} else {
-		n, err := a.client.Node(ctx, node)
+		n, err := a.client.Node(rctx, node)
+		cancel()
 		if err != nil {
 			return err
 		}
@@ -504,7 +520,9 @@ func cmdDot(ctx context.Context, a *app, args []string) error {
 	}
 	graph := make([]dot.Node, 0, len(names))
 	for _, name := range names {
-		ps, err := a.client.Processes(ctx, name, client.Filter{})
+		rctx, cancel := a.request(ctx)
+		ps, err := a.client.Processes(rctx, name, client.Filter{})
+		cancel()
 		if err != nil {
 			return err
 		}

@@ -32,7 +32,8 @@ const instructions = `These tools inspect a grpcproc cluster: Go processes (goro
 - Its mailbox holds messages waiting to be handled. A deep mailbox, or a large oldest_wait, is a backlog: the process cannot keep up, or is stuck in a handler (state running for a long time), or waits on a call (state waiting-reply).
 - get_process with inspect returns what the process publishes about itself (its state machine's state, counters); inspect_error "busy" means it is inside a handler right now.
 - Supervisors (label supervisor) restart children; their inspect lists each child and its restarts.
-- watch_events shows spawns, exits with reasons, links going up and down, and dead letters (messages that found no process, or the wrong type).
+- watch_events shows spawns, exits with reasons, links going up and down, and dead letters (messages that found no process or the wrong type, or that a broken link never delivered).
+- node_info and cluster_nodes list each node's links. queued on an out link is what waits to be written to that peer: a growing queue means the peer or the network cannot keep up. A down out link with retry_in means dials to that peer failed, and sends to it fail at once until then; such a peer shows incarnation 0, and cluster_nodes lists it with an error if it cannot be reached.
 
 Start with cluster_nodes, then list_processes sorted by mailbox to find backlogs, then get_process on the suspects.`
 
@@ -43,7 +44,7 @@ func New(c *client.Client, o Options) *mcp.Server {
 	t := tools{c: c, timeout: o.Timeout}
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	mcp.AddTool(s, &mcp.Tool{Name: "cluster_nodes", Description: "Every node reachable from the one serving the Inspector: counters, links, and which could not be reached.", Annotations: readOnly}, t.clusterNodes)
-	mcp.AddTool(s, &mcp.Tool{Name: "node_info", Description: "One node: process counts, dead letters, and each link with its traffic and last error.", Annotations: readOnly}, t.nodeInfo)
+	mcp.AddTool(s, &mcp.Tool{Name: "node_info", Description: "One node: process counts, dead letters, and each link with its traffic, queue, and last error.", Annotations: readOnly}, t.nodeInfo)
 	mcp.AddTool(s, &mcp.Tool{Name: "list_processes", Description: "Processes of a node, filtered and sorted. Sort by mailbox to find backlogs.", Annotations: readOnly}, t.listProcesses)
 	mcp.AddTool(s, &mcp.Tool{Name: "get_process", Description: "One process by pid or name, with what it says about itself.", Annotations: readOnly}, t.getProcess)
 	mcp.AddTool(s, &mcp.Tool{Name: "watch_events", Description: "Collect a node's events for a few seconds: spawns, exits with reasons, links up and down, dead letters.", Annotations: readOnly}, t.watchEvents)

@@ -16,9 +16,9 @@ import (
 	inspectv1 "github.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1"
 )
 
-// fake answers GetNode for "a" (linked to "b", which fails) and fails
-// everything else, or hands out a scripted event stream that then ends with
-// end (errFake by default).
+// fake answers GetNode for "a" (linked to "b", and failing to dial "c"
+// and "d") and fails everything else, or hands out a scripted event stream
+// that then ends with end (errFake by default).
 type fake struct {
 	inspectv1.InspectorClient
 	events []*inspectv1.Event
@@ -31,8 +31,16 @@ func (f *fake) GetNode(_ context.Context, req *inspectv1.GetNodeRequest, _ ...gr
 	switch req.GetNode() {
 	case "":
 		return &inspectv1.GetNodeResponse{Node: &inspectv1.NodeInfo{
-			Id:    &inspectv1.NodeID{Name: "a", Incarnation: 1},
-			Links: []*inspectv1.Link{{Peer: &inspectv1.NodeID{Name: "b"}, Outbound: true, State: inspectv1.LinkState_LINK_STATE_UP}},
+			Id: &inspectv1.NodeID{Name: "a", Incarnation: 1},
+			Links: []*inspectv1.Link{
+				{Peer: &inspectv1.NodeID{Name: "b"}, Outbound: true, State: inspectv1.LinkState_LINK_STATE_UP, Queued: 3},
+				{Peer: &inspectv1.NodeID{Name: "c"}, Outbound: true, State: inspectv1.LinkState_LINK_STATE_DOWN, LastError: "refused",
+					RetryAt: timestamppb.New(time.Now().Add(time.Hour))},
+				{Peer: &inspectv1.NodeID{Name: "d"}, Outbound: true, State: inspectv1.LinkState_LINK_STATE_DOWN, LastError: "refused",
+					RetryAt: timestamppb.New(time.Now().Add(-time.Second))},
+				// b again, as a down link: it is asked once, as a live peer.
+				{Peer: &inspectv1.NodeID{Name: "b"}, Outbound: true, State: inspectv1.LinkState_LINK_STATE_DOWN},
+			},
 		}}, nil
 	}
 	return nil, errFake
@@ -70,8 +78,14 @@ func TestFailuresAndOddities(t *testing.T) {
 	// A node that never started has no uptime; a peer that cannot be
 	// reached is listed with why.
 	nodes, err := c.Cluster(ctx)
-	if err != nil || len(nodes) != 2 || nodes[0].Uptime != "" || nodes[0].Links[0].Age != "" || nodes[1].Error == "" {
+	if err != nil || len(nodes) != 4 || nodes[0].Uptime != "" || nodes[0].Links[0].Age != "" || nodes[1].Name != "b" || nodes[1].Error == "" ||
+		nodes[2].Name != "c" || nodes[2].Error == "" || nodes[3].Name != "d" || nodes[3].Error == "" {
 		t.Fatalf("%+v %v", nodes, err)
+	}
+	// An outbound link's queue, and when a down one is dialed again: not
+	// at all once that time has passed.
+	if up, down, due := nodes[0].Links[0], nodes[0].Links[1], nodes[0].Links[2]; up.Queued != 3 || up.RetryIn != "" || down.State != "down" || down.RetryIn == "" || due.RetryIn != "" {
+		t.Fatalf("%+v %+v %+v", up, down, due)
 	}
 	if _, err := c.Node(ctx, "b"); !errors.Is(err, errFake) {
 		t.Fatal(err)

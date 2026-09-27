@@ -9,7 +9,7 @@ import (
 // NodeView is a node as grpcprocctl shows it and its MCP tools return it.
 type NodeView struct {
 	Name        string     `json:"name" jsonschema:"node name"`
-	Incarnation uint64     `json:"incarnation,omitempty" jsonschema:"changes every time the node starts"`
+	Incarnation uint64     `json:"incarnation,omitzero" jsonschema:"changes every time the node starts"`
 	Advertise   string     `json:"advertise,omitempty" jsonschema:"address peers dial"`
 	Uptime      string     `json:"uptime,omitempty"`
 	Processes   int        `json:"processes"`
@@ -23,13 +23,15 @@ type NodeView struct {
 // LinkView is one direction of traffic with a peer.
 type LinkView struct {
 	Peer        string `json:"peer"`
-	Incarnation uint64 `json:"incarnation"`
+	Incarnation uint64 `json:"incarnation" jsonschema:"the peer's incarnation; 0 until a dial to it succeeds"`
 	Direction   string `json:"direction" jsonschema:"out: this node sends on it; in: the peer does"`
 	State       string `json:"state"`
 	Age         string `json:"age,omitempty"`
 	Reconnects  uint64 `json:"reconnects"`
 	Messages    uint64 `json:"messages"`
 	Bytes       uint64 `json:"bytes"`
+	Queued      int    `json:"queued,omitzero" jsonschema:"on an out link: messages waiting to be written to the peer; a growing queue means the peer or the network cannot keep up"`
+	RetryIn     string `json:"retry_in,omitempty" jsonschema:"on a down out link, whose dials failed: how long sends to the peer keep failing at once; empty when the next send dials again. Measured against this tool's clock"`
 	LastError   string `json:"last_error,omitempty"`
 }
 
@@ -47,10 +49,10 @@ type ProcessView struct {
 	OldestWait    string            `json:"oldest_wait,omitempty" jsonschema:"how long the oldest waiting message has waited"`
 	Received      uint64            `json:"received"`
 	Sent          uint64            `json:"sent"`
-	CallsInFlight uint32            `json:"calls_in_flight,omitempty"`
+	CallsInFlight uint32            `json:"calls_in_flight,omitzero"`
 	LastMessage   string            `json:"last_message,omitempty" jsonschema:"type of the last message it took"`
-	Monitors      int               `json:"monitors,omitempty" jsonschema:"processes it watches"`
-	Watchers      int               `json:"watchers,omitempty" jsonschema:"processes watching it"`
+	Monitors      int               `json:"monitors,omitzero" jsonschema:"processes it watches"`
+	Watchers      int               `json:"watchers,omitzero" jsonschema:"processes watching it"`
 	LogLevel      string            `json:"log_level"`
 	Inspect       map[string]string `json:"inspect,omitempty" jsonschema:"what the process says about itself"`
 	InspectError  string            `json:"inspect_error,omitempty" jsonschema:"why inspect is empty: busy, or gone"`
@@ -60,7 +62,7 @@ type ProcessView struct {
 type EventView struct {
 	Time    string       `json:"time"`
 	Kind    string       `json:"kind" jsonschema:"spawn, exit, link-up, link-down or dead-letter"`
-	Missed  uint64       `json:"missed,omitempty" jsonschema:"events lost before this one"`
+	Missed  uint64       `json:"missed,omitzero" jsonschema:"events lost before this one"`
 	Process *ProcessView `json:"process,omitempty"`
 	Reason  string       `json:"reason,omitempty"`
 	Peer    string       `json:"peer,omitempty"`
@@ -111,7 +113,8 @@ func (c *Client) nodeView(n grpcproc.NodeInfo) NodeView {
 		}
 		v.Links = append(v.Links, LinkView{
 			Peer: l.Peer.Name, Incarnation: l.Peer.Incarnation, Direction: dir, State: l.State.String(),
-			Age: c.since(l.EstablishedAt), Reconnects: l.Reconnects, Messages: l.Messages, Bytes: l.Bytes, LastError: l.LastError,
+			Age: c.since(l.EstablishedAt), Reconnects: l.Reconnects, Messages: l.Messages, Bytes: l.Bytes,
+			Queued: l.Queued, RetryIn: Short(l.RetryAt.Sub(c.now())), LastError: l.LastError,
 		})
 	}
 	return v

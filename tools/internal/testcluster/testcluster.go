@@ -35,7 +35,8 @@ func worker(p *grpcproc.Process[*testpb.Ping]) error {
 }
 
 // Start runs nodes a and b (and any others named) with Inspectors that
-// forward to each other, and links a to b.
+// forward to each other, and links a to b. Node a backs off from a peer whose
+// dials fail (Config.DialBackoff), so a test can show it a down link.
 func Start(t *testing.T, more ...string) *Fixture {
 	t.Helper()
 	// Each Inspector reaches the others as a node would, with its node's own
@@ -43,7 +44,12 @@ func Start(t *testing.T, more ...string) *Fixture {
 	// start one at a time, config before services.
 	cfgs := map[string]grpcproc.Config{}
 	c := grpcproctest.NewWith(t, []grpcproctest.Option{
-		grpcproctest.WithConfig(func(name string, cfg *grpcproc.Config) { cfgs[name] = *cfg }),
+		grpcproctest.WithConfig(func(name string, cfg *grpcproc.Config) {
+			if name == "a" {
+				cfg.DialBackoff = time.Hour
+			}
+			cfgs[name] = *cfg
+		}),
 		grpcproctest.WithServices(func(n *grpcproc.Node, s *grpc.Server) {
 			cfg := cfgs[n.Name()]
 			insp := inspect.New(n, inspect.WithResolver(cfg.Resolver, cfg.DialOptions...))

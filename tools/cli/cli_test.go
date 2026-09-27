@@ -28,6 +28,7 @@ import (
 
 	"github.com/floatdrop/grpcproc"
 	"github.com/floatdrop/grpcproc/inspect"
+	"github.com/floatdrop/grpcproc/internal/testpb"
 	"github.com/floatdrop/grpcproc/tools/cli"
 	"github.com/floatdrop/grpcproc/tools/client"
 	"github.com/floatdrop/grpcproc/tools/internal/testcluster"
@@ -74,7 +75,7 @@ func has(t *testing.T, s string, parts ...string) {
 
 func TestReadCommands(t *testing.T) {
 	f := testcluster.Start(t)
-	has(t, ok(t, run(t, f, "node")), "node:          a#", "PEER", "b#", "out", "in", "up")
+	has(t, ok(t, run(t, f, "node")), "node:          a#", "PEER", "QUEUED", "RETRY IN", "b#", "out", "in", "up")
 	has(t, ok(t, run(t, f, "node", "b")), "node:          b#")
 	has(t, ok(t, run(t, f, "nodes")), "NODE", "PEERS", "a ", "b ")
 	has(t, ok(t, run(t, f, "ps")), "PID", "sup", "w1", "stuck", "talker", "supervisor")
@@ -404,4 +405,18 @@ func TestVersion(t *testing.T) {
 	if code := cli.Main(t.Context(), []string{"--version"}, cli.Env{Stdout: &out}); code != 0 || !strings.HasPrefix(out.String(), "grpcprocctl ") {
 		t.Fatalf("%d %q", code, out.String())
 	}
+}
+
+// A peer node a fails to dial shows as a down link with when it is dialed
+// again. nodes marks it down and lists it as unreachable, and dot --cluster
+// still draws the nodes it can reach.
+func TestADownPeer(t *testing.T) {
+	f := testcluster.Start(t, "c")
+	f.C.Kill("c")
+	if err := f.C.Node("a").SendTo(t.Context(), grpcproc.Name{Node: "c", Name: "x"}, &testpb.Ping{}); err == nil {
+		t.Fatal("sent to a killed node")
+	}
+	has(t, ok(t, run(t, f, "node")), "c#0", "out", "down", "m", "connection refused")
+	has(t, ok(t, run(t, f, "nodes")), "b,c(down)", "c ")
+	has(t, ok(t, run(t, f, "dot", "--cluster")), "digraph", `"a"`, `"b"`)
 }
