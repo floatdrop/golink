@@ -1,4 +1,4 @@
-# <img src="site/public/favicon.svg" alt="" height="28"> grpcproc
+# <img src="site/public/favicon.svg" alt="" height="32" align="middle"> grpcproc
 
 Erlang-style processes for Go, on the gRPC server you already run.
 
