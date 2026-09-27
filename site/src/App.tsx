@@ -5,8 +5,8 @@ import { Button, Icon, Text, ThemeProvider, Toc } from './uikit.ts';
 import type { Code, Highlighted as Source } from './code.ts';
 import { Drawing, Figure, Highlighted, Plain } from './components/Figure.tsx';
 import { ClusterPicture, Flow, Layout, Lifecycle, LocalPicture } from './components/diagrams.tsx';
-import { Mark } from './components/Mark.tsx';
 import { Topbar } from './components/Topbar.tsx';
+import { url } from './config.ts';
 import type { Content, Figures } from './content/types.ts';
 import type { ReactNode } from 'react';
 
@@ -138,7 +138,9 @@ export function App({ content, code }: AppProps) {
 						</Button>
 					</div>
 				</div>
-				<Mark className="gp-hero__art" />
+				{/* The scene: a node, its processes, and the nodes it is linked to. The
+				    lead says the same in words, so it is decorative. */}
+				<img className="gp-hero__art" src={url('scene.svg')} alt="" width={560} height={320} />
 			</header>
 
 			<div className="gp-page gp-layout">

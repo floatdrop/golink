@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 320" role="img" aria-label="A grpcproc node, its processes, and the nodes it is linked to">
+<!-- The scene: a node hosts processes (the mark, as in favicon.svg), and links to peer nodes, each with processes of its own. -->
+<line x1="210.4" y1="130.9" x2="110.7" y2="89.3" stroke="#3b82c4" stroke-width="2.5" stroke-opacity="0.6" stroke-linecap="round"/>
+<circle cx="168.5" cy="113.5" r="4.5" fill="#e76f51"/>
+<line x1="349.6" y1="130.9" x2="449.3" y2="89.3" stroke="#3b82c4" stroke-width="2.5" stroke-opacity="0.6" stroke-linecap="round"/>
+<line x1="210.4" y1="189.1" x2="110.7" y2="230.7" stroke="#3b82c4" stroke-width="2.5" stroke-opacity="0.6" stroke-linecap="round"/>
+<line x1="349.6" y1="189.1" x2="449.3" y2="230.7" stroke="#3b82c4" stroke-width="2.5" stroke-opacity="0.6" stroke-linecap="round"/>
+<circle cx="409.4" cy="214.0" r="4.5" fill="#2a9d8f"/>
+<polygon points="280.0,86.0 344.1,123.0 344.1,197.0 280.0,234.0 215.9,197.0 215.9,123.0" fill="none" stroke="#3b82c4" stroke-width="3.5" stroke-linejoin="round"/>
+<path d="M280.0 138.0 L256.0 182.8 L304.0 182.8 Z" fill="none" stroke="#3b82c4" stroke-width="3.2" stroke-linejoin="round"/>
+<circle cx="280.0" cy="138.0" r="14.7" fill="#7fd0e5"/>
+<circle cx="256.0" cy="182.8" r="14.7" fill="#2a9d8f"/>
+<circle cx="304.0" cy="182.8" r="14.7" fill="#e76f51"/>
+<polygon points="74.0,38.0 105.2,56.0 105.2,92.0 74.0,110.0 42.8,92.0 42.8,56.0" fill="none" stroke="#3b82c4" stroke-width="2.5" stroke-linejoin="round"/>
+<path d="M74.0 64.9 L63.9 83.8 L84.1 83.8 Z" fill="none" stroke="#3b82c4" stroke-width="1.8" stroke-linejoin="round"/>
+<circle cx="74.0" cy="64.9" r="6.2" fill="#7fd0e5"/>
+<circle cx="63.9" cy="83.8" r="6.2" fill="#2a9d8f"/>
+<circle cx="84.1" cy="83.8" r="6.2" fill="#e76f51"/>
+<polygon points="486.0,38.0 517.2,56.0 517.2,92.0 486.0,110.0 454.8,92.0 454.8,56.0" fill="none" stroke="#3b82c4" stroke-width="2.5" stroke-linejoin="round"/>
+<path d="M475.9 74.0 L496.1 74.0" fill="none" stroke="#3b82c4" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="475.9" cy="74.0" r="6.2" fill="#7fd0e5"/>
+<circle cx="496.1" cy="74.0" r="6.2" fill="#e76f51"/>
+<polygon points="74.0,210.0 105.2,228.0 105.2,264.0 74.0,282.0 42.8,264.0 42.8,228.0" fill="none" stroke="#3b82c4" stroke-width="2.5" stroke-linejoin="round"/>
+<circle cx="74.0" cy="246.0" r="7.3" fill="#2a9d8f"/>
+<polygon points="486.0,210.0 517.2,228.0 517.2,264.0 486.0,282.0 454.8,264.0 454.8,228.0" fill="none" stroke="#3b82c4" stroke-width="2.5" stroke-linejoin="round"/>
+<path d="M475.9 246.0 L496.1 246.0" fill="none" stroke="#3b82c4" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="475.9" cy="246.0" r="6.2" fill="#2a9d8f"/>
+<circle cx="496.1" cy="246.0" r="6.2" fill="#7fd0e5"/>
+</svg>

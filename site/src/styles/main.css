@@ -176,7 +176,7 @@ body {
 /* ---- hero ---------------------------------------------------------------- */
 
 /* The words alone in one column, and, from the page's two-column width in
-   the block below, the mark beside them. The topbar's small mark is there
+   the block below, the scene beside them. The topbar's small mark is there
    at every width. */
 .gp-hero {
 	/* Gravity's spacing scale stops at 40px; the page rhythm above a section is
@@ -257,7 +257,7 @@ body {
 /* ---- two columns --------------------------------------------------------- */
 
 /* The one breakpoint on the page. Below it the hero is the words alone and
-   the table of contents is not shown at all; from it up, the mark sits
+   the table of contents is not shown at all; from it up, the scene sits
    beside the words and the contents beside the prose, sticky. The two switch
    together, so the page never has one of them without the other. This block
    comes after every base rule it overrides, since the cascade breaks the tie
@@ -270,9 +270,9 @@ body {
 
 	.gp-hero__art {
 		display: block;
-		width: 11rem;
+		width: 22rem;
 		height: auto;
-		aspect-ratio: 1;
+		aspect-ratio: 560 / 320;
 	}
 
 	.gp-layout {
