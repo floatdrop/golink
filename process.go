@@ -35,6 +35,7 @@ type inspectReq struct {
 type proc struct {
 	n       *Node
 	pid     PID
+	name    string // WithName; fixed at spawn
 	label   string
 	typ     string
 	parent  PID
@@ -61,13 +62,13 @@ type proc struct {
 	level                   atomic.Int64
 	levelSet                atomic.Bool
 
+	// mu guards what follows. Taken inside Node.mu, never around it.
 	mu       sync.Mutex
 	exited   bool
 	watchers map[Ref]PID           // who monitors me
 	monitors map[Ref]monitorTarget // whom I monitor
 	open     map[openCall]struct{} // calls taken from the mailbox and not yet answered
 	timers   map[*Timer]struct{}   // SendAfter timers not yet fired
-	name     string                // WithName; fixed at spawn
 }
 
 type openCall struct {
@@ -197,44 +198,42 @@ func spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts []SpawnOpt
 	p.log = slog.New(&levelHandler{h: n.log.Handler(), p: p}).With(
 		"pid", p.pid.String(), "label", o.label)
 
-	// A process that has exited spawns nothing. A monitoring parent's
-	// monitor exists before the child does, so its Down cannot be missed.
-	var ref Ref
+	// One critical section admits the child: under n.mu, with the parent's
+	// lock inside it (n.mu first, then a process's lock: the one order), a
+	// parent's exit either precedes the spawn, which then fails, or finds the
+	// child registered and its monitor in place. A monitoring parent's
+	// monitor exists before the child runs, so its Down cannot be missed.
+	n.mu.Lock()
 	if parent != nil {
 		parent.mu.Lock()
-		if parent.exited {
-			parent.mu.Unlock()
-			cancel(nil)
-			return Addr[M]{}, Ref{}, ErrNoProc
+	}
+	var err error
+	switch {
+	case parent != nil && parent.exited:
+		err = ErrNoProc // a process that has exited spawns nothing
+	case n.stopping:
+		err = ErrNodeStopped
+	case o.name != "" && n.names[o.name] != nil:
+		err = ErrNameTaken
+	}
+	var ref Ref
+	if err == nil && monitor {
+		ref = Ref{Node: n.id.Name, ID: n.nextRef.Add(1)}
+		if parent.monitors == nil {
+			parent.monitors = map[Ref]monitorTarget{}
 		}
-		if monitor {
-			ref = Ref{Node: n.id.Name, ID: n.nextRef.Add(1)}
-			if parent.monitors == nil {
-				parent.monitors = map[Ref]monitorTarget{}
-			}
-			parent.monitors[ref] = monitorTarget{pid: p.pid}
-			p.watchers = map[Ref]PID{ref: parent.pid}
-		}
+		parent.monitors[ref] = monitorTarget{pid: p.pid}
+		p.watchers = map[Ref]PID{ref: parent.pid}
+	}
+	if parent != nil {
 		parent.mu.Unlock()
 	}
-	fail := func(err error) (Addr[M], Ref, error) {
+	if err != nil {
+		n.mu.Unlock()
 		cancel(nil)
-		if monitor {
-			parent.dropMonitor(ref)
-		}
 		return Addr[M]{}, Ref{}, err
 	}
-
-	n.mu.Lock()
-	if n.stopping {
-		n.mu.Unlock()
-		return fail(ErrNodeStopped)
-	}
 	if o.name != "" {
-		if _, taken := n.names[o.name]; taken {
-			n.mu.Unlock()
-			return fail(ErrNameTaken)
-		}
 		n.names[o.name] = p
 	}
 	n.procs[id] = p

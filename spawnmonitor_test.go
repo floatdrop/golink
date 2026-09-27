@@ -171,3 +171,65 @@ func TestSendAfterFromExitedProcess(t *testing.T) {
 		t.Fatal("an exited process scheduled a timer")
 	}
 }
+
+// A parent that exits while SpawnMonitor runs on another goroutine leaves
+// no child watching it: each spawn either fails or is demonitored.
+func TestSpawnMonitorRacesParentExit(t *testing.T) {
+	c := grpcproctest.New(t, "a")
+	a := c.Node("a")
+	w, downs := watcher(t, a)
+	// Contend Node.mu so a spawn stalls between its steps.
+	stop := make(chan struct{})
+	defer close(stop)
+	for range 4 {
+		go func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					a.Whereis("x")
+				}
+			}
+		}()
+	}
+	for i := range 2000 {
+		ready := make(chan *grpcproc.Process[proto.Message], 1)
+		pa, _ := a.Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
+			ready <- p
+			_, err := p.Receive()
+			return err
+		})
+		p := <-ready
+		w.Monitor(pa)
+		kids := make(chan []grpcproc.PID, 1)
+		go func() {
+			var ps []grpcproc.PID
+			for {
+				k, _, err := p.SpawnMonitor[*testpb.Ping](echo)
+				if err != nil {
+					kids <- ps
+					return
+				}
+				ps = append(ps, k.PID())
+			}
+		}()
+		_ = a.Exit(pa, grpcproc.ReasonKilled)
+		ps := <-kids
+		recv(t, downs)
+		deadline := time.Now().Add(200 * time.Millisecond)
+		for _, k := range ps {
+			for {
+				info, _ := a.Process(k)
+				if info.Watchers == 0 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("iteration %d: child %v of %d still watched by its dead parent", i, k, len(ps))
+				}
+				time.Sleep(time.Millisecond)
+			}
+			_ = a.Exit(k, grpcproc.ReasonKilled)
+		}
+	}
+}

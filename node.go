@@ -129,6 +129,8 @@ type Node struct {
 	started  atomic.Int64                // unix nanos, 0 before Start
 	withdraw func(context.Context) error // from Registrar; guarded by mu
 
+	// mu guards the fields below, through stopped. A process's lock may be
+	// taken inside it (spawn does), never the reverse.
 	mu       sync.Mutex
 	procs    map[uint64]*proc
 	names    map[string]*proc
