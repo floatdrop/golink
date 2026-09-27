@@ -4,13 +4,15 @@ Separate module, so grpcproc itself does not depend on what it is compared
 with. It measures the working tree (`replace ../`).
 
 grpcproc against [GoAkt](https://github.com/tochemey/goakt) v4.5.6,
-[Hollywood](https://github.com/anthdm/hollywood) v1.0.5 and
+[Hollywood](https://github.com/anthdm/hollywood) v1.0.5,
 [Proto.Actor](https://github.com/asynkron/protoactor-go) (its development
-branch; it has no Go-style release tags), each used the way it is meant to
-be:
+branch; it has no Go-style release tags) and
+[Ergo](https://ergo.services) 3.3.0 (module version v1.999.330), each used
+the way it is meant to be:
 
-- the same message, `wrapperspb.Int64Value`, because the others need
-  protobuf to go remote;
+- the same message, `wrapperspb.Int64Value`, because Hollywood and
+  Proto.Actor need protobuf to go remote. Ergo's network registers struct
+  values and not pointers, so it sends a struct holding the same `int64`;
 - **send** is end-to-end throughput: the timer stops when the receiver has
   counted every message, not when the sender has queued them;
 - **request** is one caller waiting for each reply; **parallel** is
@@ -19,7 +21,19 @@ be:
   connection warmed up before timing. grpcproc's own benchmarks in the root
   module use in-memory connections, which would flatter it here. GoAkt's
   remote actors are found with the public `PID.RemoteLookup` and reached
-  through its remoting client, as an application would.
+  through its remoting client, as an application would. Ergo's nodes find
+  each other through its embedded registrar, the default, on a port of
+  their own rather than the shared 4499.
+
+Ergo runs with its software keepalive off, the one default changed. With it
+on, parallel remote requests timed out in 8 runs of 16: each connection's
+flusher arms one `time.AfterFunc` timer from its writers (500 ns) and from
+its own callback (15 s, the keepalive), and on Go 1.26.0 and 1.27.1 a
+`Reset` to 500 ns is now and then lost when more than one P runs. The batch
+of calls then sits unsent until another timer runs, at worst the keepalive,
+past Ergo's 5 s call timeout. The standard library alone reproduces it. The
+keepalive sends nothing while messages flow, so the numbers are still
+Ergo's.
 
 Each framework is its own package: Hollywood and Proto.Actor both register a
 protobuf file named `actor.proto`, which cannot share a binary, and
@@ -28,34 +42,42 @@ gRPC's logger) out of another's numbers.
 
 Apple M3 Max, `-count=6`, medians by `benchstat`:
 
-| | grpcproc | GoAkt | Hollywood | Proto.Actor |
-| --- | --- | --- | --- | --- |
-| Local send | 93 ns, 0 allocs | 106 ns (±16%), 0 allocs | **58 ns**, 0 allocs | 189 ns, 0 allocs |
-| Local request | 726 ns, 2 allocs | **574 ns**, 2 allocs | 2246 ns, 12 allocs | 2321 ns (±13%), 10 allocs |
-| Remote send | 374 ns, 6 allocs | 453 ns (±11%), 6 allocs | **211 ns**, 7 allocs | 309 ns, 9 allocs |
-| Remote request | 41.8 µs, 52 allocs | **34.7 µs**, 42 allocs | 35.9 µs, 66 allocs | 53.8 µs, 103 allocs |
-| Remote request, parallel | 7.1 µs, 28 allocs | 10.1 µs, 40 allocs | **5.1 µs**, 54 allocs | 6.9 µs (±12%), 54 allocs |
-| Geometric mean | 1.50 µs | 1.58 µs | **1.38 µs** | 2.19 µs |
+| | grpcproc | GoAkt | Hollywood | Proto.Actor | Ergo |
+| --- | --- | --- | --- | --- | --- |
+| Local send | 96 ns, 0 allocs | 95 ns (±15%), 0 allocs | **59 ns**, 0 allocs | 200 ns, 0 allocs | 198 ns (±23%), 3 allocs |
+| Local request | 761 ns, 2 allocs | **568 ns**, 2 allocs | 2362 ns, 12 allocs | 2451 ns, 10 allocs | 3200 ns, 5 allocs |
+| Remote send | 382 ns, 6 allocs | 520 ns (±10%), 7 allocs | **197 ns**, 7 allocs | 340 ns, 9 allocs | 551 ns (±18%), 10 allocs |
+| Remote request | 44.8 µs, 52 allocs | **35.9 µs**, 42 allocs | 37.6 µs, 66 allocs | 60.7 µs, 103 allocs | 49.6 µs, 21 allocs |
+| Remote request, parallel | 7.5 µs, 27 allocs | 10.1 µs, 40 allocs | **5.0 µs**, 54 allocs | 7.0 µs, 54 allocs | 6.5 µs, 19 allocs |
+| Geometric mean | 1.56 µs | 1.59 µs | **1.39 µs** | 2.35 µs | 2.58 µs |
 
-Proto.Actor's local send varies between runs (94 ns and 189 ns in two runs
-of six), and GoAkt's sends and some of Proto.Actor's requests vary within
-one, as marked; the others hold within a few percent.
+Proto.Actor's local send varies between runs (94 ns in one run of six, 189
+to 200 ns in four others), and GoAkt's and Ergo's sends vary within one, as
+marked; the others hold within a few percent.
 
 How to read it:
 
 - **The transport decides sequential remote latency.** GoAkt (its own TCP
-  protocol) and Hollywood (dRPC) answer a remote request in 35–36 µs; the
-  two that speak gRPC take longer, grpcproc 42 µs and Proto.Actor 54 µs.
+  protocol) and Hollywood (dRPC) answer a remote request in 36–38 µs; the
+  two that speak gRPC take longer, grpcproc 45 µs and Proto.Actor 61 µs.
   gRPC-go's writer adds a goroutine hand-off in each direction. On a real
   network the round trip dwarfs the difference; for grpcproc it is the cost
   of living on the application's gRPC server.
-- **Against the other gRPC library**, grpcproc answers a remote request 22%
-  sooner than Proto.Actor and trails it by about 65 ns on remote send, where
+- **Against the other gRPC library**, grpcproc answers a remote request 26%
+  sooner than Proto.Actor and trails it by about 40 ns on remote send, where
   Proto.Actor's writer batches up to a thousand envelopes.
 - **Locally**, a grpcproc call waits on one channel of its own where
   Hollywood and Proto.Actor create a temporary process per request, which
   puts it three times ahead of them. GoAkt is quicker still, with as many
   allocations per call.
+- **Ergo starts a goroutine per hop.** A sleeping process runs on a new
+  goroutine each time a message wakes it, and so does each connection's
+  read queue and each write flush (a timer callback). A request finds its
+  echo asleep every time, so a local one takes 3.2 µs and a remote one
+  50 µs, over Ergo's own TCP protocol; a stream of sends keeps the sink
+  awake. Its remote calls allocate least of all, 19–21 times and about
+  1 KB where the others take 27–103 times and 2.3–4.3 KB, and it is second
+  only to Hollywood on parallel requests.
 - **Hollywood's sends are fastest** everywhere, with a lighter transport and
   vtprotobuf-generated envelopes. grpcproc also pays, on every message, for
   what its Inspector reports: per-process counters, mailbox ages, and a type

@@ -1,5 +1,7 @@
 dario.cat/mergo v1.0.2 h1:85+piFYR1tMbRrLcDwR18y4UKJ3aH1Tbzi24VRW1TK8=
 dario.cat/mergo v1.0.2/go.mod h1:E/hbnu0NxMFBjpMIE34DRGLWqDy0g5FuKDhCb31ngxA=
+ergo.services/ergo v1.999.330 h1:9reLfSUoaAmg1ITcdTGGhJ9UXawQW+xR9yeqHbjsddE=
+ergo.services/ergo v1.999.330/go.mod h1:2WcCdXUIZvCfy9Kkac3Sx6V/tB23Mx3yK6xz77hRfbM=
 github.com/Azure/go-ansiterm v0.0.0-20260914234754-15785f84ba1c h1:KOGMapqG8kPI4D5tzWzNhdYIORgHOtAQLs8Sp9FcXN4=
 github.com/Azure/go-ansiterm v0.0.0-20260914234754-15785f84ba1c/go.mod h1:xomTg63KZ2rFqZQzSB4Vz2SUXa1BpHTVz9L5PTmPC4E=
 github.com/DataDog/gostackparse v0.7.0 h1:i7dLkXHvYzHV308hnkvVGDL3BR4FWl7IsXNPz/IGQh4=
