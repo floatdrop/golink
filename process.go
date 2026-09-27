@@ -25,9 +25,6 @@ type item struct {
 	md   Metadata
 	ref  uint64 // call ref; 0 for a plain message
 	at   int64  // unix nanos, when it was queued; only when hooks want the wait
-	// reply is what a caller of this node waits on for the answer (see
-	// callLocal); nil for a peer's, and for a plain message.
-	reply chan<- callResult
 }
 
 type inspectReq struct {
@@ -70,7 +67,7 @@ type proc struct {
 	exited   bool
 	watchers map[Ref]PID                    // who monitors me
 	monitors map[Ref]monitorTarget          // whom I monitor
-	open     map[openCall]chan<- callResult // calls taken from the mailbox and not yet answered, with their item's reply
+	open     map[openCall]chan<- callResult // calls queued or taken, not yet answered: what a caller of this node waits on, nil for a peer's
 	timers   map[*Timer]struct{}            // SendAfter timers not yet fired
 }
 
@@ -393,8 +390,9 @@ func (p *proc) sendAfter(d time.Duration, to dest, m proto.Message) *Timer {
 
 // Reply answers a message for which IsCall is true. It may be called later,
 // from any goroutine (a deferred reply), and on another process than the one
-// that received m. A call is answered once: a second Reply, or one after the
-// receiving process exited (which answers ErrNoProc), is dropped.
+// that received m. A call is answered once: a second Reply is dropped, and
+// so is one after the receiving process exited (which answers ErrNoProc) or
+// its node's Stop gave up on it (ErrNodeStopped).
 func (*Process[M]) Reply(m Msg[M], resp proto.Message, err error) error {
 	if m.ref == 0 {
 		return ErrNotCall
@@ -459,6 +457,42 @@ func (p *proc) push(it item) bool {
 	return p.mbox.push(it)
 }
 
+// queueCall queues a call, which from then on is in open, the process's to
+// answer: by Reply, which takes it from there, by its exit, or by Stop, if
+// the process outlives it. reply is what a caller of this node waits on. It
+// reports false, and the caller answers, if the process has exited.
+func (p *proc) queueCall(it item, reply chan<- callResult) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	// The exit sets exited, under p.mu, before it closes the mailbox: a call
+	// queued here is in the open calls the exit answers.
+	if p.exited || !p.push(it) {
+		return false
+	}
+	if p.open == nil {
+		p.open = map[openCall]chan<- callResult{}
+	}
+	p.open[openCall{it.from, it.ref}] = reply
+	return true
+}
+
+// failLocalCalls answers the open calls of this node's callers with err, for
+// Stop, when the process outlives it. A later Reply finds them gone.
+func (p *proc) failLocalCalls(err error) {
+	var chs []chan<- callResult
+	p.mu.Lock()
+	for c, ch := range p.open {
+		if ch != nil { // a peer's caller hears of it from its link
+			chs = append(chs, ch)
+			delete(p.open, c)
+		}
+	}
+	p.mu.Unlock()
+	for _, ch := range chs {
+		answer(ch, callResult{err: err})
+	}
+}
+
 // outgoing is the metadata a send from this process carries: md over what
 // the process inherited from the message it is handling.
 func (p *proc) outgoing(md Metadata) Metadata {
@@ -513,14 +547,6 @@ func (p *proc) receive(ctx context.Context) (item, error) {
 func (p *proc) took(it item) item {
 	p.wakeups.Add(1)
 	p.received.Add(1)
-	if it.ref != 0 {
-		p.mu.Lock()
-		if p.open == nil {
-			p.open = map[openCall]chan<- callResult{}
-		}
-		p.open[openCall{it.from, it.ref}] = it.reply
-		p.mu.Unlock()
-	}
 	if it.body != nil {
 		// Only a change of type allocates; a stream of one type does not.
 		if name := typeName(it.body); p.lastMsg.Load() == nil || *p.lastMsg.Load() != name {
@@ -736,20 +762,18 @@ func (p *proc) terminate(reason string) {
 	n.mu.Unlock()
 	n.exited.Add(1)
 
-	// Whatever is still queued goes nowhere, and a call taken but never
-	// answered never will be: fail them now rather than let callers time out.
-	for c, ch := range open {
-		_ = n.reply(p.pid, c.from, c.ref, ch, nil, grpcprocv1.Status_STATUS_NOPROC, "", false)
-	}
-	// terminate runs on the process's goroutine, the mailbox's consumer, so
-	// it may collect what Receive had swapped in but not yet taken.
+	// Whatever is still queued goes nowhere, and a call not yet answered
+	// never will be: fail them now rather than let callers time out. The
+	// dead letters are counted first, as deliver does: a caller woken here
+	// sees its own. terminate runs on the process's goroutine, the mailbox's
+	// consumer, so it may collect what Receive had swapped in but not taken.
 	for _, it := range append(p.mbox.taken(), p.mbox.close()...) {
 		if it.body != nil {
 			n.deadLetter(it.from, p.pid, it.body, ReasonNoProc)
 		}
-		if it.ref != 0 { // counted first, as deliver does: a caller woken here sees its dead letter
-			_ = n.reply(p.pid, it.from, it.ref, it.reply, nil, grpcprocv1.Status_STATUS_NOPROC, "", false)
-		}
+	}
+	for c, ch := range open { // queued or taken
+		_ = n.reply(p.pid, c.from, c.ref, ch, nil, grpcprocv1.Status_STATUS_NOPROC, "", false)
 	}
 	// The exit is reported before its watchers hear of it, so an observer
 	// sees it before anything it causes: a supervisor's restart, say.

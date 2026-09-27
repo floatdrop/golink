@@ -7,7 +7,6 @@ import (
 	"time"
 
 	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
-	"google.golang.org/protobuf/proto"
 )
 
 // Every way a call to a peer can end leaves nothing in pending: an answer
@@ -68,28 +67,26 @@ func TestCallsLeaveNothingPending(t *testing.T) {
 	}
 }
 
-// haltingHooks halts the node as a call finds no process: between the call's
-// look at halted and its answer.
-type haltingHooks struct {
-	NopHooks
-	n *Node
-}
-
-func (h *haltingHooks) OnDeadLetter(PID, PID, proto.Message, string) { close(h.n.halted) }
-
-// A local call answered as the node halts keeps its answer, whichever its
-// wait sees first.
-func TestLocalCallAnsweredAsTheNodeHalts(t *testing.T) {
-	for range 64 {
-		h := &haltingHooks{}
-		n, err := NewNode(Config{Name: "a", Resolver: StaticResolver{}, Hooks: h})
-		if err != nil {
-			t.Fatal(err)
-		}
-		h.n = n
-		if _, err := n.Call[*grpcprocv1.Hello](t.Context(), Named[*grpcprocv1.Hello]("a", "nobody"), &grpcprocv1.Hello{}); !errors.Is(err, ErrNoProc) {
-			t.Fatalf("got %v", err)
-		}
+// Stop fails the local calls open on a process that outlives it, queued or
+// taken, and leaves a peer's, whose caller hears of it from its link. The
+// process's Reply for one it failed is dropped.
+func TestFailLocalCalls(t *testing.T) {
+	n := newTestNode(t, "a")
+	p := &proc{n: n, pid: PID{Node: "a", Incarnation: 1, ID: 5}, mbox: newQueue[item](true)}
+	local, peer := make(chan callResult, 1), openCall{from: PID{Node: "b", Incarnation: 2, ID: 7}, ref: 3}
+	if !p.queueCall(item{from: n.PID(), ref: 1}, local) || !p.queueCall(item{from: peer.from, ref: peer.ref}, nil) {
+		t.Fatal("not queued")
+	}
+	p.failLocalCalls(ErrNodeStopped)
+	if r := <-local; !errors.Is(r.err, ErrNodeStopped) {
+		t.Fatal(r.err)
+	}
+	if _, ok := p.open[peer]; !ok || len(p.open) != 1 {
+		t.Fatalf("open %v", p.open)
+	}
+	m := Msg[*grpcprocv1.Hello]{From: n.PID(), ref: 1, taker: p}
+	if err := (&Process[*grpcprocv1.Hello]{p}).Reply(m, &grpcprocv1.Hello{}, nil); err != nil || len(local) != 0 {
+		t.Fatalf("a Reply after Stop failed the call: %v, %d answers", err, len(local))
 	}
 }
 

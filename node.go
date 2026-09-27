@@ -180,10 +180,6 @@ type Node struct {
 	settled  *sync.Cond
 	wg       sync.WaitGroup
 
-	// halted is closed, once, by the Stop that set stopping, when it fails
-	// the calls still waiting: callLocal's wait on a process of this node.
-	halted chan struct{}
-
 	spawned, exited, deadLetters atomic.Uint64
 	subs                         subscribers
 }
@@ -247,7 +243,6 @@ func NewNode(cfg Config) (*Node, error) {
 		procs:    map[uint64]*proc{},
 		names:    map[string]*proc{},
 		pending:  map[uint64]*pendingCall{},
-		halted:   make(chan struct{}),
 		out:      map[string]*outLink{},
 		in:       map[string]*inLink{},
 		dialing:  map[string]*dialOp{},
@@ -458,7 +453,13 @@ func (n *Node) Stop(ctx context.Context) error {
 	for _, pc := range pending {
 		pc.ch <- callResult{err: ErrNodeStopped}
 	}
-	close(n.halted) // and the local ones
+	// So will local calls still open on processes that outlived the wait.
+	n.mu.RLock()
+	procs := slices.Collect(maps.Values(n.procs))
+	n.mu.RUnlock()
+	for _, p := range procs {
+		p.failLocalCalls(ErrNodeStopped)
+	}
 	// A dial that was in flight when the node stopped completes, and
 	// finishDial discards its link: wait for it to let go of the node.
 	if dialing {
@@ -709,7 +710,7 @@ func (n *Node) send(ctx context.Context, from PID, sender *proc, to dest, body p
 		if n.cfg.CopyLocal {
 			body = proto.Clone(body)
 		}
-		n.deliver(pid, name, item{from: from, body: body, md: md})
+		n.deliver(pid, name, item{from: from, body: body, md: md}, nil)
 		return nil
 	}
 	env := wire(grpcprocv1.Kind_KIND_SEND, from, pid, name)
@@ -741,37 +742,24 @@ func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to dest, req 
 	return n.callRemote(ctx, from, pid, name, req, md)
 }
 
-// callLocal calls a process of this node. The call carries the channel its
-// caller waits on, and whoever holds the call answers it there: deliver, if
-// it cannot queue it; the process, once it has taken it; or the process's
-// exit. No one else can, so nothing needs to find the call by its ref.
+// callLocal calls a process of this node. Its caller waits on a channel of
+// its own, which the call leaves in the process's open calls when it is
+// queued, and whoever takes it from there answers it: the process's Reply,
+// its exit, or Stop, if the process outlives it. deliver answers a call it
+// cannot queue. No one else can, so nothing needs to find the call by its
+// ref, and the caller waits on nothing else but its ctx.
 func (n *Node) callLocal(ctx context.Context, from, to PID, name string, req proto.Message, md Metadata) (proto.Message, error) {
 	if n.cfg.CopyLocal {
 		req = proto.Clone(req)
 	}
-	halted := n.halted
-	select {
-	case <-halted:
-		halted = nil // made after Stop: it waits for its answer, as then it always has
-	default:
-	}
 	ch := make(chan callResult, 1)
-	n.deliver(to, name, item{from: from, body: req, md: md, ref: n.nextRef.Add(1), reply: ch})
-	var r callResult
+	n.deliver(to, name, item{from: from, body: req, md: md, ref: n.nextRef.Add(1)}, ch)
 	select {
-	case r = <-ch:
+	case r := <-ch:
+		return r.body, r.err
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-halted:
-		// Stop fails the calls still waiting, as it does calls to peers; an
-		// answer that came first stands.
-		select {
-		case r = <-ch:
-		default:
-			return nil, ErrNodeStopped
-		}
 	}
-	return r.body, r.err
 }
 
 // callRemote calls a process of a peer, which answers by ref: the call
@@ -816,14 +804,9 @@ func (n *Node) callRemote(ctx context.Context, from, to PID, name string, req pr
 func (n *Node) reply(from, to PID, ref uint64, ch chan<- callResult, body proto.Message, status grpcprocv1.Status, errText string, dispatching bool) error {
 	if to.Node == n.id.Name {
 		// With no ch, the call was answered already: this is a second Reply,
-		// or one after the process's exit answered for it.
+		// or one after the process's exit, or Stop, answered for it.
 		if ch != nil {
-			select {
-			case ch <- outcome(body, status, errText):
-			default:
-				// Cannot happen: only the call's one holder answers it (see
-				// callLocal). Were it to, a blocked send would hang an exit.
-			}
+			answer(ch, outcome(body, status, errText))
 		}
 		return nil
 	}
@@ -948,31 +931,49 @@ func (n *Node) route(ctx context.Context, node string, env *grpcprocv1.Envelope)
 // ---------- local delivery; also the sink for decoded inbound envelopes ----------
 
 // deliver queues a message, or a call (it.ref set), for a process of this
-// node, or answers for it if there is none that takes it.
-func (n *Node) deliver(to PID, name string, it item) {
+// node, or answers for it if there is none that takes it. reply is what a
+// caller of this node waits on (see callLocal).
+func (n *Node) deliver(to PID, name string, it item, reply chan<- callResult) {
 	p := n.lookup(to, name)
 	if p == nil {
 		n.deadLetter(it.from, to, it.body, ReasonNoProc)
 		if it.ref != 0 {
-			_ = n.reply(to, it.from, it.ref, it.reply, nil, grpcprocv1.Status_STATUS_NOPROC, "", true)
+			_ = n.reply(to, it.from, it.ref, reply, nil, grpcprocv1.Status_STATUS_NOPROC, "", true)
 		}
 		return
 	}
 	if !p.accept(it.body) {
 		n.deadLetter(it.from, p.pid, it.body, ReasonType)
 		if it.ref != 0 {
-			_ = n.reply(p.pid, it.from, it.ref, it.reply, nil, grpcprocv1.Status_STATUS_TYPE, "", true)
+			_ = n.reply(p.pid, it.from, it.ref, reply, nil, grpcprocv1.Status_STATUS_TYPE, "", true)
 		}
 		return
 	}
 	if n.hooks != nil {
 		it.at = time.Now().UnixNano() // for OnReceive's exact wait
 	}
-	if !p.push(it) {
+	var queued bool
+	if it.ref == 0 {
+		queued = p.push(it)
+	} else {
+		queued = p.queueCall(it, reply)
+	}
+	if !queued {
 		n.deadLetter(it.from, p.pid, it.body, ReasonNoProc)
 		if it.ref != 0 {
-			_ = n.reply(p.pid, it.from, it.ref, it.reply, nil, grpcprocv1.Status_STATUS_NOPROC, "", true)
+			_ = n.reply(p.pid, it.from, it.ref, reply, nil, grpcprocv1.Status_STATUS_NOPROC, "", true)
 		}
+	}
+}
+
+// answer answers a call of this node's on the channel its caller waits on.
+// Only the call's one holder answers it (see callLocal), so the send never
+// finds the channel full; were it to, a blocked send would hang an exit or
+// a Stop.
+func answer(ch chan<- callResult, r callResult) {
+	select {
+	case ch <- r:
+	default:
 	}
 }
 
@@ -1039,7 +1040,7 @@ func (n *Node) dispatch(peer string, env *grpcprocv1.Envelope) {
 			n.deadLetter(from, to, nil, ReasonType)
 			return
 		}
-		n.deliver(to, name, item{from: from, body: body, md: env.GetMetadata()})
+		n.deliver(to, name, item{from: from, body: body, md: env.GetMetadata()}, nil)
 	case grpcprocv1.Kind_KIND_CALL:
 		body, err := decodeBody(env)
 		if err != nil {
@@ -1047,7 +1048,7 @@ func (n *Node) dispatch(peer string, env *grpcprocv1.Envelope) {
 			_ = n.reply(to, from, ref, nil, nil, grpcprocv1.Status_STATUS_TYPE, "", true)
 			return
 		}
-		n.deliver(to, name, item{from: from, body: body, md: env.GetMetadata(), ref: ref})
+		n.deliver(to, name, item{from: from, body: body, md: env.GetMetadata(), ref: ref}, nil)
 	case grpcprocv1.Kind_KIND_REPLY:
 		if to.Incarnation != n.id.Incarnation {
 			// A reply to a call of an earlier incarnation of this node,

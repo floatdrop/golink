@@ -116,9 +116,9 @@ func TestStopFailsCallsWaitingOnPeers(t *testing.T) {
 	}
 }
 
-// So does a call still waiting on a process of the node, one that outlives
-// Stop. A call made after Stop goes on as before: a process gone is
-// ErrNoProc, and one still running may answer it.
+// So does a call still waiting on a process of the node that outlives Stop,
+// taken or still queued. A call made after Stop goes on as before: a process
+// gone is ErrNoProc, and one still running may answer it.
 func TestStopFailsLocalCallsStillWaiting(t *testing.T) {
 	n, err := grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}})
 	if err != nil {
@@ -155,19 +155,31 @@ func TestStopFailsLocalCallsStillWaiting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed := make(chan error, 1)
-	go func() {
+	failed := make(chan error, 2)
+	call := func() {
 		_, err := n.Call[*testpb.Ping](context.Background(), stuck, &testpb.Ping{})
 		failed <- err
-	}()
+	}
+	go call()
 	<-called
+	go call() // stays queued
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		if info, _ := n.Process(stuck.PID()); info.Mailbox.Depth == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the second call was never queued")
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	if err := n.Stop(ctx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("stop: %v", err)
 	}
-	if err := <-failed; !errors.Is(err, grpcproc.ErrNodeStopped) {
-		t.Fatalf("got %v", err)
+	for range 2 { // taken, and queued
+		if err := <-failed; !errors.Is(err, grpcproc.ErrNodeStopped) {
+			t.Fatalf("got %v", err)
+		}
 	}
 	if _, err := n.Call[*testpb.Ping](context.Background(), grpcproc.Named[*testpb.Ping]("a", "nobody"), &testpb.Ping{}); !errors.Is(err, grpcproc.ErrNoProc) {
 		t.Fatalf("after stop, no process: %v", err)
