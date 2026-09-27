@@ -36,7 +36,7 @@ type LinkView struct {
 // ProcessView is a process as grpcprocctl shows it and its MCP tools return it.
 type ProcessView struct {
 	PID           string            `json:"pid"`
-	Names         []string          `json:"names,omitempty"`
+	Name          string            `json:"name,omitempty" jsonschema:"the name it is registered under, if any"`
 	Label         string            `json:"label" jsonschema:"what metrics aggregate by; the message type by default"`
 	Type          string            `json:"type" jsonschema:"Go type of the messages it accepts"`
 	Parent        string            `json:"parent,omitempty" jsonschema:"the process that started it, such as its supervisor"`
@@ -119,7 +119,7 @@ func (c *Client) nodeView(n grpcproc.NodeInfo) NodeView {
 
 func (c *Client) processView(p grpcproc.ProcessInfo) ProcessView {
 	return ProcessView{
-		PID: p.PID.String(), Names: p.Names, Label: p.Label, Type: p.Type, Parent: pidString(p.Parent),
+		PID: p.PID.String(), Name: p.Name, Label: p.Label, Type: p.Type, Parent: pidString(p.Parent),
 		State: p.State.String(), Uptime: c.since(p.StartedAt),
 		Mailbox: p.Mailbox.Depth, MailboxPeak: p.Mailbox.Peak, OldestWait: Short(p.Mailbox.OldestAge),
 		Received: p.Received, Sent: p.Sent, CallsInFlight: p.CallsInFlight, LastMessage: p.LastMessage,

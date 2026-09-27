@@ -84,7 +84,7 @@ func TestReadCommands(t *testing.T) {
 		t.Fatalf("limit ignored:\n%s", out)
 	}
 	has(t, ok(t, run(t, f, "ps", "--node", "b", "--name", "ech", "--state", "idle")), "echo")
-	has(t, ok(t, run(t, f, "inspect", "talker")), "names:", "talker", "state:          ready")
+	has(t, ok(t, run(t, f, "inspect", "talker")), "name:", "talker", "state:          ready")
 	has(t, ok(t, run(t, f, "inspect", "--wait", "10ms", "stuck")), "inspect:", "busy", "mailbox:", "(peak")
 	has(t, ok(t, run(t, f, "inspect", f.Echo.String())), "echo")
 	has(t, ok(t, run(t, f, "dot")), "digraph grpcproc", `label="a"`, "rounded,bold", "->")

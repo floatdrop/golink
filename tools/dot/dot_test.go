@@ -13,8 +13,8 @@ func TestRender(t *testing.T) {
 	var b strings.Builder
 	err := dot.Render(&b, []dot.Node{
 		{Name: "a", Processes: []client.ProcessView{
-			{PID: "<a.1.1>", Names: []string{"sup"}, Label: "supervisor"},
-			{PID: "<a.1.2>", Names: []string{"orders"}, Label: "order", Parent: "<a.1.1>", Mailbox: 3, OldestWait: "2s"},
+			{PID: "<a.1.1>", Name: "sup", Label: "supervisor"},
+			{PID: "<a.1.2>", Name: "orders", Label: "order", Parent: "<a.1.1>", Mailbox: 3, OldestWait: "2s"},
 			{PID: "<a.1.3>", Label: `say "hi"`, Parent: "<gone.1.1>"},
 		}},
 		{Name: "b", Processes: []client.ProcessView{

@@ -28,7 +28,7 @@ type Options struct {
 
 const instructions = `These tools inspect a grpcproc cluster: Go processes (goroutines with a mailbox) that message each other across nodes over gRPC, Erlang style.
 
-- A process has a PID, written <node.incarnation.id>, and may have registered names. Its label (the message type by default) groups processes of one kind.
+- A process has a PID, written <node.incarnation.id>, and may have a registered name. Its label (the message type by default) groups processes of one kind.
 - Its mailbox holds messages waiting to be handled. A deep mailbox, or a large oldest_wait, is a backlog: the process cannot keep up, or is stuck in a handler (state running for a long time), or waits on a call (state waiting-reply).
 - get_process with inspect returns what the process publishes about itself (its state machine's state, counters); inspect_error "busy" means it is inside a handler right now.
 - Supervisors (label supervisor) restart children; their inspect lists each child and its restarts.

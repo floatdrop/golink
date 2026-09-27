@@ -340,7 +340,7 @@ func cmdPS(ctx context.Context, a *app, args []string) error {
 	}
 	rows := make([][]string, 0, len(ps))
 	for _, p := range ps {
-		rows = append(rows, []string{p.PID, strings.Join(p.Names, ","), p.Label, p.State, strconv.Itoa(p.Mailbox), p.OldestWait, u(p.Received), u(p.Sent), p.LastMessage, p.Uptime})
+		rows = append(rows, []string{p.PID, p.Name, p.Label, p.State, strconv.Itoa(p.Mailbox), p.OldestWait, u(p.Received), u(p.Sent), p.LastMessage, p.Uptime})
 	}
 	return a.table("PID\tNAME\tLABEL\tSTATE\tMAILBOX\tOLDEST\tRECEIVED\tSENT\tLAST MESSAGE\tUPTIME", rows)
 }
@@ -369,7 +369,7 @@ func cmdInspect(ctx context.Context, a *app, args []string) error {
 	}
 	w := tabwriter.NewWriter(a.env.Stdout, 0, 0, 2, ' ', 0)
 	for _, kv := range [][2]string{
-		{"pid", p.PID}, {"names", strings.Join(p.Names, ", ")}, {"label", p.Label}, {"type", p.Type},
+		{"pid", p.PID}, {"name", p.Name}, {"label", p.Label}, {"type", p.Type},
 		{"parent", p.Parent}, {"state", p.State}, {"uptime", p.Uptime},
 		{"mailbox", fmt.Sprintf("%d (peak %d, oldest %s)", p.Mailbox, p.MailboxPeak, cmp.Or(p.OldestWait, "-"))},
 		{"received", u(p.Received)}, {"sent", u(p.Sent)}, {"calls in flight", strconv.Itoa(int(p.CallsInFlight))},
@@ -427,8 +427,8 @@ func eventLine(e client.EventView) string {
 	parts := []string{t, e.Kind}
 	if e.Process != nil {
 		parts = append(parts, e.Process.PID, "label="+e.Process.Label)
-		if len(e.Process.Names) > 0 {
-			parts = append(parts, "name="+strings.Join(e.Process.Names, ","))
+		if e.Process.Name != "" {
+			parts = append(parts, "name="+e.Process.Name)
 		}
 	}
 	for _, kv := range [][2]string{{"peer", e.Peer}, {"from", e.From}, {"to", e.To}, {"type", e.Type}, {"reason", e.Reason}, {"error", e.Error}} {

@@ -113,7 +113,7 @@ func TestReadTools(t *testing.T) {
 		Processes []client.ProcessView `json:"processes"`
 		Total     int                  `json:"total"`
 	}
-	if msg := call(t, cs, "list_processes", map[string]any{"sort": "mailbox", "limit": 1}, &list); msg != "" || len(list.Processes) != 1 || list.Processes[0].Names[0] != "stuck" || list.Total < 5 {
+	if msg := call(t, cs, "list_processes", map[string]any{"sort": "mailbox", "limit": 1}, &list); msg != "" || len(list.Processes) != 1 || list.Processes[0].Name != "stuck" || list.Total < 5 {
 		t.Fatalf("%+v %s", list, msg)
 	}
 	if msg := call(t, cs, "list_processes", map[string]any{"label": "supervisor"}, &list); msg != "" || list.Total != 1 {

@@ -223,7 +223,7 @@ func TestMetrics(t *testing.T) {
 	for _, n := range []int64{0, -100, -200} {
 		ep, _ := a.Spawn(echo, grpcproc.WithLabel("echo"))
 		if n == 0 {
-			_ = a.Exit(ep, grpcproc.ReasonNormal)
+			_ = a.Exit(t.Context(), ep, grpcproc.ReasonNormal)
 			continue
 		}
 		_ = a.Send(t.Context(), ep, &testpb.Ping{N: n})

@@ -77,7 +77,7 @@ func TestAgainstACluster(t *testing.T) {
 		t.Fatalf("%+v", ps)
 	}
 	ps, _ = c.Processes(ctx, "b", client.Filter{State: "idle"})
-	if len(ps) != 1 || ps[0].Names[0] != "echo" {
+	if len(ps) != 1 || ps[0].Name != "echo" {
 		t.Fatalf("%+v", ps)
 	}
 	if _, err := c.Processes(ctx, "", client.Filter{State: "sleeping"}); err == nil {
@@ -92,7 +92,7 @@ func TestAgainstACluster(t *testing.T) {
 	if err != nil || !strings.Contains(p.InspectError, "busy") {
 		t.Fatalf("%+v %v", p, err)
 	}
-	if p, err = c.Process(ctx, "", f.Echo.String(), false, 0); err != nil || p.Names[0] != "echo" {
+	if p, err = c.Process(ctx, "", f.Echo.String(), false, 0); err != nil || p.Name != "echo" {
 		t.Fatalf("%+v %v", p, err)
 	}
 	if _, err := c.Process(ctx, "", "<bad", false, 0); err == nil {

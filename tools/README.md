@@ -52,7 +52,7 @@ A process that is free answers with whatever it publishes through
 `grpcproc.WithInspect`; a supervisor lists its children:
 
 ```
-names:                 orders-sup
+name:                  orders-sup
 label:                 supervisor
 monitors:              2
   child.payments:      <orders-1.1718.3> permanent restarts=0

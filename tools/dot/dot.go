@@ -6,6 +6,7 @@
 package dot
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"strings"
@@ -50,12 +51,9 @@ func Render(w io.Writer, nodes []Node) error {
 }
 
 func label(p client.ProcessView) string {
-	title := p.Label
-	if len(p.Names) > 0 {
-		title = strings.Join(p.Names, ", ")
-	}
+	title := cmp.Or(p.Name, p.Label)
 	lines := []string{title, p.PID}
-	if len(p.Names) > 0 && p.Label != "" {
+	if p.Name != "" && p.Label != "" {
 		lines = append(lines, p.Label)
 	}
 	if p.Mailbox > 0 {
