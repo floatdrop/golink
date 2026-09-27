@@ -459,18 +459,19 @@ from, and what is left: releases, a cluster-wide name registry.
 ## Performance
 
 Against [GoAkt](https://github.com/tochemey/goakt),
-[Hollywood](https://github.com/anthdm/hollywood) and
-[Proto.Actor](https://github.com/asynkron/protoactor-go) on the same machine
-(Apple M3 Max), remote over TCP on loopback for all; see
-[benchmarks](benchmarks/README.md) for the method and how to read it:
+[Hollywood](https://github.com/anthdm/hollywood),
+[Proto.Actor](https://github.com/asynkron/protoactor-go) and
+[Ergo](https://ergo.services) on the same machine (Apple M3 Max), remote
+over TCP on loopback for all; see [benchmarks](benchmarks/README.md) for the
+method, why Ergo runs with its keepalive off, and how to read it:
 
-| | grpcproc | GoAkt | Hollywood | Proto.Actor |
-| --- | --- | --- | --- | --- |
-| Local send | 93 ns | 106 ns | 58 ns | 189 ns |
-| Local request | 726 ns | 574 ns | 2246 ns | 2321 ns |
-| Remote send | 374 ns | 453 ns | 211 ns | 309 ns |
-| Remote request | 41.8 µs | 34.7 µs | 35.9 µs | 53.8 µs |
-| Remote request, 14 in parallel | 7.1 µs | 10.1 µs | 5.1 µs | 6.9 µs |
+| | grpcproc | GoAkt | Hollywood | Proto.Actor | Ergo |
+| --- | --- | --- | --- | --- | --- |
+| Local send | 96 ns | 95 ns | 59 ns | 200 ns | 198 ns |
+| Local request | 761 ns | 568 ns | 2362 ns | 2451 ns | 3200 ns |
+| Remote send | 382 ns | 520 ns | 197 ns | 340 ns | 551 ns |
+| Remote request | 44.8 µs | 35.9 µs | 37.6 µs | 60.7 µs | 49.6 µs |
+| Remote request, 14 in parallel | 7.5 µs | 10.1 µs | 5.0 µs | 7.0 µs | 6.5 µs |
 
 A mailbox that keeps up, and a local send, allocate nothing.
 
