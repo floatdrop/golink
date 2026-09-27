@@ -388,9 +388,9 @@ func (p *Process[M]) Reply(m Msg[M], resp proto.Message, err error) error {
 	delete(p.open, openCall{m.From, m.ref})
 	p.mu.Unlock()
 	if err != nil {
-		return p.n.reply(p.pid, m.From, m.ref, resp, grpcprocv1.Status_STATUS_ERROR, err.Error())
+		return p.n.reply(p.pid, m.From, m.ref, resp, grpcprocv1.Status_STATUS_ERROR, err.Error(), false)
 	}
-	return p.n.reply(p.pid, m.From, m.ref, resp, grpcprocv1.Status_STATUS_OK, "")
+	return p.n.reply(p.pid, m.From, m.ref, resp, grpcprocv1.Status_STATUS_OK, "", false)
 }
 
 // Exit asks another process, anywhere, to terminate with reason. A first
@@ -715,13 +715,13 @@ func (p *proc) terminate(reason string) {
 	// Whatever is still queued goes nowhere, and a call taken but never
 	// answered never will be: fail them now rather than let callers time out.
 	for c := range open {
-		_ = n.reply(p.pid, c.from, c.ref, nil, grpcprocv1.Status_STATUS_NOPROC, "")
+		_ = n.reply(p.pid, c.from, c.ref, nil, grpcprocv1.Status_STATUS_NOPROC, "", false)
 	}
 	// terminate runs on the process's goroutine, the mailbox's consumer, so
 	// it may collect what Receive had swapped in but not yet taken.
 	for _, it := range append(p.mbox.taken(), p.mbox.close()...) {
 		if it.ref != 0 {
-			_ = n.reply(p.pid, it.from, it.ref, nil, grpcprocv1.Status_STATUS_NOPROC, "")
+			_ = n.reply(p.pid, it.from, it.ref, nil, grpcprocv1.Status_STATUS_NOPROC, "", false)
 		}
 		if it.body != nil {
 			n.deadLetter(it.from, p.pid, it.body, ReasonNoProc)
@@ -737,7 +737,7 @@ func (p *proc) terminate(reason string) {
 		n.subs.publish(Event{Kind: EventExit, Process: info, Reason: reason})
 	}
 	for ref, w := range watchers {
-		_ = n.down(p.pid, w, ref.ID, reason)
+		_ = n.down(p.pid, w, ref.ID, reason, false)
 	}
 	for ref, t := range monitors {
 		if t.name != "" {

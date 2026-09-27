@@ -647,7 +647,9 @@ func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to dest, req 
 	}
 }
 
-func (n *Node) reply(from, to PID, ref uint64, body proto.Message, status grpcprocv1.Status, errText string) error {
+// reply answers a call. dispatching is set when the answer comes from
+// dispatch, on the link the call arrived by; see routeOrCut.
+func (n *Node) reply(from, to PID, ref uint64, body proto.Message, status grpcprocv1.Status, errText string, dispatching bool) error {
 	if to.Node == n.id.Name {
 		n.deliverReply(ref, body, status, errText)
 		return nil
@@ -659,7 +661,7 @@ func (n *Node) reply(from, to PID, ref uint64, body proto.Message, status grpcpr
 			return err
 		}
 	}
-	return n.routeOrCut(to.Node, env)
+	return n.routeOrCut(to.Node, env, dispatching)
 }
 
 // routeOrCut routes a reply or a Down. The peer waits for those over a link
@@ -667,8 +669,32 @@ func (n *Node) reply(from, to PID, ref uint64, body proto.Message, status grpcpr
 // never learn that one was lost. When one cannot be routed, that link goes
 // too, told why: the peer sees this node as unreachable, its calls fail and
 // its monitors fire, as if the connection had broken both ways.
-func (n *Node) routeOrCut(node string, env *grpcprocv1.Envelope) error {
-	err := n.route(context.Background(), node, env)
+//
+// An answer dispatch makes itself (no such process, wrong type) runs on the
+// link the peer's frame came by, holding it: closing that link, as Stop and
+// Disconnect do, waits for the frame. It must not wait for a dial there. With
+// no link to the peer yet, it is queued on the dial, which writes it first,
+// in order with the other answers, once the link is up.
+func (n *Node) routeOrCut(node string, env *grpcprocv1.Envelope, dispatching bool) error {
+	var err error
+	if dispatching {
+		n.mu.Lock()
+		l := n.out[node]
+		if l == nil && !n.stopped {
+			var d *dialOp
+			if d, err = n.dialFor(node); err == nil {
+				d.answers = append(d.answers, env)
+				n.mu.Unlock()
+				return nil
+			}
+		}
+		n.mu.Unlock()
+		if l != nil {
+			err = l.send(env)
+		}
+	} else {
+		err = n.route(context.Background(), node, env)
+	}
 	if le, ok := errors.AsType[*LinkError](err); ok {
 		n.mu.Lock()
 		in := n.in[node]
@@ -702,14 +728,16 @@ func (n *Node) demonitor(from PID, to Target, ref uint64) error {
 	return n.route(context.Background(), pid.Node, env)
 }
 
-func (n *Node) down(from, to PID, ref uint64, reason string) error {
+// down tells a watcher that what it monitors is gone. dispatching is as for
+// reply.
+func (n *Node) down(from, to PID, ref uint64, reason string, dispatching bool) error {
 	if to.Node == n.id.Name {
 		n.deliverDown(from, to, ref, reason)
 		return nil
 	}
 	env := wire(grpcprocv1.Kind_KIND_DOWN, from, to, "")
 	env.Ref, env.Reason = ref, reason
-	return n.routeOrCut(to.Node, env)
+	return n.routeOrCut(to.Node, env, dispatching)
 }
 
 func (n *Node) exit(ctx context.Context, from PID, to Target, reason string) error {
@@ -746,14 +774,14 @@ func (n *Node) deliver(from, to PID, name string, body proto.Message, md Metadat
 	if p == nil {
 		n.deadLetter(from, to, body, ReasonNoProc)
 		if ref != 0 {
-			_ = n.reply(to, from, ref, nil, grpcprocv1.Status_STATUS_NOPROC, "")
+			_ = n.reply(to, from, ref, nil, grpcprocv1.Status_STATUS_NOPROC, "", true)
 		}
 		return
 	}
 	if !p.accept(body) {
 		n.deadLetter(from, p.pid, body, ReasonType)
 		if ref != 0 {
-			_ = n.reply(p.pid, from, ref, nil, grpcprocv1.Status_STATUS_TYPE, "")
+			_ = n.reply(p.pid, from, ref, nil, grpcprocv1.Status_STATUS_TYPE, "", true)
 		}
 		return
 	}
@@ -764,7 +792,7 @@ func (n *Node) deliver(from, to PID, name string, body proto.Message, md Metadat
 	if !p.push(it) {
 		n.deadLetter(from, p.pid, body, ReasonNoProc)
 		if ref != 0 {
-			_ = n.reply(p.pid, from, ref, nil, grpcprocv1.Status_STATUS_NOPROC, "")
+			_ = n.reply(p.pid, from, ref, nil, grpcprocv1.Status_STATUS_NOPROC, "", true)
 		}
 	}
 }
@@ -793,7 +821,7 @@ func (n *Node) deliverMonitor(from, to PID, name string, ref uint64) {
 	r := Ref{Node: from.Node, ID: ref}
 	p := n.lookup(to, name)
 	if p == nil || !p.addWatcher(r, from) {
-		_ = n.down(to, from, ref, ReasonNoProc)
+		_ = n.down(to, from, ref, ReasonNoProc, true)
 	}
 }
 
@@ -850,7 +878,7 @@ func (n *Node) dispatch(peer string, env *grpcprocv1.Envelope) {
 		body, err := decodeBody(env)
 		if err != nil {
 			n.log.Warn("undecodable call", "err", err)
-			_ = n.reply(to, from, ref, nil, grpcprocv1.Status_STATUS_TYPE, "")
+			_ = n.reply(to, from, ref, nil, grpcprocv1.Status_STATUS_TYPE, "", true)
 			return
 		}
 		n.deliver(from, to, name, body, env.GetMetadata(), ref)

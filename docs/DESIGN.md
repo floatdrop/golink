@@ -173,6 +173,9 @@ message Envelope {                                   // one flat message, decode
   that preceded it. The goroutine reading a link dispatches each frame
   itself; a per-link lock held while dispatching and while closing means
   nothing from a closed link is dispatched after its `Down{noconnection}`.
+  So dispatch never waits for a dial: the answers it makes itself (no such
+  process, wrong type) to a peer this node has no link to yet are queued on
+  the dial, and written first, in order, once it is up.
 - **Node identity travels in the stream's metadata** (`name`, `incarnation`,
   protocol version). An `Authorize(peer credentials.AuthInfo, claimed NodeInfo) error`
   hook lets mTLS deployments refuse a node whose certificate does not match the

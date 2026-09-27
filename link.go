@@ -228,6 +228,9 @@ type dialOp struct {
 	l         *outLink
 	err       error
 	forgotten bool // Disconnect or Membership's Up came during the dial; guarded by n.mu
+	// answers are replies and Downs that dispatch made while the dial was
+	// under way, written first once the link is up; guarded by n.mu.
+	answers []*grpcprocv1.Envelope
 }
 
 // getOut returns the link to peer, dialing if there is none. Concurrent
@@ -247,12 +250,28 @@ func (n *Node) getOut(ctx context.Context, peer string) (*outLink, error) {
 		n.mu.Unlock()
 		return nil, err // it would not wait for the dial, so it starts none
 	}
+	d, err := n.dialFor(peer)
+	n.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	select {
+	case <-d.done:
+		return d.l, d.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// dialFor returns the dial to peer, starting one if none is under way, or
+// why sends to peer fail at once. Called with n.mu held, while the node is
+// not stopped and has no link to peer.
+func (n *Node) dialFor(peer string) (*dialOp, error) {
 	d := n.dialing[peer]
 	// While dials to peer fail, sends fail at once rather than wait for one.
 	// The first send after the wait starts the next dial, and waits for it
 	// alone: a hung peer then holds one sender at a time, not all of them.
 	if r := n.backedOff(peer); r != nil && (d != nil || time.Now().Before(r.at)) {
-		n.mu.Unlock()
 		next := "the next dial is under way"
 		if d == nil {
 			next = fmt.Sprintf("next dial in %v", max(time.Until(r.at), time.Millisecond).Round(time.Millisecond))
@@ -265,13 +284,7 @@ func (n *Node) getOut(ctx context.Context, peer string) (*outLink, error) {
 		// Under n.mu, and only while not stopped: Stop's Wait sees every Add.
 		n.dialWG.Go(func() { n.finishDial(peer, d) })
 	}
-	n.mu.Unlock()
-	select {
-	case <-d.done:
-		return d.l, d.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+	return d, nil
 }
 
 // redial is a peer whose last dial failed: sends to it fail at once until at.
@@ -334,6 +347,8 @@ func (n *Node) finishDial(peer string, d *dialOp) {
 	var discard *outLink
 	n.mu.Lock()
 	delete(n.dialing, peer)
+	answers := d.answers
+	d.answers = nil
 	if err != nil {
 		if !n.stopped && !d.forgotten {
 			n.failedDial(peer, err, why)
@@ -344,10 +359,24 @@ func (n *Node) finishDial(peer string, d *dialOp) {
 		if n.stopped {
 			discard, l, err = l, nil, ErrNodeStopped
 		} else {
+			// Ahead of anything a sender queues once it sees the link.
+			for _, env := range answers {
+				l.q.push(env)
+			}
+			answers = nil
 			n.out[peer] = l
 		}
 	}
+	// Answers that will not go: the peer waits for them over its link to
+	// this node, which is cut, as routeOrCut does.
+	var cut *inLink
+	if _, ok := errors.AsType[*LinkError](err); ok && len(answers) > 0 {
+		cut = n.in[peer]
+	}
 	n.mu.Unlock()
+	if cut != nil {
+		cut.abort(errors.Unwrap(err))
+	}
 	if discard != nil {
 		discard.close(ErrNodeStopped) // outside n.mu, as every close
 	}
