@@ -85,3 +85,89 @@ func TestFailedRestartEndsSupervisor(t *testing.T) {
 		t.Fatalf("starts = %d", starts)
 	}
 }
+
+// A restart that fails partway through its group retries it, and the retry
+// brings back every child the first attempt stopped, wherever it stands
+// relative to the one that failed, and still leaves down those the restart
+// rules keep down: a temporary child, and a transient one that finished.
+func TestFailedRestartBringsBackTheWholeGroup(t *testing.T) {
+	crash := func(p *grpcproc.Process[proto.Message]) error {
+		if _, err := p.Receive(); err != nil {
+			return err
+		}
+		return errors.New("crash")
+	}
+	finish := func(*grpcproc.Process[proto.Message]) error { return nil }
+	policies := func(flaky ChildSpec) []ChildSpec {
+		return []ChildSpec{
+			ChildFunc("first", crash), flaky,
+			ChildFunc("temp", crash).WithRestart(Temporary),
+			ChildFunc("trans", finish).WithRestart(Transient),
+			ChildFunc("transrun", crash).WithRestart(Transient),
+			ChildFunc("last", crash),
+		}
+	}
+	cases := []struct {
+		name       string
+		strategy   Strategy
+		children   func(flaky ChildSpec) []ChildSpec
+		crash      string
+		back, gone []string
+	}{
+		{"one_for_all/crash_before", OneForAll, func(f ChildSpec) []ChildSpec {
+			return []ChildSpec{ChildFunc("first", crash), f, ChildFunc("last", crash)}
+		}, "first", []string{"first", "flaky", "last"}, nil},
+		{"rest_for_one/crash_before", RestForOne, func(f ChildSpec) []ChildSpec {
+			return []ChildSpec{ChildFunc("first", crash), f, ChildFunc("last", crash)}
+		}, "first", []string{"first", "flaky", "last"}, nil},
+		{"one_for_all/crash_after", OneForAll, func(f ChildSpec) []ChildSpec {
+			return []ChildSpec{f, ChildFunc("mid", crash), ChildFunc("crasher", crash)}
+		}, "crasher", []string{"flaky", "mid", "crasher"}, nil},
+		{"one_for_all/policies", OneForAll, policies, "first", []string{"first", "flaky", "transrun", "last"}, []string{"temp", "trans"}},
+		{"rest_for_one/policies", RestForOne, policies, "first", []string{"first", "flaky", "transrun", "last"}, []string{"temp", "trans"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			n := grpcproctest.New(t, "a").Node("a")
+			flaky := ChildFunc("flaky", crash)
+			start, starts := flaky.start, 0
+			flaky.start = func(sup *grpcproc.Process[proto.Message]) (grpcproc.PID, grpcproc.Ref, error) {
+				if starts++; starts == 2 {
+					return grpcproc.PID{}, grpcproc.Ref{}, errors.New("cannot start, once")
+				}
+				return start(sup)
+			}
+			if _, err := Supervise(n, Spec{Strategy: tc.strategy, MaxRestarts: 5, Children: tc.children(flaky)}); err != nil {
+				t.Fatal(err)
+			}
+			eventually := func(what string, cond func() bool) {
+				t.Helper()
+				for deadline := time.Now().Add(5 * time.Second); !cond(); time.Sleep(5 * time.Millisecond) {
+					if time.Now().After(deadline) {
+						t.Fatal(what)
+					}
+				}
+			}
+			eventually("trans did not finish", func() bool { _, ok := n.Whereis("trans"); return !ok })
+			before := map[string]grpcproc.PID{}
+			for _, name := range tc.back {
+				pid, ok := n.Whereis(name)
+				if !ok {
+					t.Fatalf("%s is not running", name)
+				}
+				before[name] = pid
+			}
+			if err := n.SendTo(t.Context(), before[tc.crash], &emptypb.Empty{}); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range tc.back {
+				eventually(name+" never came back", func() bool { pid, ok := n.Whereis(name); return ok && pid != before[name] })
+			}
+			for _, name := range tc.gone {
+				if _, ok := n.Whereis(name); ok {
+					t.Fatalf("%s came back", name)
+				}
+			}
+		})
+	}
+}

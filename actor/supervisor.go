@@ -171,6 +171,7 @@ type kid struct {
 	pid      grpcproc.PID
 	ref      grpcproc.Ref
 	running  bool
+	pending  bool // the restart in progress still owes it a start; false whenever none is
 	restarts int
 }
 
@@ -222,7 +223,7 @@ func (s *supervisor) start(k *kid) error {
 	if err != nil {
 		return err
 	}
-	k.pid, k.ref, k.running = pid, ref, true
+	k.pid, k.ref, k.running, k.pending = pid, ref, true, false
 	return nil
 }
 
@@ -265,24 +266,25 @@ func (s *supervisor) restart(i int) error {
 			"restarts", len(s.history), "within", s.spec.Within)
 		return &grpcproc.ExitError{Reason: ReasonMaxRestarts}
 	}
-	group := []int{i}
+	lo, hi := i, i+1
 	switch s.spec.Strategy {
 	case OneForAll:
-		group = indexes(0, len(s.kids))
+		lo, hi = 0, len(s.kids)
 	case RestForOne:
-		group = indexes(i, len(s.kids))
+		hi = len(s.kids)
 	}
 	// Only what was running comes back: a transient child that had already
-	// finished stays finished, and a temporary one is stopped for good.
-	running := make([]bool, len(s.kids))
-	for j := len(group) - 1; j >= 0; j-- {
-		k := s.kids[group[j]]
-		running[group[j]] = k.running
+	// finished stays finished, and a temporary one is stopped for good. What
+	// this restart stops stays due until it starts again, so if a start
+	// fails, the retry still brings back the children after it.
+	for j := hi - 1; j >= lo; j-- {
+		k := s.kids[j]
+		k.pending = k.pending || j == i || (k.running && k.spec.Restart != Temporary)
 		s.stop(k)
 	}
-	for _, j := range group {
+	for j := lo; j < hi; j++ {
 		k := s.kids[j]
-		if j != i && (!running[j] || k.spec.Restart == Temporary) {
+		if !k.pending {
 			continue
 		}
 		k.restarts++
@@ -292,14 +294,6 @@ func (s *supervisor) restart(i int) error {
 		}
 	}
 	return nil
-}
-
-func indexes(from, to int) []int {
-	out := make([]int, 0, to-from)
-	for i := from; i < to; i++ {
-		out = append(out, i)
-	}
-	return out
 }
 
 func (s *supervisor) stopAll() {
