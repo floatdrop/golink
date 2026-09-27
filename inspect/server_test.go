@@ -474,7 +474,7 @@ func TestEventConversions(t *testing.T) {
 		got := inspect.Event(inspect.EventToProto(ev))
 		if got.Kind != ev.Kind || got.Reason != ev.Reason || got.Peer != ev.Peer || got.Err != ev.Err ||
 			got.From != ev.From || got.Type != ev.Type || got.Missed != 3 || !got.Time.Equal(now) ||
-			got.Process.PID != ev.Process.PID || got.Process.LogLevel != ev.Process.LogLevel {
+			got.Process.PID != ev.Process.PID || got.Process.LogLevel != ev.Process.LogLevel || !got.Process.StartedAt.Equal(ev.Process.StartedAt) {
 			t.Errorf("%v: got %+v", ev.Kind, got)
 		}
 	}
@@ -489,6 +489,18 @@ func TestEventConversions(t *testing.T) {
 	}
 	if p := inspect.ProcessInfo(&inspectv1.ProcessInfo{State: inspectv1.ProcessState_PROCESS_STATE_EXITING}); p.State != grpcproc.StateExiting {
 		t.Errorf("exiting became %v", p.State)
+	}
+	// A zero time goes as an absent timestamp, and an absent one comes back
+	// zero, in every message: a process's start and an event's time used to
+	// come back as the Unix epoch.
+	if e := inspect.EventToProto(grpcproc.Event{Kind: grpcproc.EventSpawn}); e.GetTime() != nil || e.GetSpawned().GetStartedAt() != nil {
+		t.Errorf("%v", e)
+	}
+	if p := inspect.ProcessInfo(&inspectv1.ProcessInfo{}); !p.StartedAt.IsZero() || !p.Parent.IsZero() {
+		t.Errorf("%+v", p)
+	}
+	if e := inspect.Event(&inspectv1.Event{}); !e.Time.IsZero() {
+		t.Errorf("%+v", e)
 	}
 	// Zero times stay zero across the wire, and set ones cross it.
 	if n := inspect.NodeInfo(inspect.NodeInfoToProto(grpcproc.NodeInfo{Links: []grpcproc.LinkInfo{{}}})); !n.StartedAt.IsZero() || !n.Links[0].EstablishedAt.IsZero() || !n.Links[0].RetryAt.IsZero() {
@@ -540,5 +552,26 @@ func TestWatchCapsItsBuffer(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// An inspect timeout of 0 or less is the default, as an absent one is: a
+// negative one used to expire before the process could answer.
+func TestNegativeInspectTimeout(t *testing.T) {
+	c := cluster(t, nil, "a")
+	addr, err := c.Node("a").Spawn(func(p *grpcproc.Process[proto.Message]) error {
+		_, err := p.Receive()
+		return err
+	}, grpcproc.WithInspect(func() map[string]string { return map[string]string{"state": "idle"} }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 20 {
+		resp, err := client(c, "a").GetProcess(t.Context(), &inspectv1.GetProcessRequest{
+			Target: byPID(addr.PID()), Inspect: true, InspectTimeout: durationpb.New(-time.Second),
+		})
+		if err != nil || resp.GetInspect()["state"] != "idle" {
+			t.Fatalf("%v %v", resp, err)
+		}
 	}
 }

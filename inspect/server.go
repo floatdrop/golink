@@ -197,7 +197,7 @@ func (s *Server) GetProcess(ctx context.Context, req *inspectv1.GetProcessReques
 	}
 	resp := &inspectv1.GetProcessResponse{Process: processInfoTo(info)}
 	if req.GetInspect() {
-		timeout := cmp.Or(req.GetInspectTimeout().AsDuration(), defaultInspectTimeout)
+		timeout := cmp.Or(max(req.GetInspectTimeout().AsDuration(), 0), defaultInspectTimeout) // 0 or less: the default
 		ictx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 		m, err := s.node.Inspect(ictx, pid)

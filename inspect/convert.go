@@ -35,11 +35,20 @@ func nodeIDFrom(n *inspectv1.NodeID) grpcproc.NodeID {
 	return grpcproc.NodeID{Name: n.GetName(), Incarnation: n.GetIncarnation()}
 }
 
+// timeTo and timeFrom carry a zero time as an absent timestamp, so that it
+// stays zero across the wire rather than become the Unix epoch.
 func timeTo(t time.Time) *timestamppb.Timestamp {
 	if t.IsZero() {
 		return nil
 	}
 	return timestamppb.New(t)
+}
+
+func timeFrom(ts *timestamppb.Timestamp) time.Time {
+	if ts == nil {
+		return time.Time{}
+	}
+	return ts.AsTime()
 }
 
 func stateTo(s grpcproc.ProcessState) inspectv1.ProcessState {
@@ -103,7 +112,7 @@ func processInfoTo(p grpcproc.ProcessInfo) *inspectv1.ProcessInfo {
 		Type:      p.Type,
 		Parent:    pidTo(p.Parent),
 		State:     stateTo(p.State),
-		StartedAt: timestamppb.New(p.StartedAt),
+		StartedAt: timeTo(p.StartedAt),
 		Mailbox: &inspectv1.Mailbox{
 			Depth:     uint32(p.Mailbox.Depth),
 			Peak:      uint32(p.Mailbox.Peak),
@@ -121,7 +130,7 @@ func processInfoTo(p grpcproc.ProcessInfo) *inspectv1.ProcessInfo {
 }
 
 func eventTo(ev grpcproc.Event) *inspectv1.Event {
-	out := &inspectv1.Event{Time: timestamppb.New(ev.Time), Missed: ev.Missed}
+	out := &inspectv1.Event{Time: timeTo(ev.Time), Missed: ev.Missed}
 	switch ev.Kind {
 	case grpcproc.EventSpawn:
 		out.Kind = &inspectv1.Event_Spawned{Spawned: processInfoTo(ev.Process)}
@@ -148,46 +157,40 @@ func NodeInfo(n *inspectv1.NodeInfo) grpcproc.NodeInfo {
 		Spawned:     n.GetSpawned(),
 		Exited:      n.GetExited(),
 		DeadLetters: n.GetDeadLetters(),
-	}
-	if n.GetStartedAt() != nil {
-		out.StartedAt = n.GetStartedAt().AsTime()
+		StartedAt:   timeFrom(n.GetStartedAt()),
 	}
 	for _, l := range n.GetLinks() {
-		li := grpcproc.LinkInfo{
-			Peer:       nodeIDFrom(l.GetPeer()),
-			Outbound:   l.GetOutbound(),
-			State:      linkStateFrom(l.GetState()),
-			Reconnects: l.GetReconnects(),
-			Messages:   l.GetMessages(),
-			Bytes:      l.GetBytes(),
-			LastError:  l.GetLastError(),
-			Queued:     int(l.GetQueued()),
-		}
-		if l.GetEstablishedAt() != nil {
-			li.EstablishedAt = l.GetEstablishedAt().AsTime()
-		}
-		if l.GetRetryAt() != nil {
-			li.RetryAt = l.GetRetryAt().AsTime()
-		}
-		out.Links = append(out.Links, li)
+		out.Links = append(out.Links, grpcproc.LinkInfo{
+			Peer:          nodeIDFrom(l.GetPeer()),
+			Outbound:      l.GetOutbound(),
+			State:         linkStateFrom(l.GetState()),
+			EstablishedAt: timeFrom(l.GetEstablishedAt()),
+			Reconnects:    l.GetReconnects(),
+			Messages:      l.GetMessages(),
+			Bytes:         l.GetBytes(),
+			LastError:     l.GetLastError(),
+			RetryAt:       timeFrom(l.GetRetryAt()),
+			Queued:        int(l.GetQueued()),
+		})
 	}
 	return out
 }
 
 // ProcessInfo converts a wire ProcessInfo back to grpcproc's.
 func ProcessInfo(p *inspectv1.ProcessInfo) grpcproc.ProcessInfo {
-	out := grpcproc.ProcessInfo{
-		PID:   pidFrom(p.GetPid()),
-		Name:  p.GetName(),
-		Label: p.GetLabel(),
-		Type:  p.GetType(),
-		State: stateFrom(p.GetState()),
+	return grpcproc.ProcessInfo{
+		PID:    pidFrom(p.GetPid()),
+		Parent: pidFrom(p.GetParent()), // the zero PID for none
+		Name:   p.GetName(),
+		Label:  p.GetLabel(),
+		Type:   p.GetType(),
+		State:  stateFrom(p.GetState()),
 		Mailbox: grpcproc.MailboxInfo{
 			Depth:     int(p.GetMailbox().GetDepth()),
 			Peak:      int(p.GetMailbox().GetPeak()),
 			OldestAge: p.GetMailbox().GetOldestAge().AsDuration(),
 		},
-		StartedAt:     p.GetStartedAt().AsTime(),
+		StartedAt:     timeFrom(p.GetStartedAt()),
 		Received:      p.GetReceived(),
 		Sent:          p.GetSent(),
 		CallsInFlight: p.GetCallsInFlight(),
@@ -197,15 +200,11 @@ func ProcessInfo(p *inspectv1.ProcessInfo) grpcproc.ProcessInfo {
 		Wakeups:       p.GetWakeups(),
 		LogLevel:      slog.Level(p.GetLogLevel()),
 	}
-	if p.GetParent() != nil {
-		out.Parent = pidFrom(p.GetParent())
-	}
-	return out
 }
 
 // Event converts a wire Event back to grpcproc's.
 func Event(e *inspectv1.Event) grpcproc.Event {
-	out := grpcproc.Event{Time: e.GetTime().AsTime(), Missed: e.GetMissed()}
+	out := grpcproc.Event{Time: timeFrom(e.GetTime()), Missed: e.GetMissed()}
 	switch k := e.GetKind().(type) {
 	case *inspectv1.Event_Spawned:
 		out.Kind, out.Process = grpcproc.EventSpawn, ProcessInfo(k.Spawned)
