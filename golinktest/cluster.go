@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -175,7 +176,9 @@ func (c *Cluster) Heal(a, b string) {
 }
 
 // Kill stops name abruptly, as a crash would: no Down{shutdown} reaches
-// anyone; peers see their links break.
+// anyone; peers see their links break. They have by the time Kill returns,
+// monitors fired and calls failed, so the next send to name fails, and after
+// Restart reaches the new node.
 func (c *Cluster) Kill(name string) {
 	c.t.Helper()
 	c.mu.Lock()
@@ -185,11 +188,40 @@ func (c *Cluster) Kill(name string) {
 		c.t.Fatalf("golinktest: no running node %q", name)
 	}
 	m.dead = true
+	var peers []*golink.Node
+	for _, other := range c.nodes {
+		if !other.dead {
+			peers = append(peers, other.node)
+		}
+	}
 	c.mu.Unlock()
+
+	// A peer linked to name reports one link-down once it has torn the
+	// links down, whoever notices first: its own side, or Disconnect below.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var linked []<-chan golink.Event
+	for _, peer := range peers {
+		events := peer.Subscribe(ctx, 1024)
+		if slices.Contains(peer.Peers(), name) {
+			linked = append(linked, events)
+		}
+	}
+
 	for _, peer := range m.node.Peers() {
 		m.node.Disconnect(peer)
 	}
 	stopMember(m, 100*time.Millisecond)
+	for _, peer := range peers {
+		peer.Disconnect(name)
+	}
+	for _, events := range linked {
+		for e := range events {
+			if e.Kind == golink.EventLinkDown && e.Peer.Name == name {
+				break
+			}
+		}
+	}
 }
 
 // Stop stops name gracefully: watchers of its processes get Down{shutdown}.

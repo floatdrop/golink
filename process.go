@@ -737,6 +737,15 @@ func (p *proc) terminate(reason string) {
 			n.deadLetter(it.from, p.pid, it.body, ReasonNoProc)
 		}
 	}
+	// The exit is reported before its watchers hear of it, so an observer
+	// sees it before anything it causes: a supervisor's restart, say.
+	if n.hooks != nil || n.subs.active() {
+		info := p.info()
+		if n.hooks != nil {
+			n.hooks.OnExit(info, reason)
+		}
+		n.subs.publish(Event{Kind: EventExit, Process: info, Reason: reason})
+	}
 	for ref, w := range watchers {
 		_ = n.down(p.pid, w, ref.ID, reason)
 	}
@@ -746,13 +755,6 @@ func (p *proc) terminate(reason string) {
 		} else {
 			_ = n.demonitor(p.pid, t.pid, ref.ID)
 		}
-	}
-	if n.hooks != nil || n.subs.active() {
-		info := p.info()
-		if n.hooks != nil {
-			n.hooks.OnExit(info, reason)
-		}
-		n.subs.publish(Event{Kind: EventExit, Process: info, Reason: reason})
 	}
 }
 

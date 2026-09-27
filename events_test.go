@@ -2,6 +2,8 @@ package golink_test
 
 import (
 	"context"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -99,4 +101,51 @@ func TestLinkDownWithoutError(t *testing.T) {
 	}
 	c.Stop("b")
 	nextEvent(t, events, golink.EventLinkDown)
+}
+
+// orderHooks records spawns and exits in the order the node reports them,
+// taking its time over each exit.
+type orderHooks struct {
+	golink.NopHooks
+	mu  sync.Mutex
+	log []string
+}
+
+func (h *orderHooks) OnSpawn(info golink.ProcessInfo) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.log = append(h.log, "spawn "+info.Label)
+}
+
+func (h *orderHooks) OnExit(info golink.ProcessInfo, _ string) {
+	time.Sleep(10 * time.Millisecond)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.log = append(h.log, "exit "+info.Label)
+}
+
+func TestExitReportedBeforeItsConsequences(t *testing.T) {
+	// A watcher that replaces what it monitors, as a supervisor does: the
+	// exit must be reported (hooks, then events) before the replacement's
+	// spawn, however long reporting it takes.
+	h := &orderHooks{}
+	a := golinktest.NewWith(t, []golinktest.Option{golinktest.WithHooks(h)}, "a").Node("a")
+	victim, _ := golink.Spawn(a, echo, golink.WithLabel("victim"))
+	done := make(chan struct{})
+	_, _ = golink.Spawn(a, func(p *golink.Process[proto.Message]) error {
+		defer close(done)
+		p.Monitor(victim)
+		_ = p.Exit(victim, "boom")
+		if _, err := p.Receive(); err != nil {
+			return err
+		}
+		_, err := golink.Spawn(a, echo, golink.WithLabel("replacement"))
+		return err
+	}, golink.WithLabel("watcher"))
+	<-done
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if i, j := slices.Index(h.log, "exit victim"), slices.Index(h.log, "spawn replacement"); i < 0 || j < 0 || i > j {
+		t.Fatal(h.log)
+	}
 }
