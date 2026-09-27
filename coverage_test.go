@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -130,7 +131,7 @@ func TestStopTimesOut(t *testing.T) {
 	close(block)
 }
 
-func TestProcessAccessorsAndRegistry(t *testing.T) {
+func TestProcessAccessorsAndNames(t *testing.T) {
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithLogger(log)}, "a")
@@ -140,25 +141,17 @@ func TestProcessAccessorsAndRegistry(t *testing.T) {
 		ready <- p
 		_, err := p.Receive()
 		return err
-	})
+	}, grpcproc.WithName("one"))
 	p := <-ready
 	if p.PID() != addr.PID() || p.Node() != a || p.Addr() != addr || p.Context().Err() != nil {
 		t.Fatal("accessors")
 	}
-	if err := p.Register("one"); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.Register("one"); !errors.Is(err, grpcproc.ErrNameTaken) {
-		t.Fatal(err)
+	if pid, ok := a.Whereis("one"); !ok || pid != addr.PID() {
+		t.Fatal("whereis")
 	}
 	info, _ := a.Process(addr.PID())
-	if !info.Parent.IsZero() || len(info.Names) != 1 || info.LogLevel != slog.LevelInfo {
+	if !info.Parent.IsZero() || !slices.Equal(info.Names, []string{"one"}) || info.LogLevel != slog.LevelInfo {
 		t.Fatalf("%+v", info)
-	}
-	a.Unregister("one")
-	a.Unregister("one") // idempotent
-	if _, ok := a.Whereis("one"); ok {
-		t.Fatal("unregister")
 	}
 	// Per-process log level: the node's handler is at Info, so debug is dropped
 	// by default; a process can be made more verbose, or quieter, on its own.
@@ -191,13 +184,18 @@ func TestProcessAccessorsAndRegistry(t *testing.T) {
 	if m, err := a.Inspect(ctx(t), addr.PID()); err != nil || m != nil {
 		t.Fatalf("%v %v", m, err)
 	}
+	// The exit event is published once the process is gone and its name free.
+	events := a.Subscribe(t.Context(), 16)
 	if err := a.Exit(addr, grpcproc.ReasonKilled); err != nil {
 		t.Fatal(err)
 	}
-	<-p.Context().Done()
-	time.Sleep(20 * time.Millisecond)
-	if err := p.Register("late"); !errors.Is(err, grpcproc.ErrNoProc) {
-		t.Fatal(err)
+	for e := range events {
+		if e.Kind == grpcproc.EventExit && e.Process.PID == addr.PID() {
+			break
+		}
+	}
+	if _, ok := a.Whereis("one"); ok {
+		t.Fatal("a name outlived its process")
 	}
 	if _, err := a.Inspect(ctx(t), addr.PID()); !errors.Is(err, grpcproc.ErrNoProc) {
 		t.Fatal(err)

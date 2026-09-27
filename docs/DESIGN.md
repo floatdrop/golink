@@ -180,8 +180,7 @@ func (p *Process[M]) Reply(m Msg[M], resp proto.Message, err error) error   // m
 func (p *Process[M]) Monitor(to Target) Ref
 func (p *Process[M]) Demonitor(ref Ref)
 func (p *Process[M]) Exit(to Target, reason string) error
-func (p *Process[M]) Register(name string) error
-func (p *Process[M]) Log() *slog.Logger        // pid, name, label attrs attached
+func (p *Process[M]) Log() *slog.Logger        // pid and label attrs attached
 func (p *Process[M]) Context() context.Context // cancelled on Exit / node stop
 
 type Msg[M proto.Message] struct {

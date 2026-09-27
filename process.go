@@ -8,7 +8,6 @@ import (
 	"maps"
 	"reflect"
 	"runtime/debug"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -68,7 +67,7 @@ type proc struct {
 	monitors map[Ref]monitorTarget // whom I monitor
 	open     map[openCall]struct{} // calls taken from the mailbox and not yet answered
 	timers   map[*Timer]struct{}   // SendAfter timers not yet fired
-	names    []string              // guarded by n.mu
+	name     string                // WithName; fixed at spawn
 }
 
 type openCall struct {
@@ -91,6 +90,8 @@ type spawnOpts struct {
 }
 
 // WithName registers the process under name on its node before it runs.
+// The name is held until the process exits; while another process holds it,
+// spawning fails with ErrNameTaken.
 func WithName(name string) SpawnOption { return func(o *spawnOpts) { o.name = name } }
 
 // WithLabel tags the process with a low-cardinality label, the key metrics
@@ -181,6 +182,7 @@ func spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts []SpawnOpt
 	p := &proc{
 		n:       n,
 		pid:     PID{Node: n.id.Name, Incarnation: n.id.Incarnation, ID: id},
+		name:    o.name,
 		label:   o.label,
 		typ:     typ,
 		parent:  parentPID(parent),
@@ -234,7 +236,6 @@ func spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts []SpawnOpt
 			return fail(ErrNameTaken)
 		}
 		n.names[o.name] = p
-		p.names = append(p.names, o.name)
 	}
 	n.procs[id] = p
 	n.wg.Add(1)
@@ -270,22 +271,6 @@ func (p *proc) Context() context.Context { return p.ctx }
 // Log returns a logger with the process's pid and label attached. Its
 // threshold can be changed at runtime with Node.SetLogLevel.
 func (p *proc) Log() *slog.Logger { return p.log }
-
-// Register binds name to this process on its node.
-func (p *proc) Register(name string) error {
-	n := p.n
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	if n.procs[p.pid.ID] != p {
-		return ErrNoProc
-	}
-	if _, taken := n.names[name]; taken {
-		return ErrNameTaken
-	}
-	n.names[name] = p
-	p.names = append(p.names, name)
-	return nil
-}
 
 // Receive blocks until a message or a Down arrives, or the process is told
 // to exit. The error is then context.Canceled (node stop) or an *ExitError.
@@ -587,9 +572,10 @@ func (p *proc) info() ProcessInfo {
 	p.mu.Lock()
 	monitors, watchers := len(p.monitors), len(p.watchers)
 	p.mu.Unlock()
-	p.n.mu.Lock()
-	names := slices.Clone(p.names)
-	p.n.mu.Unlock()
+	var names []string
+	if p.name != "" {
+		names = []string{p.name}
+	}
 	info := ProcessInfo{
 		PID:           p.pid,
 		Names:         names,
@@ -624,12 +610,6 @@ func (p *proc) logLevel() slog.Level {
 		return slog.Level(p.level.Load())
 	}
 	return slog.LevelInfo
-}
-
-func (p *proc) dropName(name string) {
-	if i := slices.Index(p.names, name); i >= 0 {
-		p.names = slices.Delete(p.names, i, i+1)
-	}
 }
 
 func (p *proc) addWatcher(ref Ref, w PID) bool {
@@ -732,11 +712,7 @@ func (p *proc) terminate(reason string) {
 	n := p.n
 	n.mu.Lock()
 	delete(n.procs, p.pid.ID)
-	for _, name := range p.names {
-		if n.names[name] == p {
-			delete(n.names, name)
-		}
-	}
+	delete(n.names, p.name) // only its holder's exit frees a name
 	n.mu.Unlock()
 	n.exited.Add(1)
 

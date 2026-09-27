@@ -325,16 +325,6 @@ func (n *Node) Whereis(name string) (PID, bool) {
 	return PID{}, false
 }
 
-// Unregister removes a name binding on this node.
-func (n *Node) Unregister(name string) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	if p := n.names[name]; p != nil {
-		delete(n.names, name)
-		p.dropName(name)
-	}
-}
-
 // Processes snapshots every local process, ordered by PID.
 func (n *Node) Processes() []ProcessInfo {
 	n.mu.Lock()
