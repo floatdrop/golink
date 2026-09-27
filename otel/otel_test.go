@@ -319,6 +319,31 @@ func TestDownIsTraced(t *testing.T) {
 	}
 }
 
+func TestExitedIsTraced(t *testing.T) {
+	e := setup(t)
+	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithHooks(e.hooks)}, "a")
+	a := c.Node("a")
+	ep, _ := a.Spawn(echo)
+	got := make(chan struct{})
+	_, _ = a.Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
+		p.SetTrapExit(true)
+		p.Link(ep)
+		_ = p.Exit(ep, "stop")
+		if _, err := p.Receive(); err != nil {
+			return err
+		}
+		close(got)
+		_, err := p.Receive()
+		return err
+	}, grpcproc.WithLabel("linker"))
+	<-got
+	time.Sleep(20 * time.Millisecond)
+	s := span(t, e.spans.Ended(), "process grpcproc.Exited", "linker")
+	if attr(s, "grpcproc.reason") != "stop" || attr(s, "grpcproc.exited.pid") != ep.PID().String() {
+		t.Fatalf("%v", s.Attributes())
+	}
+}
+
 func TestClassification(t *testing.T) {
 	reasons := map[string]string{
 		grpcproc.ReasonNormal: "normal", grpcproc.ReasonKilled: "killed", grpcproc.ReasonShutdown: "shutdown",

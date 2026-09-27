@@ -195,8 +195,11 @@ func (h *Hooks) OnReceive(r grpcproc.ReceiveInfo, md grpcproc.Metadata) (grpcpro
 	h.mailboxWait.Record(context.Background(), r.Waited.Seconds(), label)
 
 	typ, kind := typeOf(r.Body), trace.SpanKindConsumer
-	if r.Down != nil {
+	switch {
+	case r.Down != nil:
 		typ = "grpcproc.Down"
+	case r.Exited != nil:
+		typ = "grpcproc.Exited"
 	}
 	if r.Call {
 		kind = trace.SpanKindServer
@@ -210,8 +213,11 @@ func (h *Hooks) OnReceive(r grpcproc.ReceiveInfo, md grpcproc.Metadata) (grpcpro
 			AttrPID.String(r.PID.String()),
 			attribute.Float64("grpcproc.mailbox.wait", r.Waited.Seconds()),
 		))
-	if r.Down != nil {
+	switch {
+	case r.Down != nil:
 		span.SetAttributes(AttrReason.String(r.Down.Reason), attribute.String("grpcproc.down.pid", r.Down.PID.String()))
+	case r.Exited != nil:
+		span.SetAttributes(AttrReason.String(r.Exited.Reason), attribute.String("grpcproc.exited.pid", r.Exited.PID.String()))
 	}
 	return h.inject(ctx, md), func(err error) {
 		if err != nil {

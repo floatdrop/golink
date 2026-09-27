@@ -24,6 +24,7 @@ defer reg.Unregister()
 | `Call` | `call <message type>` | client | the context the sender carries |
 | a process takes a message | `process <message type>` | consumer (server for a call) | the sender's span |
 | a process takes a `Down` | `process grpcproc.Down` | consumer | — |
+| a process that traps exits takes an `Exited` | `process grpcproc.Exited` | consumer | — |
 
 A handling span lasts until the process calls `Receive` again, or exits (with
 an error status if abnormally). Everything the process sends meanwhile is
