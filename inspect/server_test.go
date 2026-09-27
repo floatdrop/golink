@@ -167,6 +167,23 @@ func TestListProcessesFilters(t *testing.T) {
 	}
 }
 
+// The Inspector reports an inspect function that panicked, which ended its
+// process, as the process's inspect error.
+func TestGetProcessWhoseInspectPanics(t *testing.T) {
+	c := cluster(t, nil, "a")
+	addr, err := c.Node("a").Spawn(func(p *grpcproc.Process[proto.Message]) error {
+		_, err := p.Receive()
+		return err
+	}, grpcproc.WithInspect(func() map[string]string { panic("inspect") }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client(c, "a").GetProcess(t.Context(), &inspectv1.GetProcessRequest{Target: byPID(addr.PID()), Inspect: true})
+	if err != nil || !strings.Contains(resp.GetInspectError(), "inspect function panicked") {
+		t.Fatalf("%v %v", resp, err)
+	}
+}
+
 func TestGetProcess(t *testing.T) {
 	c := cluster(t, nil, "a", "b")
 	b := c.Node("b")

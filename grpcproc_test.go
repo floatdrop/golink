@@ -879,3 +879,31 @@ func TestReplyToAnEarlierIncarnationIsDropped(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// An inspect function that panics ends its process, as any panic in it
+// does, and Inspect says so at once rather than wait on an answer that will
+// not come.
+func TestInspectOfAProcessThatPanicsAnswering(t *testing.T) {
+	a := grpcproctest.New(t, "a").Node("a")
+	events := a.Subscribe(t.Context(), 16)
+	addr, err := a.Spawn(func(p *grpcproc.Process[proto.Message]) error {
+		_, err := p.Receive()
+		return err
+	}, grpcproc.WithInspect(func() map[string]string { panic("inspect") }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if _, err := a.Inspect(ctx, addr.PID()); !errors.Is(err, grpcproc.ErrNoProc) || !strings.Contains(err.Error(), "inspect function panicked") {
+		t.Fatalf("got %v", err)
+	}
+	for e := range events {
+		if e.Kind == grpcproc.EventExit && e.Process.PID == addr.PID() {
+			if e.Reason != "panic: inspect" {
+				t.Fatalf("exited with %q", e.Reason)
+			}
+			return
+		}
+	}
+}

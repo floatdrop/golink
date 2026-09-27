@@ -101,7 +101,9 @@ func WithLabel(label string) SpawnOption { return func(o *spawnOpts) { o.label =
 
 // WithInspect lets the process publish what it currently believes. fn runs
 // on the process's own goroutine, inside Receive, so it may read the
-// process's state without locking. See Node.Inspect.
+// process's state without locking. A panic in fn is the process's own: it
+// exits with reason "panic: …", and Inspect returns ErrNoProc. See
+// Node.Inspect.
 func WithInspect(fn func() map[string]string) SpawnOption {
 	return func(o *spawnOpts) { o.inspect = fn }
 }
@@ -523,6 +525,9 @@ func (p *proc) took(it item) item {
 }
 
 func (p *proc) serveInspect(r inspectReq) {
+	// Closed however this ends: if p.inspect panics, nothing is sent, the
+	// process exits, and the closed channel tells inspectNow not to wait.
+	defer close(r.ch)
 	var m map[string]string
 	if p.inspect != nil {
 		m = p.inspect()
@@ -540,7 +545,10 @@ func (p *proc) inspectNow(ctx context.Context) (map[string]string, error) {
 		return nil, ErrNoProc
 	}
 	select {
-	case m := <-r.ch:
+	case m, ok := <-r.ch:
+		if !ok {
+			return nil, fmt.Errorf("grpcproc: inspect %s: inspect function panicked: %w", p.pid, ErrNoProc)
+		}
 		return m, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()

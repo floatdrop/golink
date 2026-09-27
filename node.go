@@ -401,7 +401,9 @@ func (n *Node) Process(pid PID) (ProcessInfo, bool) {
 // Inspect asks a local process what it currently believes: the map its
 // WithInspect function returns, produced on the process's own goroutine
 // between two messages. A process busy in a handler answers when it next
-// calls Receive; ctx bounds the wait.
+// calls Receive; ctx bounds the wait, and the error then wraps ctx.Err(). A
+// process that is gone, or exits before answering (its inspect function
+// panicked), is ErrNoProc.
 func (n *Node) Inspect(ctx context.Context, pid PID) (map[string]string, error) {
 	p := n.local(pid)
 	if p == nil {
