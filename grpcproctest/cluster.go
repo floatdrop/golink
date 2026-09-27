@@ -166,12 +166,15 @@ func (c *Cluster) Partition(a, b string) {
 	c.mu.Lock()
 	c.cut[[2]string{a, b}] = true
 	c.cut[[2]string{b, a}] = true
+	// Whether each runs is read under the lock that Stop and Kill write it
+	// under.
 	ma, mb := c.nodes[a], c.nodes[b]
+	upA, upB := ma != nil && !ma.dead, mb != nil && !mb.dead
 	c.mu.Unlock()
-	if ma != nil && !ma.dead {
+	if upA {
 		ma.node.Disconnect(b)
 	}
-	if mb != nil && !mb.dead {
+	if upB {
 		mb.node.Disconnect(a)
 	}
 }
@@ -241,7 +244,8 @@ func (c *Cluster) Kill(name string) {
 	}
 }
 
-// Stop stops name gracefully: watchers of its processes get Down{shutdown}.
+// Stop stops name gracefully: watchers of its processes get Down{shutdown},
+// or Down{noconnection} if a Partition breaks their link meanwhile.
 func (c *Cluster) Stop(name string) {
 	c.t.Helper()
 	c.mu.Lock()
@@ -301,11 +305,18 @@ func (c *Cluster) start(name string) *grpcproc.Node {
 		register(node, srv)
 	}
 	go func() { _ = srv.Serve(ln) }()
+	m.node = node
 	if err := node.Start(context.Background()); err != nil {
+		stopMember(m, 2*time.Second) // it is in no list Cleanup stops
 		c.t.Fatal(err)
 	}
-	m.node = node
 	c.mu.Lock()
+	if cur := c.nodes[name]; cur != nil && !cur.dead {
+		// A Restart that ran alongside this one got there first.
+		c.mu.Unlock()
+		stopMember(m, 2*time.Second)
+		c.t.Fatalf("grpcproctest: node %q is running", name)
+	}
 	c.nodes[name] = m
 	c.mu.Unlock()
 	return node
