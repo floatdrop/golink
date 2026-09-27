@@ -22,8 +22,8 @@ node, err := grpcproc.NewNode(grpcproc.Config{
 node.Start(ctx) // registers; Stop withdraws
 ```
 
-One `Cluster` value serves every node of a process, and the Inspector's peer
-dialer too: `inspect.NewDialer(cluster, dialOptions...)`.
+One `Cluster` value serves every node of a process, and the Inspector's
+forwarding too: `inspect.WithResolver(cluster, dialOptions...)`.
 
 ## What it does
 

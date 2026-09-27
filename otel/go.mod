@@ -9,7 +9,7 @@ module github.com/floatdrop/grpcproc/otel
 go 1.27.1
 
 require (
-	github.com/floatdrop/grpcproc v0.0.2-0.20260927023252-84a656e55d25
+	github.com/floatdrop/grpcproc v0.0.2-0.20260927034655-896fa8548b6e
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/metric v1.46.0
 	go.opentelemetry.io/otel/sdk v1.46.0

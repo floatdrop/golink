@@ -2,7 +2,6 @@
 package testcluster
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -14,7 +13,6 @@ import (
 	"github.com/floatdrop/grpcproc/grpcproctest"
 	"github.com/floatdrop/grpcproc/inspect"
 	"github.com/floatdrop/grpcproc/internal/testpb"
-	inspectv1 "github.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1"
 )
 
 // Fixture is what Start leaves running on node "a".
@@ -40,15 +38,19 @@ func worker(p *grpcproc.Process[*testpb.Ping]) error {
 // forward to each other, and links a to b.
 func Start(t *testing.T, more ...string) *Fixture {
 	t.Helper()
-	var c *grpcproctest.Cluster
-	var dialer *inspect.Dialer
-	c = grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithServices(func(n *grpcproc.Node, s *grpc.Server) {
-		inspect.New(n, inspect.WithPeers(func(ctx context.Context, node string) (inspectv1.InspectorClient, error) {
-			return dialer.Peer(ctx, node)
-		})).Register(s)
-	})}, append([]string{"a", "b"}, more...)...)
-	dialer = inspect.NewDialer(c.Resolver(), c.DialOptions()...)
-	t.Cleanup(func() { _ = dialer.Close() })
+	// Each Inspector reaches the others as a node would, with its node's own
+	// resolver and dial options (so a Partition cuts it off too). Nodes
+	// start one at a time, config before services.
+	cfgs := map[string]grpcproc.Config{}
+	c := grpcproctest.NewWith(t, []grpcproctest.Option{
+		grpcproctest.WithConfig(func(name string, cfg *grpcproc.Config) { cfgs[name] = *cfg }),
+		grpcproctest.WithServices(func(n *grpcproc.Node, s *grpc.Server) {
+			cfg := cfgs[n.Name()]
+			insp := inspect.New(n, inspect.WithResolver(cfg.Resolver, cfg.DialOptions...))
+			insp.Register(s)
+			t.Cleanup(func() { _ = insp.Close() })
+		}),
+	}, append([]string{"a", "b"}, more...)...)
 	a, b := c.Node("a"), c.Node("b")
 
 	f := &Fixture{C: c, Resolver: c.Resolver()}
@@ -68,7 +70,7 @@ func Start(t *testing.T, more ...string) *Fixture {
 		}
 	}
 	t.Cleanup(f.Release)
-	stuck, _ := grpcproc.Spawn[*testpb.Ping](a, func(p *grpcproc.Process[*testpb.Ping]) error {
+	stuck, _ := a.Spawn[*testpb.Ping](func(p *grpcproc.Process[*testpb.Ping]) error {
 		if _, err := p.Receive(); err != nil {
 			return err
 		}
@@ -77,9 +79,9 @@ func Start(t *testing.T, more ...string) *Fixture {
 	}, grpcproc.WithName("stuck"), grpcproc.WithLabel("stuck"))
 	f.Stuck = stuck.PID()
 	for range 4 {
-		_ = a.Send(stuck, &testpb.Ping{})
+		_ = a.Send(t.Context(), stuck, &testpb.Ping{})
 	}
-	talker, _ := grpcproc.Spawn[proto.Message](a, func(p *grpcproc.Process[proto.Message]) error {
+	talker, _ := a.Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
 		for {
 			if _, err := p.Receive(); err != nil {
 				return err
@@ -87,7 +89,7 @@ func Start(t *testing.T, more ...string) *Fixture {
 		}
 	}, grpcproc.WithName("talker"), grpcproc.WithInspect(func() map[string]string { return map[string]string{"state": "ready"} }))
 	f.Talker = talker.PID()
-	echo, _ := grpcproc.Spawn[*testpb.Ping](b, func(p *grpcproc.Process[*testpb.Ping]) error {
+	echo, _ := b.Spawn[*testpb.Ping](func(p *grpcproc.Process[*testpb.Ping]) error {
 		for {
 			m, err := p.Receive()
 			if err != nil {

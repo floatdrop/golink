@@ -125,7 +125,7 @@ func TestAgainstACluster(t *testing.T) {
 	var exited client.EventView
 	deadline := time.After(5 * time.Second)
 	for exited.Kind == "" {
-		_, _ = grpcproc.Spawn(f.C.Node("a"), func(*grpcproc.Process[*testpb.Ping]) error { return errors.New("bye") }, grpcproc.WithLabel("short"))
+		_, _ = f.C.Node("a").Spawn(func(*grpcproc.Process[*testpb.Ping]) error { return errors.New("bye") }, grpcproc.WithLabel("short"))
 		select {
 		case e := <-events:
 			if e.Kind == "exit" {

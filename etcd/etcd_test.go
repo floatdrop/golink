@@ -219,7 +219,7 @@ func TestNodesFindAndLoseEachOther(t *testing.T) {
 	a, b := node(t, c, "a"), node(t, c, "b")
 
 	// b's process is found through etcd; a monitors it.
-	target, _ := grpcproc.Spawn[*testpb.Ping](b, func(p *grpcproc.Process[*testpb.Ping]) error {
+	target, _ := b.Spawn[*testpb.Ping](func(p *grpcproc.Process[*testpb.Ping]) error {
 		for {
 			m, err := p.Receive()
 			if err != nil {
@@ -232,7 +232,7 @@ func TestNodesFindAndLoseEachOther(t *testing.T) {
 	}, grpcproc.WithName("echo"))
 	downs := make(chan grpcproc.Down, 1)
 	ready := make(chan struct{})
-	_, _ = grpcproc.Spawn[proto.Message](a, func(p *grpcproc.Process[proto.Message]) error {
+	_, _ = a.Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
 		p.Monitor(target)
 		close(ready)
 		for {

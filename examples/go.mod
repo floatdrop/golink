@@ -8,7 +8,7 @@ go 1.27.1
 replace github.com/floatdrop/grpcproc => ../
 
 require (
-	github.com/floatdrop/grpcproc v0.0.2-0.20260927023252-84a656e55d25
+	github.com/floatdrop/grpcproc v0.0.2-0.20260927034655-896fa8548b6e
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
 )

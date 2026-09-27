@@ -13,7 +13,9 @@ The node must serve the Inspector next to grpcproc:
 
 ```go
 node.Register(grpcServer)
-inspect.New(node, inspect.WithPeers(dialer.Peer)).Register(grpcServer)
+insp := inspect.New(node, inspect.WithResolver(resolver, dialOptions...))
+insp.Register(grpcServer)
+defer insp.Close()
 ```
 
 ## In a terminal

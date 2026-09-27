@@ -119,7 +119,7 @@ func TestWatch(t *testing.T) {
 	var got []result
 	deadline := time.After(5 * time.Second)
 	for len(got) < 2 {
-		_, _ = grpcproc.Spawn(f.C.Node("a"), func(*grpcproc.Process[proto.Message]) error { return nil }, grpcproc.WithName("brief"))
+		_, _ = f.C.Node("a").Spawn(func(*grpcproc.Process[proto.Message]) error { return nil }, grpcproc.WithName("brief"))
 		select {
 		case r := <-done:
 			got = append(got, r)

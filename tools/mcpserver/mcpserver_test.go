@@ -152,7 +152,7 @@ func TestWatchEvents(t *testing.T) {
 			case <-stop:
 				return
 			case <-time.After(10 * time.Millisecond):
-				_, _ = grpcproc.Spawn(f.C.Node("a"), func(*grpcproc.Process[proto.Message]) error { return nil })
+				_, _ = f.C.Node("a").Spawn(func(*grpcproc.Process[proto.Message]) error { return nil })
 			}
 		}
 	}()
