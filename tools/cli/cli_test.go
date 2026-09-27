@@ -97,7 +97,12 @@ func TestReadCommands(t *testing.T) {
 func TestJSON(t *testing.T) {
 	f := testcluster.Start(t)
 	var n client.NodeView
-	if err := json.Unmarshal([]byte(ok(t, run(t, f, "--json", "node"))), &n); err != nil || n.Name != "a" {
+	// JSON output ends with a newline, as every line of output does.
+	out := ok(t, run(t, f, "--json", "node"))
+	if !strings.HasSuffix(out, "}\n") {
+		t.Fatalf("%q", out[max(len(out)-20, 0):])
+	}
+	if err := json.Unmarshal([]byte(out), &n); err != nil || n.Name != "a" {
 		t.Fatalf("%+v %v", n, err)
 	}
 	var nodes []client.NodeView
@@ -133,6 +138,11 @@ func TestWatch(t *testing.T) {
 	}
 	all := ok(t, got[0]) + ok(t, got[1])
 	has(t, all, " exit <a.", "name=brief", `reason="normal"`, `"kind":"spawn"`)
+	for _, r := range got {
+		if out := ok(t, r); strings.HasPrefix(out, "{") && (strings.Count(out, "\n") != 1 || !strings.HasSuffix(out, "}\n")) {
+			t.Fatalf("one event is one line: %q", out)
+		}
+	}
 }
 
 func TestWrites(t *testing.T) {

@@ -131,7 +131,7 @@ func Main(ctx context.Context, args []string, env Env) int {
 	fs.StringVar(&a.conn.Key, "key", "", "client key file, for mutual TLS")
 	fs.StringVar(&a.conn.ServerName, "servername", "", "server name to verify, when it differs from the address")
 	fs.DurationVar(&a.timeout, "timeout", 5*time.Second, "time limit for each request")
-	fs.BoolVar(&a.json, "json", false, "print JSON instead of tables")
+	fs.BoolVar(&a.json, "json", false, "print JSON: node, nodes, ps, inspect, watch")
 	fs.BoolVar(&showVersion, "version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -248,8 +248,10 @@ func (a *app) request(ctx context.Context) (context.Context, context.CancelFunc)
 	return context.WithTimeout(ctx, a.timeout)
 }
 
+// printJSON writes v as indented JSON. An Encoder ends each value with a
+// newline, as a line of output should.
 func (a *app) printJSON(v any) error {
-	return json.MarshalWrite(a.env.Stdout, v, jsontext.WithIndentPrefix(""), jsontext.WithIndent("  "))
+	return json.MarshalEncode(jsontext.NewEncoder(a.env.Stdout, jsontext.WithIndent("  "), json.Deterministic(true)), v)
 }
 
 func (a *app) table(header string, rows [][]string) error {
@@ -426,13 +428,13 @@ func cmdWatch(ctx context.Context, a *app, args []string) error {
 	}
 	seen := 0
 	var werr error
+	lines := jsontext.NewEncoder(a.env.Stdout) // one event per line, with --json
 	err := a.client.Watch(ctx, node, func(e client.EventView) bool {
 		if only != nil && !slices.Contains(only, e.Kind) {
 			return true
 		}
 		if a.json {
-			werr = json.MarshalWrite(a.env.Stdout, e)
-			fmt.Fprintln(a.env.Stdout)
+			werr = json.MarshalEncode(lines, e)
 		} else {
 			fmt.Fprintln(a.env.Stdout, eventLine(e))
 		}

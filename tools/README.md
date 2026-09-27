@@ -77,10 +77,13 @@ monitors:              2
 what its MCP server reports.
 
 A pid is written as grpcproc prints it, `<node.incarnation.id>`; a name is
-looked up on `--node`, by default the node serving the Inspector. Any
-command takes `--json` before it for the same data as JSON (the same shapes
-the MCP tools return). Connection flags follow grpcurl: `--plaintext`,
-`--cacert`, `--cert` and `--key` for mutual TLS, `--servername`.
+looked up on `--node`, by default the node serving the Inspector.
+`--json` before `node`, `nodes`, `ps`, `inspect` or `watch` prints the same
+data as JSON: one indented value, or for `watch` one compact event per line,
+so `grpcprocctl --json watch | jq` sees events as they happen. The objects
+are those the MCP tools return, which wrap lists in an object of their own.
+Connection flags follow grpcurl: `--plaintext`, `--cacert`, `--cert` and
+`--key` for mutual TLS, `--servername`.
 
 ```sh
 grpcprocctl --plaintext dot --cluster | dot -Tsvg -o processes.svg
