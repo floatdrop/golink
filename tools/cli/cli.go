@@ -136,6 +136,10 @@ func Main(ctx context.Context, args []string, env Env) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if a.timeout <= 0 {
+		fmt.Fprintf(env.Stderr, "grpcprocctl: --timeout must be positive, not %v\n", a.timeout)
+		return 2
+	}
 	if showVersion {
 		fmt.Fprintf(env.Stdout, "grpcprocctl %s\n", a.version)
 		return 0
@@ -371,7 +375,10 @@ func cmdInspect(ctx context.Context, a *app, args []string) error {
 	if fs.NArg() != 1 {
 		return usageError{"want one process: <node.incarnation.id> or a name"}
 	}
-	ctx, cancel := a.request(ctx)
+	// The request waits for the process, then for the answer: a wait longer
+	// than --timeout must not time it out.
+	wait = cmp.Or(max(wait, 0), time.Second)
+	ctx, cancel := context.WithTimeout(ctx, a.timeout+wait)
 	defer cancel()
 	p, err := a.client.Process(ctx, node, fs.Arg(0), true, wait)
 	if err != nil {
@@ -406,13 +413,16 @@ func cmdWatch(ctx context.Context, a *app, args []string) error {
 	if _, err := a.flags("watch", args, func(fs *flag.FlagSet) {
 		fs.StringVar(&node, "node", "", "node to watch")
 		fs.StringVar(&kinds, "kind", "", "only these kinds, comma separated: spawn, exit, link-up, link-down, dead-letter")
-		fs.IntVar(&count, "count", 0, "stop after this many events (0: until interrupted)")
+		fs.IntVar(&count, "count", 0, "stop after this many events (0 or less: until interrupted)")
 	}); err != nil {
 		return err
 	}
 	var only []string
 	if kinds != "" {
-		only = strings.Split(kinds, ",")
+		var err error
+		if only, err = client.ParseKinds(strings.Split(kinds, ",")); err != nil {
+			return usageError{err.Error()}
+		}
 	}
 	seen := 0
 	var werr error
@@ -427,7 +437,7 @@ func cmdWatch(ctx context.Context, a *app, args []string) error {
 			fmt.Fprintln(a.env.Stdout, eventLine(e))
 		}
 		seen++
-		return werr == nil && (count == 0 || seen < count)
+		return werr == nil && (count <= 0 || seen < count)
 	})
 	return cmp.Or(werr, err)
 }
@@ -478,12 +488,13 @@ func cmdLogLevel(ctx context.Context, a *app, args []string) error {
 	if fs.NArg() != 2 {
 		return usageError{"want a process and a level"}
 	}
-	if _, err := client.ParseLevel(fs.Arg(1)); err != nil {
+	level, err := client.ParseLevel(fs.Arg(1))
+	if err != nil {
 		return usageError{err.Error()}
 	}
 	ctx, cancel := a.request(ctx)
 	defer cancel()
-	return a.client.SetLogLevel(ctx, node, fs.Arg(0), fs.Arg(1))
+	return a.client.SetLogLevel(ctx, node, fs.Arg(0), level)
 }
 
 func cmdDot(ctx context.Context, a *app, args []string) error {

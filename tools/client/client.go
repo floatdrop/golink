@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -68,18 +69,42 @@ func ParseTarget(s string) (*inspectv1.Target, error) {
 	return &inspectv1.Target{Kind: &inspectv1.Target_Name{Name: s}}, nil
 }
 
-// ParseLevel reads a log level: debug, info, warn, error, or a number.
+// ParseLevel reads a log level: debug, info, warn, error (each with an
+// optional offset, as in debug-4), or a number. It must fit the Inspector's
+// int32.
 func ParseLevel(s string) (slog.Level, error) {
 	var l slog.Level
-	if err := l.UnmarshalText([]byte(s)); err == nil {
+	if err := l.UnmarshalText([]byte(s)); err == nil && l >= math.MinInt32 && l <= math.MaxInt32 {
 		return l, nil
 	}
-	n, err := strconv.Atoi(s)
+	n, err := strconv.ParseInt(s, 10, 32)
 	if err != nil {
 		return 0, fmt.Errorf("bad level %q: want debug, info, warn, error or a number", s)
 	}
 	return slog.Level(n), nil
 }
+
+// ParseKinds checks names of event kinds (spawn, exit, link-up, link-down,
+// dead-letter), trimming spaces, and returns them.
+func ParseKinds(names []string) ([]string, error) {
+	var out []string
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if !slices.Contains(kinds, name) {
+			return nil, fmt.Errorf("bad event kind %q: want %s", name, strings.Join(kinds, ", "))
+		}
+		out = append(out, name)
+	}
+	return out, nil
+}
+
+var kinds = func() []string {
+	var out []string
+	for k := grpcproc.EventSpawn; k <= grpcproc.EventDeadLetter; k++ {
+		out = append(out, k.String())
+	}
+	return out
+}()
 
 // Node describes one node; "" is the node serving the Inspector.
 func (c *Client) Node(ctx context.Context, node string) (NodeView, error) {
@@ -153,7 +178,7 @@ type Filter struct {
 
 // Processes lists the processes of node that match f, ordered by PID.
 func (c *Client) Processes(ctx context.Context, node string, f Filter) ([]ProcessView, error) {
-	req := &inspectv1.ListProcessesRequest{Node: node, Name: f.Name, Label: f.Label, MinMailbox: uint32(max(f.MinMailbox, 0))}
+	req := &inspectv1.ListProcessesRequest{Node: node, Name: f.Name, Label: f.Label, MinMailbox: uint32(min(max(int64(f.MinMailbox), 0), math.MaxUint32))}
 	if f.State != "" {
 		s, err := parseState(f.State)
 		if err != nil {
@@ -212,16 +237,12 @@ func (c *Client) Exit(ctx context.Context, node, target, reason string) error {
 }
 
 // SetLogLevel sets a process's log threshold.
-func (c *Client) SetLogLevel(ctx context.Context, node, target, level string) error {
+func (c *Client) SetLogLevel(ctx context.Context, node, target string, level slog.Level) error {
 	t, err := ParseTarget(target)
 	if err != nil {
 		return err
 	}
-	l, err := ParseLevel(level)
-	if err != nil {
-		return err
-	}
-	_, err = c.rpc.SetLogLevel(ctx, &inspectv1.SetLogLevelRequest{Node: node, Target: t, Level: int32(l)})
+	_, err = c.rpc.SetLogLevel(ctx, &inspectv1.SetLogLevelRequest{Node: node, Target: t, Level: int32(level)})
 	return err
 }
 

@@ -87,6 +87,8 @@ func TestReadCommands(t *testing.T) {
 	has(t, ok(t, run(t, f, "ps", "--node", "b", "--name", "ech", "--state", "idle")), "echo")
 	has(t, ok(t, run(t, f, "inspect", "talker")), "name:", "talker", "state:          ready")
 	has(t, ok(t, run(t, f, "inspect", "--wait", "10ms", "stuck")), "inspect:", "busy", "mailbox:", "(peak")
+	// A wait longer than --timeout still gets its answer: busy.
+	has(t, ok(t, run(t, f, "--timeout", "200ms", "inspect", "--wait", "400ms", "stuck")), "busy")
 	has(t, ok(t, run(t, f, "inspect", f.Echo.String())), "echo")
 	has(t, ok(t, run(t, f, "dot")), "digraph grpcproc", `label="a"`, "rounded,bold", "->")
 	has(t, ok(t, run(t, f, "dot", "--cluster")), `label="a"`, `label="b"`, "echo")
@@ -115,7 +117,7 @@ func TestJSON(t *testing.T) {
 func TestWatch(t *testing.T) {
 	f := testcluster.Start(t)
 	done := make(chan result, 2)
-	go func() { done <- run(t, f, "watch", "--kind", "exit", "--count", "1") }()
+	go func() { done <- run(t, f, "watch", "--kind", " exit ", "--count", "1") }()
 	go func() { done <- run(t, f, "--json", "watch", "--kind", "spawn", "--count", "1") }()
 	var got []result
 	deadline := time.After(5 * time.Second)
@@ -162,6 +164,8 @@ func TestUsageAndErrors(t *testing.T) {
 		{[]string{"exit"}, 2, "want a process"},
 		{[]string{"loglevel", "talker"}, 2, "want a process and a level"},
 		{[]string{"loglevel", "talker", "loud"}, 2, "bad level"},
+		{[]string{"watch", "--kind", "exits"}, 2, "bad event kind"},
+		{[]string{"--timeout", "0s", "nodes"}, 2, "--timeout must be positive"},
 		{[]string{"node", "nowhere"}, 1, "node nowhere:"},
 		{[]string{"nodes", "--bogus"}, 2, ""},
 		{[]string{"node", "--bogus"}, 2, ""},

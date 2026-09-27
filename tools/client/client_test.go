@@ -3,6 +3,9 @@ package client_test
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"math"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -34,8 +37,21 @@ func TestParseLevelAndSort(t *testing.T) {
 			t.Errorf("%s: %v %v", in, l, err)
 		}
 	}
-	if _, err := client.ParseLevel("loud"); err == nil {
-		t.Fatal("accepted loud")
+	if l, err := client.ParseLevel("-2147483648"); err != nil || l != math.MinInt32 {
+		t.Fatalf("%v %v", l, err)
+	}
+	// Levels must fit the Inspector's int32: they used to wrap, and 2147483648
+	// set the lowest level there is.
+	for _, bad := range []string{"loud", "2147483648", "debug+4294967296"} {
+		if _, err := client.ParseLevel(bad); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+	if kinds, err := client.ParseKinds([]string{"exit", " spawn"}); err != nil || !slices.Equal(kinds, []string{"exit", "spawn"}) {
+		t.Fatalf("%v %v", kinds, err)
+	}
+	if _, err := client.ParseKinds([]string{"exits"}); err == nil || !strings.Contains(err.Error(), "dead-letter") {
+		t.Fatalf("got %v", err)
 	}
 	ps := []client.ProcessView{{PID: "1", Mailbox: 1, Received: 5, Sent: 1}, {PID: "2", Mailbox: 3, Received: 1, Sent: 9}}
 	for by, first := range map[string]string{"pid": "1", "mailbox": "2", "received": "1", "sent": "2"} {
@@ -68,6 +84,11 @@ func TestAgainstACluster(t *testing.T) {
 		t.Fatalf("%+v %v", nodes, err)
 	}
 
+	// A minimum past uint32 matches nothing; it used to wrap, and 1<<32
+	// matched everything.
+	if ps, err := c.Processes(ctx, "", client.Filter{MinMailbox: 1 << 32}); err != nil || len(ps) != 0 {
+		t.Fatalf("%v %v", ps, err)
+	}
 	ps, err := c.Processes(ctx, "", client.Filter{MinMailbox: 1})
 	if err != nil || len(ps) != 1 || ps[0].PID != f.Stuck.String() || ps[0].Mailbox != 3 || ps[0].State != "running" || ps[0].OldestWait == "" {
 		t.Fatalf("%+v %v", ps, err)
@@ -102,16 +123,14 @@ func TestAgainstACluster(t *testing.T) {
 		t.Fatal("found nobody")
 	}
 
-	if err := c.SetLogLevel(ctx, "", "talker", "debug"); err != nil {
+	if err := c.SetLogLevel(ctx, "", "talker", slog.LevelDebug); err != nil {
 		t.Fatal(err)
 	}
 	if p, _ := c.Process(ctx, "", "talker", false, 0); p.LogLevel != "DEBUG" {
 		t.Fatalf("%+v", p)
 	}
-	for _, bad := range [][2]string{{"<bad", "debug"}, {"talker", "loud"}} {
-		if err := c.SetLogLevel(ctx, "", bad[0], bad[1]); err == nil {
-			t.Errorf("accepted %v", bad)
-		}
+	if err := c.SetLogLevel(ctx, "", "<bad", slog.LevelDebug); err == nil {
+		t.Error("accepted a bad pid")
 	}
 
 	// Watch: events arrive; returning false ends it.

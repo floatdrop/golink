@@ -116,6 +116,11 @@ func TestReadTools(t *testing.T) {
 	if msg := call(t, cs, "list_processes", map[string]any{"sort": "mailbox", "limit": 1}, &list); msg != "" || len(list.Processes) != 1 || list.Processes[0].Name != "stuck" || list.Total < 5 {
 		t.Fatalf("%+v %s", list, msg)
 	}
+	// A negative limit is refused by the schema; it used to slice out of
+	// range and crash the server.
+	if msg := call(t, cs, "list_processes", map[string]any{"limit": -1}, &list); !strings.Contains(msg, "minimum") {
+		t.Fatalf("got %q", msg)
+	}
 	if msg := call(t, cs, "list_processes", map[string]any{"label": "supervisor"}, &list); msg != "" || list.Total != 1 {
 		t.Fatalf("%+v %s", list, msg)
 	}
@@ -163,9 +168,15 @@ func TestWatchEvents(t *testing.T) {
 	if msg := call(t, cs, "watch_events", map[string]any{"seconds": 5, "max_events": 2, "kinds": []string{"exit"}}, &out); msg != "" || len(out.Events) != 2 || !out.Truncated || out.Events[0].Kind != "exit" {
 		t.Fatalf("%+v %s", out, msg)
 	}
+	if msg := call(t, cs, "watch_events", map[string]any{"max_events": -1}, &out); !strings.Contains(msg, "minimum") {
+		t.Fatalf("got %q", msg)
+	}
+	if msg := call(t, cs, "watch_events", map[string]any{"kinds": []string{"exits"}}, &out); !strings.Contains(msg, "bad event kind") {
+		t.Fatalf("got %q", msg)
+	}
 	// Defaults: every kind, at most 100 events.
 	out.Events, out.Truncated = nil, false
-	if msg := call(t, cs, "watch_events", map[string]any{"seconds": 1}, &out); msg != "" || len(out.Events) == 0 || len(out.Events) > 100 {
+	if msg := call(t, cs, "watch_events", map[string]any{"seconds": 1}, &out); msg != "" || len(out.Events) < 2 || len(out.Events) > 100 {
 		t.Fatalf("%+v %s", out, msg)
 	}
 	if msg := call(t, cs, "watch_events", map[string]any{"node": "nowhere", "seconds": 1}, &out); msg == "" {
@@ -179,8 +190,11 @@ func TestWriteTools(t *testing.T) {
 	var done struct {
 		Result string `json:"result"`
 	}
-	if msg := call(t, cs, "set_log_level", map[string]any{"process": "talker", "level": "debug"}, &done); msg != "" || !strings.Contains(done.Result, "debug") {
+	if msg := call(t, cs, "set_log_level", map[string]any{"process": "talker", "level": "debug"}, &done); msg != "" || !strings.Contains(done.Result, "DEBUG") {
 		t.Fatalf("%+v %s", done, msg)
+	}
+	if msg := call(t, cs, "set_log_level", map[string]any{"process": "<bad", "level": "debug"}, &done); msg == "" {
+		t.Fatal("accepted a bad pid")
 	}
 	if msg := call(t, cs, "set_log_level", map[string]any{"process": "talker", "level": "loud"}, &done); msg == "" {
 		t.Fatal("accepted loud")
@@ -190,5 +204,36 @@ func TestWriteTools(t *testing.T) {
 	}
 	if msg := call(t, cs, "exit_process", map[string]any{"process": "<bad"}, &done); msg == "" {
 		t.Fatal("accepted a bad pid")
+	}
+}
+
+// A wait longer than the request timeout still gets its answer: the request
+// is given the wait on top.
+func TestLongWaitForABusyProcess(t *testing.T) {
+	f := testcluster.Start(t)
+	cs := connect(t, f, mcpserver.Options{Timeout: 200 * time.Millisecond})
+	var p client.ProcessView
+	if msg := call(t, cs, "get_process", map[string]any{"process": "stuck", "wait_ms": 400}, &p); msg != "" || !strings.Contains(p.InspectError, "busy") {
+		t.Fatalf("%+v %s", p, msg)
+	}
+}
+
+// A handler that panics fails its request, and the server carries on.
+func TestPanickingHandlerFailsItsRequest(t *testing.T) {
+	serverT, clientT := mcp.NewInMemoryTransports()
+	ss, err := mcpserver.New(&client.Client{}, mcpserver.Options{}).Connect(t.Context(), serverT, nil) // no connection: every call panics
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ss.Close() })
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil).Connect(t.Context(), clientT, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+	for range 2 {
+		if _, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "cluster_nodes"}); err == nil || !strings.Contains(err.Error(), "internal error") {
+			t.Fatalf("got %v", err)
+		}
 	}
 }

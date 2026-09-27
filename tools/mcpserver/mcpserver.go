@@ -39,8 +39,20 @@ Start with cluster_nodes, then list_processes sorted by mailbox to find backlogs
 
 // New returns an MCP server over c.
 func New(c *client.Client, o Options) *mcp.Server {
-	o.Timeout = cmp.Or(o.Timeout, 5*time.Second)
+	o.Timeout = cmp.Or(max(o.Timeout, 0), 5*time.Second)
 	s := mcp.NewServer(&mcp.Implementation{Name: "grpcproc", Version: cmp.Or(o.Version, "dev")}, &mcp.ServerOptions{Instructions: instructions})
+	// A handler's panic fails its request, not the server: nothing in the
+	// SDK recovers, and an agent can send anything.
+	s.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (res mcp.Result, err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("%s: internal error: %v", method, r)
+				}
+			}()
+			return next(ctx, method, req)
+		}
+	})
 	t := tools{c: c, timeout: o.Timeout}
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	mcp.AddTool(s, &mcp.Tool{Name: "cluster_nodes", Description: "Every node reachable from the one serving the Inspector: counters, links, and which could not be reached.", Annotations: readOnly}, t.clusterNodes)
@@ -93,7 +105,7 @@ type listIn struct {
 	State      string `json:"state,omitempty" jsonschema:"only processes in this state: idle, running, waiting-reply, exiting"`
 	MinMailbox int    `json:"min_mailbox,omitempty" jsonschema:"only processes with at least this many waiting messages"`
 	Sort       string `json:"sort,omitempty" jsonschema:"pid (default), mailbox, received or sent; largest first"`
-	Limit      int    `json:"limit,omitempty" jsonschema:"at most this many; default 100"`
+	Limit      uint   `json:"limit,omitempty" jsonschema:"at most this many; default 100"`
 }
 
 type listOut struct {
@@ -112,7 +124,7 @@ func (t tools) listProcesses(ctx context.Context, _ *mcp.CallToolRequest, in lis
 		return nil, listOut{}, err
 	}
 	out := listOut{Processes: ps, Total: len(ps)}
-	if limit := cmp.Or(in.Limit, 100); len(ps) > limit {
+	if limit := cmp.Or(in.Limit, 100); uint(len(ps)) > limit {
 		out.Processes = ps[:limit]
 	}
 	return nil, out, nil
@@ -122,20 +134,22 @@ type processIn struct {
 	Node       string `json:"node,omitempty" jsonschema:"node the name is registered on; not needed for a pid"`
 	Process    string `json:"process" jsonschema:"a pid, <node.incarnation.id>, or a registered name"`
 	NoInspect  bool   `json:"no_inspect,omitempty" jsonschema:"skip asking the process about itself"`
-	WaitMillis int    `json:"wait_ms,omitempty" jsonschema:"how long a busy process has to answer; default 1000"`
+	WaitMillis uint   `json:"wait_ms,omitempty" jsonschema:"how long a busy process has to answer, up to 60000; default 1000"`
 }
 
 func (t tools) getProcess(ctx context.Context, _ *mcp.CallToolRequest, in processIn) (*mcp.CallToolResult, client.ProcessView, error) {
-	ctx, cancel := t.ctx(ctx)
+	wait := time.Duration(min(cmp.Or(in.WaitMillis, 1000), 60_000)) * time.Millisecond
+	// The request waits for the process, then for the answer.
+	ctx, cancel := context.WithTimeout(ctx, t.timeout+wait)
 	defer cancel()
-	p, err := t.c.Process(ctx, in.Node, in.Process, !in.NoInspect, time.Duration(cmp.Or(in.WaitMillis, 1000))*time.Millisecond)
+	p, err := t.c.Process(ctx, in.Node, in.Process, !in.NoInspect, wait)
 	return nil, p, err
 }
 
 type watchIn struct {
 	Node      string   `json:"node,omitempty" jsonschema:"node to watch; empty for the node serving the Inspector"`
 	Seconds   int      `json:"seconds,omitempty" jsonschema:"how long to collect, 1 to 60; default 5"`
-	MaxEvents int      `json:"max_events,omitempty" jsonschema:"stop after this many; default 100"`
+	MaxEvents uint     `json:"max_events,omitempty" jsonschema:"stop after this many; default 100"`
 	Kinds     []string `json:"kinds,omitempty" jsonschema:"only these kinds: spawn, exit, link-up, link-down, dead-letter"`
 }
 
@@ -145,17 +159,21 @@ type watchOut struct {
 }
 
 func (t tools) watchEvents(ctx context.Context, _ *mcp.CallToolRequest, in watchIn) (*mcp.CallToolResult, watchOut, error) {
+	kinds, err := client.ParseKinds(in.Kinds)
+	if err != nil {
+		return nil, watchOut{}, err
+	}
 	seconds := min(max(cmp.Or(in.Seconds, 5), 1), 60)
 	limit := cmp.Or(in.MaxEvents, 100)
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(seconds)*time.Second)
 	defer cancel()
 	out := watchOut{Events: []client.EventView{}}
-	err := t.c.Watch(ctx, in.Node, func(e client.EventView) bool {
-		if len(in.Kinds) > 0 && !slices.Contains(in.Kinds, e.Kind) {
+	err = t.c.Watch(ctx, in.Node, func(e client.EventView) bool {
+		if len(kinds) > 0 && !slices.Contains(kinds, e.Kind) {
 			return true
 		}
 		out.Events = append(out.Events, e)
-		out.Truncated = len(out.Events) >= limit
+		out.Truncated = uint(len(out.Events)) >= limit
 		return !out.Truncated
 	})
 	return nil, out, err
@@ -188,10 +206,14 @@ type levelIn struct {
 }
 
 func (t tools) setLogLevel(ctx context.Context, _ *mcp.CallToolRequest, in levelIn) (*mcp.CallToolResult, done, error) {
-	ctx, cancel := t.ctx(ctx)
-	defer cancel()
-	if err := t.c.SetLogLevel(ctx, in.Node, in.Process, in.Level); err != nil {
+	l, err := client.ParseLevel(in.Level)
+	if err != nil {
 		return nil, done{}, err
 	}
-	return nil, done{Result: fmt.Sprintf("log level of %s set to %s", in.Process, in.Level)}, nil
+	ctx, cancel := t.ctx(ctx)
+	defer cancel()
+	if err := t.c.SetLogLevel(ctx, in.Node, in.Process, l); err != nil {
+		return nil, done{}, err
+	}
+	return nil, done{Result: fmt.Sprintf("log level of %s set to %s", in.Process, l)}, nil
 }
