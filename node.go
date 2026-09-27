@@ -122,6 +122,7 @@ type Node struct {
 
 	ctx    context.Context // parent of every process; cancelled first by Stop
 	cancel context.CancelFunc
+	dialWG sync.WaitGroup // finishDial goroutines; Stop waits for them
 
 	nextID   atomic.Uint64
 	nextRef  atomic.Uint64
@@ -270,7 +271,9 @@ func (n *Node) memberEvent(ev MemberEvent) {
 
 // Stop asks every process to exit (Receive returns ReasonShutdown), waits for
 // them until ctx is done, then closes every link. Watchers of this node's
-// processes receive Down{shutdown} while the links are still up.
+// processes receive Down{shutdown} while the links are still up. A dial in
+// flight completes within Config.DialTimeout and its link is discarded;
+// Stop waits for it too, until ctx is done.
 func (n *Node) Stop(ctx context.Context) error {
 	n.mu.Lock()
 	if n.stopping {
@@ -292,6 +295,7 @@ func (n *Node) Stop(ctx context.Context) error {
 
 	n.mu.Lock()
 	n.stopped = true
+	dialing := len(n.dialing) > 0
 	outs, ins := n.out, n.in
 	n.out, n.in = map[string]*outLink{}, map[string]*inLink{}
 	n.mu.Unlock()
@@ -301,6 +305,19 @@ func (n *Node) Stop(ctx context.Context) error {
 	}
 	for _, l := range ins {
 		l.close()
+	}
+	// A dial that was in flight when the node stopped completes, and
+	// finishDial discards its link: wait for it to let go of the node.
+	if dialing {
+		dialed := make(chan struct{})
+		go func() { n.dialWG.Wait(); close(dialed) }()
+		select {
+		case <-dialed:
+		case <-ctx.Done():
+			if err == nil {
+				err = fmt.Errorf("grpcproc: stop: %w", ctx.Err())
+			}
+		}
 	}
 	n.mu.Lock()
 	withdraw := n.withdraw
@@ -454,22 +471,19 @@ func (n *Node) lookup(pid PID, name string) *proc {
 // ---------- messaging from outside a process ----------
 
 // Send delivers m to a typed address, local or remote, with the node as
-// sender. Sending to a process that does not exist is not an error (it is a
-// dead letter); an error means m could not be encoded or the node could not
-// be reached.
-func (n *Node) Send[N proto.Message](to Addr[N], m N) error {
-	return n.send(n.PID(), nil, to.dest(), m, nil)
-}
-
-// SendContext is Send with the metadata carried by ctx.
-func (n *Node) SendContext[N proto.Message](ctx context.Context, to Addr[N], m N) error {
-	return n.send(n.PID(), nil, to.dest(), m, MetadataFrom(ctx))
+// sender and the metadata carried by ctx. It returns once m is queued; ctx
+// bounds only the wait for a connection to a peer this node has no link to
+// yet. Sending to a process that does not exist is not an error (it is a
+// dead letter); an error means m could not be encoded, the node could not be
+// reached, or ctx ended first.
+func (n *Node) Send[N proto.Message](ctx context.Context, to Addr[N], m N) error {
+	return n.send(ctx, n.PID(), nil, to.dest(), m, MetadataFrom(ctx))
 }
 
 // SendTo delivers m to an untyped target: a PID, a Name, or an Addr of
 // another type. The target's type is checked on delivery only.
-func (n *Node) SendTo(to Target, m proto.Message) error {
-	return n.send(n.PID(), nil, destOf(to), m, nil)
+func (n *Node) SendTo(ctx context.Context, to Target, m proto.Message) error {
+	return n.send(ctx, n.PID(), nil, destOf(to), m, MetadataFrom(ctx))
 }
 
 // Call sends req to a typed address and waits for the reply, typed as R:
@@ -505,7 +519,7 @@ func (n *Node) hookSend(from PID, sender *proc, pid PID, name string, body proto
 	return n.hooks.OnSend(s, md)
 }
 
-func (n *Node) send(from PID, sender *proc, to dest, body proto.Message, md Metadata) (err error) {
+func (n *Node) send(ctx context.Context, from PID, sender *proc, to dest, body proto.Message, md Metadata) (err error) {
 	pid, name := to.pid, to.name
 	md, done := n.hookSend(from, sender, pid, name, body, md, false)
 	if done != nil {
@@ -526,7 +540,7 @@ func (n *Node) send(from PID, sender *proc, to dest, body proto.Message, md Meta
 	if err := encodeBody(env, body); err != nil {
 		return err
 	}
-	return n.route(pid.Node, env)
+	return n.route(ctx, pid.Node, env)
 }
 
 func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to dest, req proto.Message, md Metadata) (_ proto.Message, err error) {
@@ -563,7 +577,7 @@ func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to dest, req 
 		if err := encodeBody(env, req); err != nil {
 			return nil, err
 		}
-		if err := n.route(pid.Node, env); err != nil {
+		if err := n.route(ctx, pid.Node, env); err != nil {
 			return nil, err
 		}
 	}
@@ -587,7 +601,7 @@ func (n *Node) reply(from, to PID, ref uint64, body proto.Message, status grpcpr
 			return err
 		}
 	}
-	return n.route(to.Node, env)
+	return n.route(context.Background(), to.Node, env)
 }
 
 func (n *Node) monitor(from PID, to Target, ref uint64) error {
@@ -598,7 +612,7 @@ func (n *Node) monitor(from PID, to Target, ref uint64) error {
 	}
 	env := wire(grpcprocv1.Kind_KIND_MONITOR, from, pid, name)
 	env.Ref = ref
-	return n.route(pid.Node, env)
+	return n.route(context.Background(), pid.Node, env)
 }
 
 func (n *Node) demonitor(from PID, to Target, ref uint64) error {
@@ -609,7 +623,7 @@ func (n *Node) demonitor(from PID, to Target, ref uint64) error {
 	}
 	env := wire(grpcprocv1.Kind_KIND_DEMONITOR, from, pid, name)
 	env.Ref = ref
-	return n.route(pid.Node, env)
+	return n.route(context.Background(), pid.Node, env)
 }
 
 func (n *Node) down(from, to PID, ref uint64, reason string) error {
@@ -619,7 +633,7 @@ func (n *Node) down(from, to PID, ref uint64, reason string) error {
 	}
 	env := wire(grpcprocv1.Kind_KIND_DOWN, from, to, "")
 	env.Ref, env.Reason = ref, reason
-	return n.route(to.Node, env)
+	return n.route(context.Background(), to.Node, env)
 }
 
 func (n *Node) exit(from PID, to Target, reason string) error {
@@ -630,15 +644,18 @@ func (n *Node) exit(from PID, to Target, reason string) error {
 	}
 	env := wire(grpcprocv1.Kind_KIND_EXIT, from, pid, name)
 	env.Reason = reason
-	return n.route(pid.Node, env)
+	return n.route(context.Background(), pid.Node, env)
 }
 
-// route queues env on the link to node, dialing it if needed.
-func (n *Node) route(node string, env *grpcprocv1.Envelope) error {
+// route queues env on the link to node, dialing it if needed. ctx bounds the
+// wait for the dial. Everything but Node.Send, Node.SendTo and calls passes
+// context.Background(): replies, monitors, Downs, exits, process sends and
+// timers wait for the dial, which Config.DialTimeout bounds.
+func (n *Node) route(ctx context.Context, node string, env *grpcprocv1.Envelope) error {
 	if node == "" {
 		return errors.New("grpcproc: empty destination node")
 	}
-	l, err := n.getOut(node)
+	l, err := n.getOut(ctx, node)
 	if err != nil {
 		return err
 	}

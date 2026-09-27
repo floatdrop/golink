@@ -139,7 +139,7 @@ func TestRunLifecycle(t *testing.T) {
 	}
 	downs := watch(t, n, addr)
 	for range 3 {
-		_ = n.Send(addr, &testpb.Ping{N: 1})
+		_ = n.Send(t.Context(), addr, &testpb.Ping{N: 1})
 	}
 	if r, err := n.Call[*testpb.Pong](t.Context(), addr, &testpb.Ping{}); err != nil || r.GetN() != 3 {
 		t.Fatalf("call: %v %v", r, err)
@@ -171,9 +171,9 @@ func TestRunExits(t *testing.T) {
 		reason string
 		log    string
 	}{
-		{"message error", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Send(a, &testpb.Ping{N: -1}) }, "bad message", "init; terminate: bad message"},
-		{"stop", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Send(a, &testpb.Ping{N: -2}) }, grpcproc.ReasonNormal, "init; terminate"},
-		{"panic", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Send(a, &testpb.Ping{N: -3}) }, "panic: kaboom", "init; terminate: panic: kaboom"},
+		{"message error", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Send(t.Context(), a, &testpb.Ping{N: -1}) }, "bad message", "init; terminate: bad message"},
+		{"stop", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Send(t.Context(), a, &testpb.Ping{N: -2}) }, grpcproc.ReasonNormal, "init; terminate"},
+		{"panic", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Send(t.Context(), a, &testpb.Ping{N: -3}) }, "panic: kaboom", "init; terminate: panic: kaboom"},
 		{"exit", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Exit(a, "bye") }, "bye", "init; terminate: grpcproc: exit: bye"},
 	}
 	for _, tc := range cases {
@@ -252,7 +252,7 @@ func TestPlainIgnoresDowns(t *testing.T) {
 	pa, _ := n.Spawn(actor.Run[*testpb.Ping](&monitoringPlain{plain: plain{seen: seen}, target: target}))
 	_ = n.Exit(target, "gone")
 	time.Sleep(20 * time.Millisecond)
-	_ = n.Send(pa, &testpb.Ping{N: 9})
+	_ = n.Send(t.Context(), pa, &testpb.Ping{N: 9})
 	if got := <-seen; got != 9 {
 		t.Fatal(got) // the Down was skipped, the process is alive
 	}

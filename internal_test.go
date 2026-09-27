@@ -175,7 +175,7 @@ func TestConnLostStaleAndSendClosed(t *testing.T) {
 	}
 	// getOut after stop.
 	_ = n.Stop(context.Background())
-	if _, err := n.getOut("b"); !errors.Is(err, ErrNodeStopped) {
+	if _, err := n.getOut(t.Context(), "b"); !errors.Is(err, ErrNodeStopped) {
 		t.Fatal(err)
 	}
 }
@@ -383,9 +383,9 @@ func TestDialSharingAndStopWhileDialing(t *testing.T) {
 	}
 	// Two concurrent sends share one dial.
 	errs := make(chan error, 2)
-	go func() { errs <- n.SendTo(Named[*testpb.Ping]("b", "x"), &testpb.Ping{}) }()
+	go func() { errs <- n.SendTo(t.Context(), Named[*testpb.Ping]("b", "x"), &testpb.Ping{}) }()
 	<-entered
-	go func() { errs <- n.SendTo(Named[*testpb.Ping]("b", "x"), &testpb.Ping{}) }()
+	go func() { errs <- n.SendTo(t.Context(), Named[*testpb.Ping]("b", "x"), &testpb.Ping{}) }()
 	time.Sleep(20 * time.Millisecond)
 	close(release)
 	for range 2 {
@@ -399,10 +399,24 @@ func TestDialSharingAndStopWhileDialing(t *testing.T) {
 	// Stop while a dial is in flight: the link is discarded.
 	n.Disconnect("b")
 	release = make(chan struct{})
-	go func() { errs <- n.SendTo(Named[*testpb.Ping]("b", "x"), &testpb.Ping{}) }()
+	go func() { errs <- n.SendTo(t.Context(), Named[*testpb.Ping]("b", "x"), &testpb.Ping{}) }()
 	<-entered
-	_ = n.Stop(context.Background())
-	close(release)
+	// Stop waits for the dial; let it complete only once the node is stopped.
+	go func() {
+		for {
+			n.mu.Lock()
+			stopped := n.stopped
+			n.mu.Unlock()
+			if stopped {
+				close(release)
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	if err := n.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	if err := <-errs; !errors.Is(err, ErrNodeStopped) {
 		t.Fatalf("got %v", err)
 	}
@@ -415,7 +429,7 @@ func TestDialBadTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := n.SendTo(Named[*testpb.Ping]("b", "x"), &testpb.Ping{}); !errors.Is(err, ErrNoConnection) {
+	if err := n.SendTo(t.Context(), Named[*testpb.Ping]("b", "x"), &testpb.Ping{}); !errors.Is(err, ErrNoConnection) {
 		t.Fatalf("got %v", err)
 	}
 }

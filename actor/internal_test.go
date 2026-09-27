@@ -70,7 +70,7 @@ func TestFailedRestartEndsSupervisor(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	for _, pr := range n.Processes() {
 		if pr.Parent == sup {
-			_ = n.SendTo(pr.PID, &emptypb.Empty{})
+			_ = n.SendTo(t.Context(), pr.PID, &emptypb.Empty{})
 		}
 	}
 	select {

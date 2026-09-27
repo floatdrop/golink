@@ -130,7 +130,7 @@ func TestLocalTypedSendAndCall(t *testing.T) {
 	e, _ := a.Spawn(echo)
 	// Sending from outside any process: the Pong reply has nowhere to go, so
 	// it is a dead letter, not an error.
-	if err := a.Send(e, &testpb.Ping{N: 1}); err != nil {
+	if err := a.Send(t.Context(), e, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	// From inside a process the reply comes back to it.
@@ -218,14 +218,14 @@ func TestTypeMismatchIsDeadLetter(t *testing.T) {
 
 	// A remote sender addresses the process with the wrong type.
 	wrong := grpcproc.Named[*testpb.Pong]("b", "echo")
-	if err := a.SendTo(wrong, &testpb.Pong{N: 1}); err != nil {
+	if err := a.SendTo(t.Context(), wrong, &testpb.Pong{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.CallTo[*testpb.Pong](ctx(t), wrong, &testpb.Pong{}); !errors.Is(err, grpcproc.ErrType) {
 		t.Fatalf("want ErrType, got %v", err)
 	}
 	// Locally too, through an untyped address.
-	if err := b.SendTo(e.PID(), &testpb.Pong{}); err != nil {
+	if err := b.SendTo(t.Context(), e.PID(), &testpb.Pong{}); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
@@ -387,7 +387,7 @@ func TestKillAndRestart(t *testing.T) {
 	if m := recv(t, ch); m.Down == nil || m.Down.PID != silent.PID() || m.Down.Reason != grpcproc.ReasonNoConnection {
 		t.Fatalf("got %+v", m.Down)
 	}
-	if err := a.SendTo(silent, &testpb.Ping{}); !errors.Is(err, grpcproc.ErrNoConnection) {
+	if err := a.SendTo(t.Context(), silent, &testpb.Ping{}); !errors.Is(err, grpcproc.ErrNoConnection) {
 		t.Fatalf("send to dead node: %v", err)
 	}
 
@@ -487,7 +487,7 @@ func TestRegistry(t *testing.T) {
 	}
 	w, ch := watcher(t, a)
 	w.Monitor(e)
-	_ = a.SendTo(grpcproc.Name{Node: "a", Name: "svc"}, &testpb.Ping{N: 0})
+	_ = a.SendTo(t.Context(), grpcproc.Name{Node: "a", Name: "svc"}, &testpb.Ping{N: 0})
 	recv(t, ch)
 	if _, ok := a.Whereis("svc"); ok {
 		t.Fatal("name not released on exit")
@@ -515,7 +515,7 @@ func TestInspectAndInfo(t *testing.T) {
 		return map[string]string{"handled": strconv.Itoa(s.handled)}
 	}))
 	for range 3 {
-		_ = a.SendTo(e, &testpb.Ping{N: 1})
+		_ = a.SendTo(t.Context(), e, &testpb.Ping{N: 1})
 	}
 	time.Sleep(20 * time.Millisecond)
 	got, err := a.Inspect(ctx(t), e.PID())
@@ -528,8 +528,8 @@ func TestInspectAndInfo(t *testing.T) {
 		t.Fatalf("info %+v", info)
 	}
 	// Busy process: inspect times out with a reason, and the mailbox shows the backlog.
-	_ = a.SendTo(e, &testpb.Ping{N: 7})
-	_ = a.SendTo(e, &testpb.Ping{N: 1})
+	_ = a.SendTo(t.Context(), e, &testpb.Ping{N: 7})
+	_ = a.SendTo(t.Context(), e, &testpb.Ping{N: 1})
 	time.Sleep(20 * time.Millisecond)
 	short, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
@@ -554,7 +554,7 @@ func TestMetadataPropagates(t *testing.T) {
 	c := grpcproctest.New(t, "a", "b")
 	a, b := c.Node("a"), c.Node("b")
 	col, ch := collector(t, b)
-	if err := a.SendContext(grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"trace": "abc"}), col, proto.Message(&testpb.Ping{})); err != nil {
+	if err := a.Send(grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"trace": "abc"}), col, proto.Message(&testpb.Ping{})); err != nil {
 		t.Fatal(err)
 	}
 	if m := recv(t, ch); m.Metadata["trace"] != "abc" {
@@ -621,11 +621,11 @@ func benchSend(b *testing.B, from, to *grpcproc.Node) {
 		b.Fatal(err)
 	}
 	msg := &testpb.Ping{}
-	_ = from.Send(addr, msg) // establish the link before timing
+	_ = from.Send(b.Context(), addr, msg) // establish the link before timing
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		if err := from.Send(addr, msg); err != nil {
+		if err := from.Send(b.Context(), addr, msg); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -659,7 +659,7 @@ func TestBusyMeasuresTheCurrentMessage(t *testing.T) {
 		}
 	})
 	time.Sleep(300 * time.Millisecond) // old, but idle
-	_ = a.Send(p, &testpb.Ping{N: 1})
+	_ = a.Send(t.Context(), p, &testpb.Ping{N: 1})
 	time.Sleep(20 * time.Millisecond)
 	short, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 	defer cancel()
@@ -694,4 +694,115 @@ func busyFor(t *testing.T, err error) time.Duration {
 		t.Fatalf("no duration in %v", err)
 	}
 	return d
+}
+
+func TestContextBoundsTheDial(t *testing.T) {
+	// Node a resolves its peers only once released, so its first dial hangs.
+	release := make(chan struct{})
+	var resolves atomic.Int32
+	var c *grpcproctest.Cluster
+	c = grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithConfig(func(name string, cfg *grpcproc.Config) {
+		if name == "a" {
+			cfg.Resolver = grpcproc.ResolverFunc(func(ctx context.Context, node string) (string, error) {
+				resolves.Add(1)
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+				return c.Resolver().Resolve(ctx, node)
+			})
+		}
+	})}, "a", "b")
+	a := c.Node("a")
+	sink, got := collector(t, c.Node("b"))
+	ping := func(ctx context.Context, n int64) error { return a.Send(ctx, sink, proto.Message(&testpb.Ping{N: n})) }
+
+	// A sender whose ctx is already done does not start a dial.
+	done, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := ping(done, 0); !errors.Is(err, context.Canceled) || resolves.Load() != 0 {
+		t.Fatalf("got %v after %d resolves", err, resolves.Load())
+	}
+	// One whose ctx ends stops waiting for the dial, and its message is not sent...
+	short, cancelShort := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancelShort()
+	if err := ping(short, 1); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("got %v", err)
+	}
+	// ...while the same dial goes on for those still waiting.
+	sent := make(chan error, 1)
+	go func() { sent <- ping(t.Context(), 2) }()
+	close(release)
+	if err := <-sent; err != nil {
+		t.Fatal(err)
+	}
+	if err := ping(t.Context(), 3); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []int64{2, 3} {
+		if m := recv(t, got); m.Body.(*testpb.Ping).GetN() != want {
+			t.Fatalf("got %+v, want %d", m, want)
+		}
+	}
+	if n := resolves.Load(); n != 1 {
+		t.Fatalf("%d dials, want one shared", n)
+	}
+}
+
+// dialStuck sends from n to a peer whose dial is in progress, and gives up
+// waiting for it once the resolver has been entered.
+func dialStuck(t *testing.T, n *grpcproc.Node, entered <-chan struct{}) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	go func() { <-entered; cancel() }()
+	if err := n.SendTo(ctx, grpcproc.Named[*testpb.Ping]("b", "x"), &testpb.Ping{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestStopWaitsForDials(t *testing.T) {
+	// A peer that never resolves: the dial ends at its timeout, and Stop
+	// returns only after that.
+	entered, ended := make(chan struct{}), make(chan struct{})
+	n, err := grpcproc.NewNode(grpcproc.Config{Name: "a", DialTimeout: 50 * time.Millisecond,
+		Resolver: grpcproc.ResolverFunc(func(ctx context.Context, _ string) (string, error) {
+			close(entered)
+			<-ctx.Done()
+			close(ended)
+			return "", ctx.Err()
+		})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialStuck(t, n, entered)
+	if err := n.Stop(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ended:
+	default:
+		t.Fatal("Stop returned with a dial in flight")
+	}
+}
+
+func TestStopGivesUpOnADialThatWillNotEnd(t *testing.T) {
+	// A resolver that ignores its ctx: Stop waits for it only as long as its
+	// own ctx allows.
+	entered, release := make(chan struct{}), make(chan struct{})
+	n, err := grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.ResolverFunc(func(context.Context, string) (string, error) {
+		close(entered)
+		<-release
+		return "", errors.New("gone")
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer close(release)
+	dialStuck(t, n, entered)
+	stop, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if err := n.Stop(stop); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("got %v", err)
+	}
 }

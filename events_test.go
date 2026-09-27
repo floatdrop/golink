@@ -41,11 +41,11 @@ func TestSubscribe(t *testing.T) {
 	if ev := nextEvent(t, events, grpcproc.EventSpawn); ev.Process.PID != e.PID() || ev.Process.Label != "echo" || ev.Time.IsZero() {
 		t.Fatalf("%+v", ev)
 	}
-	_ = a.SendTo(e.PID(), &testpb.Pong{})
+	_ = a.SendTo(t.Context(), e.PID(), &testpb.Pong{})
 	if ev := nextEvent(t, events, grpcproc.EventDeadLetter); ev.To != e.PID() || ev.Type != "grpcproc.test.v1.Pong" || ev.Reason != grpcproc.ReasonType {
 		t.Fatalf("%+v", ev)
 	}
-	_ = a.Send(e, &testpb.Ping{N: -100})
+	_ = a.Send(t.Context(), e, &testpb.Ping{N: -100})
 	if ev := nextEvent(t, events, grpcproc.EventExit); ev.Process.PID != e.PID() || ev.Reason != "boom" {
 		t.Fatalf("%+v", ev)
 	}
@@ -74,10 +74,10 @@ func TestSubscribeMissedAndClose(t *testing.T) {
 	events := a.Subscribe(ctx, 1)
 	quiet := a.Subscribe(t.Context(), 0) // buffer rounds up to 1
 	for range 5 {
-		_ = a.SendTo(grpcproc.PID{Node: "a"}, proto.Message(&testpb.Ping{}))
+		_ = a.SendTo(t.Context(), grpcproc.PID{Node: "a"}, proto.Message(&testpb.Ping{}))
 	}
 	<-events // the first one fitted
-	_ = a.SendTo(grpcproc.PID{Node: "a"}, &testpb.Ping{})
+	_ = a.SendTo(t.Context(), grpcproc.PID{Node: "a"}, &testpb.Ping{})
 	if ev := <-events; ev.Missed != 4 {
 		t.Fatalf("missed %d", ev.Missed)
 	}

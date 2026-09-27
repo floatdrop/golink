@@ -132,8 +132,8 @@ func TestSendAfter(t *testing.T) {
 		_, err := p.Receive() // until told to exit
 		return err
 	})
-	_ = a.SendContext(grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"tenant": "first"}), p, &testpb.Ping{})
-	_ = a.SendContext(grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"tenant": "second"}), p, &testpb.Ping{})
+	_ = a.Send(grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"tenant": "first"}), p, &testpb.Ping{})
+	_ = a.Send(grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"tenant": "second"}), p, &testpb.Ping{})
 	m := recv(t, got)
 	if m.Body.(*testpb.Ping).GetN() != 1 || m.From != p.PID() {
 		t.Fatalf("got %+v", m)
@@ -142,7 +142,7 @@ func TestSendAfter(t *testing.T) {
 	if m.Metadata["tenant"] != "first" {
 		t.Fatalf("timer carried %v", m.Metadata)
 	}
-	_ = a.Send(p, &testpb.Ping{})
+	_ = a.Send(t.Context(), p, &testpb.Ping{})
 	r := <-res
 	if !r.stopped || r.stoppedLate {
 		t.Fatalf("Stop: before firing %v, after firing %v", r.stopped, r.stoppedLate)

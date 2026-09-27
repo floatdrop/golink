@@ -120,9 +120,9 @@ func TestListProcessesFilters(t *testing.T) {
 	_, _ = n.Spawn(fn2, grpcproc.WithName("orders-idle"), grpcproc.WithLabel("order"), insp2)
 	fn3, insp3 := worker(release)
 	_, _ = n.Spawn(fn3, grpcproc.WithName("billing"), grpcproc.WithLabel("bill"), insp3)
-	_ = n.Send(busy, &testpb.Ping{N: 7})
-	_ = n.Send(busy, &testpb.Ping{N: 1})
-	_ = n.Send(busy, &testpb.Ping{N: 1})
+	_ = n.Send(t.Context(), busy, &testpb.Ping{N: 7})
+	_ = n.Send(t.Context(), busy, &testpb.Ping{N: 1})
+	_ = n.Send(t.Context(), busy, &testpb.Ping{N: 1})
 	time.Sleep(30 * time.Millisecond)
 
 	a := client(c, "a")
@@ -173,7 +173,7 @@ func TestGetProcess(t *testing.T) {
 	spawner := <-parents
 	parent := spawner.PID()
 	pid, _ := spawner.Spawn(fn, grpcproc.WithName("w"), insp)
-	_ = b.Send(pid, &testpb.Ping{N: 1})
+	_ = b.Send(t.Context(), pid, &testpb.Ping{N: 1})
 	time.Sleep(20 * time.Millisecond)
 
 	a := client(c, "a")
@@ -191,7 +191,7 @@ func TestGetProcess(t *testing.T) {
 		t.Fatalf("%v %v", resp, err)
 	}
 	// Busy: the snapshot is still returned, with why inspect is empty.
-	_ = b.Send(pid, &testpb.Ping{N: 7})
+	_ = b.Send(t.Context(), pid, &testpb.Ping{N: 7})
 	time.Sleep(20 * time.Millisecond)
 	resp, err = a.GetProcess(t.Context(), &inspectv1.GetProcessRequest{Target: byPID(pid.PID()), Inspect: true, InspectTimeout: durationpb.New(30 * time.Millisecond)})
 	if err != nil || !strings.Contains(resp.GetInspectError(), "busy") || resp.GetProcess() == nil {

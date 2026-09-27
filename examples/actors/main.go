@@ -110,7 +110,7 @@ func main() {
 		}
 		reserved <- r
 	}()
-	if err := node.Send(inventory, restock("apple", 5)); err != nil {
+	if err := node.Send(ctx, inventory, restock("apple", 5)); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("reserved, left:", (<-reserved).Left)
@@ -127,7 +127,7 @@ func main() {
 	// A reservation sent without waiting for the answer breaks the
 	// protocol: HandleMessage fails, and the actor exits. The call behind
 	// it in the mailbox is never handled.
-	if err := node.Send(inventory, reserve("apple", 1)); err != nil {
+	if err := node.Send(ctx, inventory, reserve("apple", 1)); err != nil {
 		log.Fatal(err)
 	}
 	_, err = node.Call[*shoppb.Reserved](ctx, inventory, reserve("apple", 1))

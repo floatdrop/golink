@@ -57,8 +57,8 @@ func restarted(t *testing.T, n *grpcproc.Node, name string, old grpcproc.PID) gr
 	}
 }
 
-func send(n *grpcproc.Node, name string, v int64) {
-	_ = n.Send(grpcproc.Named[*testpb.Ping](n.Name(), name), &testpb.Ping{N: v})
+func send(t *testing.T, n *grpcproc.Node, name string, v int64) {
+	_ = n.Send(t.Context(), grpcproc.Named[*testpb.Ping](n.Name(), name), &testpb.Ping{N: v})
 }
 
 func settle() { time.Sleep(50 * time.Millisecond) }
@@ -92,7 +92,7 @@ func TestStrategies(t *testing.T) {
 			for _, name := range names {
 				before[name] = pidOf(t, n, name)
 			}
-			send(n, "w2", -1)
+			send(t, n, "w2", -1)
 			restarted(t, n, "w2", before["w2"])
 			settle()
 			for i, name := range names {
@@ -126,19 +126,19 @@ func TestRestartPolicies(t *testing.T) {
 	}
 	// A permanent child comes back even after a normal exit.
 	old := pidOf(t, n, "perm")
-	send(n, "perm", 0)
+	send(t, n, "perm", 0)
 	restarted(t, n, "perm", old)
 	// A transient child comes back after a crash, not after a normal exit.
 	old = pidOf(t, n, "trans")
-	send(n, "trans", -1)
+	send(t, n, "trans", -1)
 	old = restarted(t, n, "trans", old)
-	send(n, "trans", 0)
+	send(t, n, "trans", 0)
 	settle()
 	if _, ok := n.Whereis("trans"); ok {
 		t.Fatal("transient child restarted after a normal exit")
 	}
 	// A temporary child never comes back.
-	send(n, "temp", -1)
+	send(t, n, "temp", -1)
 	settle()
 	if _, ok := n.Whereis("temp"); ok {
 		t.Fatal("temporary child restarted")
@@ -157,10 +157,10 @@ func TestOneForAllKeepsFinishedChildrenFinished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	send(n, "done", 0) // finishes normally: stays finished
+	send(t, n, "done", 0) // finishes normally: stays finished
 	settle()
 	old := pidOf(t, n, "main")
-	send(n, "main", -1)
+	send(t, n, "main", -1)
 	restarted(t, n, "main", old)
 	settle()
 	if _, ok := n.Whereis("done"); ok {
@@ -186,9 +186,9 @@ func TestIntensityAndEscalation(t *testing.T) {
 	inner := pidOf(t, n, "inner")
 	innerDowns := watch(t, n, inner)
 	leaf := pidOf(t, n, "leaf")
-	send(n, "leaf", -1)
+	send(t, n, "leaf", -1)
 	leaf = restarted(t, n, "leaf", leaf) // first restart: allowed
-	send(n, "leaf", -1)                  // second: over the limit
+	send(t, n, "leaf", -1)               // second: over the limit
 	if d := down(t, innerDowns); d.Reason != actor.ReasonMaxRestarts {
 		t.Fatalf("inner exited with %q", d.Reason)
 	}
@@ -209,7 +209,7 @@ func TestNoRestartsAllowed(t *testing.T) {
 		t.Fatal(err)
 	}
 	downs := watch(t, n, sup)
-	send(n, "w", -1)
+	send(t, n, "w", -1)
 	if d := down(t, downs); d.Reason != actor.ReasonMaxRestarts {
 		t.Fatalf("%+v", d)
 	}
@@ -230,7 +230,7 @@ func TestSupervisorExitStopsChildren(t *testing.T) {
 	if _, err := n.CallTo[*testpb.Pong](t.Context(), sup, &testpb.Ping{}); err == nil {
 		t.Fatal("a supervisor answered a call")
 	}
-	_ = n.SendTo(sup, &testpb.Ping{})
+	_ = n.SendTo(t.Context(), sup, &testpb.Ping{})
 	_ = n.Exit(grpcproc.Name{Node: "a", Name: "sup"}, grpcproc.ReasonKilled)
 	for _, ch := range []<-chan grpcproc.Down{w1, w2} {
 		if d := down(t, ch); d.Reason != grpcproc.ReasonShutdown {
@@ -261,11 +261,11 @@ func TestChildIgnoringExit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	send(n, "stubborn", 5)
+	send(t, n, "stubborn", 5)
 	settle()
 	old := pidOf(t, n, "w")
 	start := time.Now()
-	send(n, "w", -1)
+	send(t, n, "w", -1)
 	restarted(t, n, "w", old)
 	if time.Since(start) < 30*time.Millisecond {
 		t.Fatal("did not wait for the stubborn child")
@@ -326,13 +326,13 @@ func TestChildHandlerIsFreshOnRestart(t *testing.T) {
 	}
 	addr := grpcproc.Named[*testpb.Ping]("a", "counter")
 	pidOf(t, n, "counter")
-	_ = n.Send(addr, &testpb.Ping{N: 1})
-	_ = n.Send(addr, &testpb.Ping{N: 1})
+	_ = n.Send(t.Context(), addr, &testpb.Ping{N: 1})
+	_ = n.Send(t.Context(), addr, &testpb.Ping{N: 1})
 	if r, _ := n.Call[*testpb.Pong](t.Context(), addr, &testpb.Ping{}); r.GetN() != 2 {
 		t.Fatalf("count %d", r.GetN())
 	}
 	old := pidOf(t, n, "counter")
-	_ = n.Send(addr, &testpb.Ping{N: -1})
+	_ = n.Send(t.Context(), addr, &testpb.Ping{N: -1})
 	restarted(t, n, "counter", old)
 	if r, _ := n.Call[*testpb.Pong](t.Context(), addr, &testpb.Ping{}); r.GetN() != 0 {
 		t.Fatalf("state survived a restart: %d", r.GetN())

@@ -88,10 +88,11 @@ func glSend(b *testing.B, from, to *grpcproc.Node) {
 		b.Fatal(err)
 	}
 	m := &shared.Msg{Value: 1}
+	ctx := b.Context()
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		_ = from.Send(sink, m)
+		_ = from.Send(ctx, sink, m)
 	}
 	<-done
 }

@@ -308,7 +308,7 @@ func main() {
 		}
 		reserved <- r
 	}()
-	if err := node.Send(inventory, restock("apple", 5)); err != nil {
+	if err := node.Send(ctx, inventory, restock("apple", 5)); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("reserved, left:", (<-reserved).Left)
@@ -325,7 +325,7 @@ func main() {
 	// A reservation sent without waiting for the answer breaks the
 	// protocol: HandleMessage fails, and the actor exits. The call behind
 	// it in the mailbox is never handled.
-	if err := node.Send(inventory, reserve("apple", 1)); err != nil {
+	if err := node.Send(ctx, inventory, reserve("apple", 1)); err != nil {
 		log.Fatal(err)
 	}
 	_, err = node.Call[*shoppb.Reserved](ctx, inventory, reserve("apple", 1))
@@ -472,7 +472,7 @@ func main() {
 
 	// The name reaches whichever process currently runs the child.
 	inventory := grpcproc.Named[*shoppb.Stock]("shop", "inventory")
-	if err := node.Send(inventory, restock("apple", 5)); err != nil {
+	if err := node.Send(ctx, inventory, restock("apple", 5)); err != nil {
 		log.Fatal(err)
 	}
 	r, err := node.Call[*shoppb.Reserved](ctx, inventory, reserve("apple", 2))
@@ -483,7 +483,7 @@ func main() {
 
 	// Crash it, and follow what the supervisor does through node events.
 	events := node.Subscribe(ctx, 16)
-	if err := node.Send(inventory, restock("apple", 0)); err != nil {
+	if err := node.Send(ctx, inventory, restock("apple", 0)); err != nil {
 		log.Fatal(err)
 	}
 	for e := range events {
@@ -548,7 +548,8 @@ r, err := p.Call[*shoppb.Reserved](ctx, stock, &shoppb.Reserve{…})
 err = p.SendTo(m.From, &shoppb.Restock{…}) // untyped: a PID from a message
 a, err := p.CallTo[*shoppb.Reserved](ctx, m.From, &shoppb.Reserve{…})
 
-// Node has the same four: Send, SendTo, Call, CallTo.
+// Node has the same four, and each takes a ctx: its metadata goes with the
+// message. It bounds a whole Call, but for Send only the first connection.
 ```
 
 | Call | Returns |

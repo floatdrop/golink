@@ -77,8 +77,8 @@ func typed[R proto.Message](resp proto.Message, err error) (R, error) {
 
 type mdKey struct{}
 
-// WithMetadata returns a context carrying md; SendContext and Call propagate
-// it with the message, merged over any metadata already in ctx.
+// WithMetadata returns a context carrying md, merged over any metadata already
+// in ctx. Node.Send, Node.SendTo and every Call propagate it with the message.
 func WithMetadata(ctx context.Context, md Metadata) context.Context {
 	if old := MetadataFrom(ctx); len(old) > 0 {
 		merged := maps.Clone(old)

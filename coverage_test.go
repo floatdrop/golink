@@ -99,10 +99,10 @@ func TestNewNodeValidation(t *testing.T) {
 		t.Fatalf("defaults: %+v", n.Info())
 	}
 	// Unknown peer: the resolver refuses, the error is a connection error.
-	if err := n.SendTo(grpcproc.Named[*testpb.Ping]("nowhere", "x"), &testpb.Ping{}); !errors.Is(err, grpcproc.ErrNoConnection) {
+	if err := n.SendTo(t.Context(), grpcproc.Named[*testpb.Ping]("nowhere", "x"), &testpb.Ping{}); !errors.Is(err, grpcproc.ErrNoConnection) {
 		t.Fatalf("got %v", err)
 	}
-	if err := n.SendTo(grpcproc.PID{}, &testpb.Ping{}); err == nil {
+	if err := n.SendTo(t.Context(), grpcproc.PID{}, &testpb.Ping{}); err == nil {
 		t.Fatal("empty node must be an error")
 	}
 	if err := n.Stop(context.Background()); err != nil {
@@ -114,7 +114,7 @@ func TestNewNodeValidation(t *testing.T) {
 	if _, err := n.Spawn(echo); !errors.Is(err, grpcproc.ErrNodeStopped) {
 		t.Fatalf("spawn after stop: %v", err)
 	}
-	if err := n.SendTo(grpcproc.Named[*testpb.Ping]("b", "x"), &testpb.Ping{}); !errors.Is(err, grpcproc.ErrNodeStopped) {
+	if err := n.SendTo(t.Context(), grpcproc.Named[*testpb.Ping]("b", "x"), &testpb.Ping{}); !errors.Is(err, grpcproc.ErrNodeStopped) {
 		t.Fatalf("send after stop: %v", err)
 	}
 }
@@ -242,7 +242,7 @@ func TestReceiveTimeoutAndExitError(t *testing.T) {
 	}
 }
 
-func TestSendContextReplyAndMonitorVariants(t *testing.T) {
+func TestProcessSendReplyAndMonitorVariants(t *testing.T) {
 	c := grpcproctest.New(t, "a", "b")
 	a, b := c.Node("a"), c.Node("b")
 	col, ch := collector(t, b)
@@ -250,8 +250,7 @@ func TestSendContextReplyAndMonitorVariants(t *testing.T) {
 	done := make(chan struct{})
 	_, _ = a.Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
 		defer close(done)
-		md := grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"k": "v"})
-		if err := p.SendContext(md, col, proto.Message(&testpb.Ping{N: 1})); err != nil {
+		if err := p.Send(col, proto.Message(&testpb.Ping{N: 1})); err != nil {
 			return err
 		}
 		// CallTo from a process, to an untyped target.
@@ -278,8 +277,8 @@ func TestSendContextReplyAndMonitorVariants(t *testing.T) {
 		// Exit a remote process by name, from a process.
 		return p.Exit(grpcproc.Name{Node: "b", Name: "echo"}, grpcproc.ReasonKilled)
 	})
-	if m := recv(t, ch); m.Metadata["k"] != "v" {
-		t.Fatalf("%v", m.Metadata)
+	if m := recv(t, ch); len(m.Metadata) != 0 || !proto.Equal(m.Body, &testpb.Ping{N: 1}) {
+		t.Fatalf("%+v", m)
 	}
 	<-done
 	// The echo was told to exit.
@@ -312,7 +311,7 @@ func TestEncodeErrors(t *testing.T) {
 	a, b := c.Node("a"), c.Node("b")
 	bad := &testpb.Reserve{Id: "\xff"}
 	col, _ := collector(t, b)
-	if err := a.SendTo(col, bad); err == nil || !strings.Contains(err.Error(), "encode") {
+	if err := a.SendTo(t.Context(), col, bad); err == nil || !strings.Contains(err.Error(), "encode") {
 		t.Fatalf("send: %v", err)
 	}
 	if _, err := a.CallTo[*testpb.Pong](ctx(t), col, bad); err == nil || !strings.Contains(err.Error(), "encode") {
@@ -353,9 +352,9 @@ func TestInspectWhileBacklogged(t *testing.T) {
 			}
 		}
 	}, grpcproc.WithInspect(func() map[string]string { return map[string]string{"n": "x"} }))
-	_ = a.SendTo(e, &testpb.Ping{N: 7})
+	_ = a.SendTo(t.Context(), e, &testpb.Ping{N: 7})
 	<-entered
-	_ = a.SendTo(e, &testpb.Ping{N: 1}) // queued behind the busy handler
+	_ = a.SendTo(t.Context(), e, &testpb.Ping{N: 1}) // queued behind the busy handler
 	got := make(chan error, 1)
 	go func() { _, err := a.Inspect(ctx(t), e.PID()); got <- err }()
 	time.Sleep(20 * time.Millisecond)
@@ -446,7 +445,7 @@ func TestHandshakeFailures(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			n := nodeAgainst(t, tc.peer, 200*time.Millisecond)
-			err := n.SendTo(grpcproc.Named[*testpb.Ping]("b", "x"), &testpb.Ping{})
+			err := n.SendTo(t.Context(), grpcproc.Named[*testpb.Ping]("b", "x"), &testpb.Ping{})
 			if !errors.Is(err, grpcproc.ErrNoConnection) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("got %v", err)
 			}
@@ -529,7 +528,7 @@ func TestCopyLocal(t *testing.T) {
 	t.Cleanup(func() { _ = n.Stop(context.Background()) })
 	e, _ := n.Spawn(echo)
 	msg := &testpb.Ping{N: 1}
-	if err := n.SendTo(e, msg); err != nil {
+	if err := n.SendTo(t.Context(), e, msg); err != nil {
 		t.Fatal(err)
 	}
 	msg.N = -100 // would crash the echo if the pointer were shared
@@ -587,7 +586,7 @@ func TestOrderingOfSnapshots(t *testing.T) {
 	if info, _ := a.Process(e1.PID()); info.Watchers != 0 {
 		t.Fatalf("%+v", info)
 	}
-	_ = a.SendTo(e1, &testpb.Ping{N: 0})
+	_ = a.SendTo(t.Context(), e1, &testpb.Ping{N: 0})
 	select {
 	case m := <-ch:
 		t.Fatalf("unexpected %+v", m)
@@ -627,7 +626,7 @@ func TestAuthorize(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = a.SendTo(grpcproc.Named[*testpb.Ping]("b", "x"), &testpb.Ping{})
+		err = a.SendTo(t.Context(), grpcproc.Named[*testpb.Ping]("b", "x"), &testpb.Ping{})
 		if name == "a" && (err == nil || !strings.Contains(err.Error(), "unknown peer a")) {
 			t.Fatalf("a: %v", err)
 		}

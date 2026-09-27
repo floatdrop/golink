@@ -168,9 +168,10 @@ type dialOp struct {
 	err  error
 }
 
-// getOut returns the link to peer, dialing once if needed; concurrent
-// callers share the dial.
-func (n *Node) getOut(peer string) (*outLink, error) {
+// getOut returns the link to peer, dialing if there is none. Concurrent
+// callers share one dial, which runs on its own goroutine: a caller whose ctx
+// ends stops waiting, and the dial goes on for the others.
+func (n *Node) getOut(ctx context.Context, peer string) (*outLink, error) {
 	n.mu.Lock()
 	if n.stopped {
 		n.mu.Unlock()
@@ -180,17 +181,29 @@ func (n *Node) getOut(peer string) (*outLink, error) {
 		n.mu.Unlock()
 		return l, nil
 	}
-	if d := n.dialing[peer]; d != nil {
+	if err := ctx.Err(); err != nil {
 		n.mu.Unlock()
-		<-d.done
-		return d.l, d.err
+		return nil, err // it would not wait for the dial, so it starts none
 	}
-	d := &dialOp{done: make(chan struct{})}
-	n.dialing[peer] = d
+	d := n.dialing[peer]
+	if d == nil {
+		d = &dialOp{done: make(chan struct{})}
+		n.dialing[peer] = d
+		// Under n.mu, and only while not stopped: Stop's Wait sees every Add.
+		n.dialWG.Go(func() { n.finishDial(peer, d) })
+	}
 	n.mu.Unlock()
+	select {
+	case <-d.done:
+		return d.l, d.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
+// finishDial dials peer for d's waiters and installs the link.
+func (n *Node) finishDial(peer string, d *dialOp) {
 	l, err := n.dial(peer)
-
 	n.mu.Lock()
 	delete(n.dialing, peer)
 	if err == nil {
@@ -208,13 +221,12 @@ func (n *Node) getOut(peer string) (*outLink, error) {
 	}
 	d.l, d.err = l, err
 	close(d.done)
-	return l, err
 }
 
 func (n *Node) dial(peer string) (*outLink, error) {
 	// Not derived from n.ctx: a dial that Stop overtakes completes and is
-	// then discarded by getOut, rather than failing half-way with a
-	// misleading error.
+	// then discarded by finishDial, rather than failing half-way with a
+	// misleading error. Stop waits for it.
 	ctx, cancel := context.WithTimeout(context.Background(), n.cfg.DialTimeout)
 	defer cancel()
 	addr, err := n.cfg.Resolver.Resolve(ctx, peer)

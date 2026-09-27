@@ -102,7 +102,7 @@ func main() {
 
 	// The name reaches whichever process currently runs the child.
 	inventory := grpcproc.Named[*shoppb.Stock]("shop", "inventory")
-	if err := node.Send(inventory, restock("apple", 5)); err != nil {
+	if err := node.Send(ctx, inventory, restock("apple", 5)); err != nil {
 		log.Fatal(err)
 	}
 	r, err := node.Call[*shoppb.Reserved](ctx, inventory, reserve("apple", 2))
@@ -113,7 +113,7 @@ func main() {
 
 	// Crash it, and follow what the supervisor does through node events.
 	events := node.Subscribe(ctx, 16)
-	if err := node.Send(inventory, restock("apple", 0)); err != nil {
+	if err := node.Send(ctx, inventory, restock("apple", 0)); err != nil {
 		log.Fatal(err)
 	}
 	for e := range events {

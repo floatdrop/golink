@@ -127,8 +127,8 @@ type Msg[M proto.Message] struct {
 // IsCall reports whether the sender waits for a Reply.
 func (m Msg[M]) IsCall() bool { return m.ref != 0 }
 
-// Context returns a context carrying the message's metadata, for Send and
-// Call made while handling it.
+// Context returns a context carrying the message's metadata, for Node.Send,
+// a Call, or any code taking a ctx, run on behalf of the message.
 func (m Msg[M]) Context(parent context.Context) context.Context {
 	if len(m.Metadata) == 0 {
 		return parent
@@ -298,20 +298,18 @@ func toMsg[M proto.Message](it item) Msg[M] {
 	return m
 }
 
-// Send delivers m to a typed address, local or remote. See Node.Send.
+// Send delivers m to a typed address, local or remote. It carries the
+// metadata of the message the process is handling. A first send to a node
+// with no link yet waits for the dial, up to Config.DialTimeout. See
+// Node.Send.
 func (p *Process[M]) Send[N proto.Message](to Addr[N], m N) error {
-	return p.n.send(p.pid, p.proc, to.dest(), m, p.outgoing(nil))
-}
-
-// SendContext is Send with the metadata carried by ctx.
-func (p *Process[M]) SendContext[N proto.Message](ctx context.Context, to Addr[N], m N) error {
-	return p.n.send(p.pid, p.proc, to.dest(), m, p.outgoing(MetadataFrom(ctx)))
+	return p.n.send(context.Background(), p.pid, p.proc, to.dest(), m, p.outgoing(nil))
 }
 
 // SendTo delivers msg to an untyped target such as a Msg's From. The
 // target's type is checked on delivery only.
 func (p *proc) SendTo(to Target, msg proto.Message) error {
-	return p.n.send(p.pid, p, destOf(to), msg, p.outgoing(nil))
+	return p.n.send(context.Background(), p.pid, p, destOf(to), msg, p.outgoing(nil))
 }
 
 // Call sends req and waits for the Reply, typed as R:
@@ -375,7 +373,7 @@ func (p *proc) sendAfter(d time.Duration, to dest, m proto.Message) *Timer {
 		delete(p.timers, tm)
 		p.mu.Unlock()
 		if pending {
-			_ = p.n.send(p.pid, p, to, m, md)
+			_ = p.n.send(context.Background(), p.pid, p, to, m, md)
 		}
 	})
 	return tm

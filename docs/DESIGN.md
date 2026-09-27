@@ -175,7 +175,8 @@ func (p *Process[M]) Send[N proto.Message](to Addr[N], m N) error
 func (p *Process[M]) Call[R, N proto.Message](ctx, to Addr[N], req N) (R, error)
 func (p *Process[M]) CallTo[R proto.Message](ctx, to Target, req proto.Message) (R, error)
 func (p *Process[M]) SendTo(to Target, m proto.Message) error
-// Node has the same Send / SendTo / Call / CallTo, with the node as sender.
+// Node has the same Send / SendTo / Call / CallTo, with the node as sender;
+// its Send and SendTo take a ctx too, for metadata and the dial.
 func (p *Process[M]) Reply(m Msg[M], resp proto.Message, err error) error   // may be deferred
 func (p *Process[M]) Monitor(to Target) Ref
 func (p *Process[M]) Demonitor(ref Ref)
@@ -352,9 +353,9 @@ type Done func(err error)
 `Done` that closes what they started: a send once handed to delivery, a call
 once it returns, the handling of a message at the process's next `Receive`
 or its exit. A process remembers the metadata of the message it is handling
-(after `OnReceive`), and its own sends inherit it, merged under any metadata
-the send's ctx carries. That is ergo's "the outgoing message inherits the
-trace", and it is what lets a tracer build causal chains without the
+(after `OnReceive`), and its own sends and calls inherit it; a call's ctx
+can add to it. That is ergo's "the outgoing message inherits the trace", and
+it is what lets a tracer build causal chains without the
 application threading a context through every handler: `OnReceive` stamps
 the consumer span, and everything the handler sends is its child.
 `JoinHooks` combines several; metadata threads through them in order and

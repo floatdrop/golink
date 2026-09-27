@@ -124,7 +124,7 @@ func TestMembershipDropsLinks(t *testing.T) {
 	// A peer a only hears from (an inbound link, no outbound) leaves too.
 	cn := c.Node("c")
 	sink, got := collector(t, a)
-	_ = cn.SendTo(sink, &testpb.Ping{})
+	_ = cn.SendTo(t.Context(), sink, &testpb.Ping{})
 	recv(t, got)
 	// Incarnation 0: whichever it was.
 	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "c"}}

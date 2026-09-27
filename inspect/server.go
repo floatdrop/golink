@@ -221,7 +221,7 @@ func (s *Server) Send(ctx context.Context, req *inspectv1.SendRequest) (*inspect
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "inspect: body: %v", err)
 	}
-	if err := s.node.SendTo(to, body); err != nil {
+	if err := s.node.SendTo(ctx, to, body); err != nil {
 		return nil, status.Errorf(codes.Unavailable, "inspect: %v", err)
 	}
 	return &inspectv1.SendResponse{}, nil
