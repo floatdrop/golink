@@ -128,11 +128,15 @@ func (s *subscribers) publish(ev Event) {
 func (n *Node) Subscribe(ctx context.Context, buffer int) <-chan Event {
 	sub := &subscriber{ch: make(chan Event, max(buffer, 1))}
 	n.subs.add(sub)
-	stop := func() {
+	// One ctx ends the subscription, whichever of ctx and the node's ends
+	// first. Ending it unhooks it from both: a callback left on the node's
+	// ctx would keep the subscriber, and its buffer, until the node stops.
+	ctx, cancel := context.WithCancel(ctx)
+	unhook := context.AfterFunc(n.ctx, cancel)
+	context.AfterFunc(ctx, func() {
+		unhook()
 		n.subs.remove(sub)
 		sub.close()
-	}
-	context.AfterFunc(ctx, stop)
-	context.AfterFunc(n.ctx, stop)
+	})
 	return sub.ch
 }
