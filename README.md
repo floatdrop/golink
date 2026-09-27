@@ -181,7 +181,9 @@ no such process: true
 `grpcproc/actor` adds structure on top of processes, using only the public
 API. An actor is a plain struct holding its dependencies, which is what a
 constructor or a DI container builds. Instead of a receive loop it has a
-method per kind of message; all but `HandleMessage` are optional:
+method per kind of message; all but `HandleMessage` are optional. An actor
+that only answers calls embeds `actor.CallsOnly[M]` in place of it, which
+logs and drops anything sent to it without a call:
 
 | Method | Runs for | Its result |
 | --- | --- | --- |

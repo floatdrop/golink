@@ -2,6 +2,8 @@ package actor_test
 
 import (
 	"errors"
+	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -266,4 +268,65 @@ type monitoringPlain struct {
 func (m *monitoringPlain) Init(p *P) error {
 	p.Monitor(m.target)
 	return nil
+}
+
+// quoter only answers calls.
+type quoter struct{ actor.CallsOnly[*testpb.Ping] }
+
+func (quoter) HandleCall(_ *P, m M) (proto.Message, error) {
+	return &testpb.Pong{N: m.Body.GetN() + 1}, nil
+}
+
+// logBuffer is an io.Writer safe for the node's logger.
+type logBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *logBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *logBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+func TestCallsOnly(t *testing.T) {
+	var logs logBuffer
+	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithLogger(slog.New(slog.NewTextHandler(&logs, nil)))}, "a")
+	n := c.Node("a")
+	addr, err := n.Spawn(actor.Run(quoter{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A plain send is dropped with a warning; the actor carries on.
+	if err := n.Send(t.Context(), addr, &testpb.Ping{N: 1}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := n.Call[*testpb.Pong](t.Context(), addr, &testpb.Ping{N: 2})
+	if err != nil || r.GetN() != 3 {
+		t.Fatalf("%v %v", r, err)
+	}
+	if out := logs.String(); !strings.Contains(out, "dropped a message sent without a call") || !strings.Contains(out, "grpcproc.test.v1.Ping") {
+		t.Fatalf("log:\n%s", out)
+	}
+}
+
+// quoterByValue has a pointer-receiver HandleCall: spawned by value, it
+// would answer nothing.
+type quoterByValue struct{ actor.CallsOnly[*testpb.Ping] }
+
+func (*quoterByValue) HandleCall(*P, M) (proto.Message, error) { return &testpb.Pong{}, nil }
+
+func TestCallsOnlyWithoutHandleCallPanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil || !strings.Contains(fmt.Sprint(r), "quoterByValue") {
+			t.Fatalf("recovered %v", r)
+		}
+	}()
+	_ = actor.Run(quoterByValue{})
 }

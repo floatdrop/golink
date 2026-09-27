@@ -30,6 +30,32 @@ type Handler[M proto.Message] interface {
 	HandleMessage(p *grpcproc.Process[M], m grpcproc.Msg[M]) error
 }
 
+// CallsOnly provides HandleMessage for an actor that only answers calls;
+// embed it by value. A message sent to the actor with Send is logged at Warn
+// and dropped, and the actor carries on, as gen_server's default handle_info
+// does: a stray sender cannot crash it.
+//
+//	type Pricer struct {
+//		actor.CallsOnly[*pricespb.Quote]
+//		table *Table
+//	}
+//
+//	func (pr *Pricer) HandleCall(p *grpcproc.Process[*pricespb.Quote], m grpcproc.Msg[*pricespb.Quote]) (proto.Message, error) { … }
+//
+//	addr, err := node.Spawn(actor.Run(&Pricer{table: table}))
+//
+// Run panics for an actor that embeds CallsOnly but has no HandleCall, which
+// is what spawning Pricer{} rather than &Pricer{} gives.
+type CallsOnly[M proto.Message] struct{}
+
+// HandleMessage logs m and drops it.
+func (CallsOnly[M]) HandleMessage(p *grpcproc.Process[M], m grpcproc.Msg[M]) error {
+	p.Log().Warn("actor: dropped a message sent without a call", "from", m.From, "type", proto.MessageName(m.Body))
+	return nil
+}
+
+func (CallsOnly[M]) callsOnly() {}
+
 // CallHandler answers calls: the returned message, or error, is the reply,
 // and the actor carries on. Return ErrNoReply to answer later with
 // p.Reply(m, …), from any goroutine; ErrStop to reply and then stop.
@@ -72,6 +98,9 @@ var (
 // Process.Spawn or Process.SpawnMonitor.
 func Run[M proto.Message](h Handler[M]) func(*grpcproc.Process[M]) error {
 	calls, _ := h.(CallHandler[M])
+	if _, ok := h.(interface{ callsOnly() }); ok && calls == nil {
+		panic(fmt.Sprintf("actor: %T embeds CallsOnly but has no HandleCall; with a pointer receiver, pass a pointer", h))
+	}
 	downs, _ := h.(DownHandler[M])
 	init, _ := h.(Initializer[M])
 	term, _ := h.(Terminator[M])

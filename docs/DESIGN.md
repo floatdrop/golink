@@ -440,9 +440,12 @@ them. Two primitives went into the core because they need process internals:
 - `actor.Run(h)`, spawned as `n.Spawn(actor.Run(h))`: the handler loop.
   `Handler[M]` has `HandleMessage`; `CallHandler`, `DownHandler`,
   `Initializer`, `Terminator` are optional interfaces, found by type assertion
-  once. An error from
-  `HandleCall` is the reply and the actor carries on; from `HandleMessage` it
-  is the exit reason. `ErrStop` ends normally (replying first, from a call);
+  once. A call-only actor embeds `CallsOnly[M]`, whose `HandleMessage` logs
+  and drops what is sent without a call: gen_server's default `handle_info`,
+  so that a stray sender cannot crash the actor. It is not a dead letter,
+  because the message was delivered. An error from `HandleCall` is the
+  reply and the actor carries on; from `HandleMessage` it is the exit
+  reason. `ErrStop` ends normally (replying first, from a call);
   `ErrNoReply` defers the answer. `Terminate` also runs on a panic, which then
   continues so grpcproc reports it.
 - `actor.Supervise(n, Spec)`: one-for-one, one-for-all, rest-for-one;
