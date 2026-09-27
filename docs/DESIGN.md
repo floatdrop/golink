@@ -546,15 +546,51 @@ them. Two primitives went into the core because they need process internals:
   within `Within`, default 3 in 5s). Giving up is exit reason
   `max restarts`, abnormal, so a parent supervisor restarts the child
   supervisor: escalation. Children are registered under their names, so
-  addresses survive restarts; `Child` takes a factory so each start gets a
-  fresh handler. Only children that were running come back with their group:
-  a transient child that finished stays finished. Stopping a child is
-  Demonitor, Exit, then waiting on node events (not the mailbox, which is
-  closed once the supervisor itself has been told to exit), bounded by
-  `Spec.Shutdown`; grpcproc cannot kill a goroutine that ignores Exit, so such
-  a child is left behind and logged. A restart that cannot start counts
-  against the intensity, so it ends rather than loops. The supervisor's state
-  is published through `WithInspect`.
+  addresses survive restarts, or anonymous, with no name; `Child` takes a
+  factory so each start gets a fresh handler. Only children that were
+  running come back with their group: a transient child that finished stays
+  finished. Stopping a child is Demonitor, Exit, then waiting on node events
+  (not the mailbox, which is closed once the supervisor itself has been told
+  to exit), and looking again every 50ms, since events can be dropped. A
+  worker's wait is bounded by `Spec.Shutdown`, or its own; a child
+  supervisor's is not (`Infinity`, OTP's default for supervisors), since its
+  subtree stops in order.
+- **Nothing starts under a name an old process still holds.** OTP kills a
+  child that outlives its shutdown, so its restart always finds the name
+  free; grpcproc cannot kill a goroutine. Starting anyway fails on the name
+  at once, and every retry does too, so one stuck child used to burn the
+  whole restart intensity in a millisecond and end the tree to its root.
+  Instead the supervisor logs the child, monitors it, and a restart that
+  reaches it waits for its `Down`, starting the children after it only then,
+  in order, while the supervisor goes on handling its mailbox. Its own end
+  waits for such processes too, since whatever restarts it will start the
+  same names. An anonymous child holds no name and is waited for by nobody.
+  A child that never exits holds its restart for good: the alternative was
+  to end the tree, which cannot free the name either. A restart that cannot
+  start for another reason counts against the intensity, so it ends rather
+  than loops. The supervisor's state is published through `WithInspect`.
+- `actor.StartChild` adds a child to a running supervisor, and
+  `actor.StopChild` stops one for good. A spec holds Go functions, so
+  `StartChild` registers it in the actor package and calls the supervisor
+  with its id (`grpcproc.actor.v1.Control`): only a supervisor on the same
+  node can start it. `StopChild` carries a PID and works across nodes. A
+  child `StartChild` added is forgotten once it ends for good, so a pool of
+  anonymous workers does not grow the supervisor. There is no
+  `simple_one_for_one`: a pool is a `OneForOne` supervisor whose children
+  `StartChild` adds. `StartChild` is refused while a restart waits, since
+  the new child would start before the ones owed a start.
+- **A supervisor that waits long for a child answers calls with
+  `ErrBusy`.** It waits outside `Receive`, and so do the supervisors above
+  it, each waiting for its subtree; a child that calls its supervisor while
+  it exits, from a `Terminate` say, would hold the whole chain until its call
+  gave up, or for good. So while it waits it takes what is queued, to handle
+  after, and once the wait passes 100ms it answers the calls among it with
+  `ErrBusy`: a quick stop is invisible to callers, a stuck one holds none of
+  them. Hooks see what it takes as received then, not when it is handled.
+- Significant children and `Spec.AutoShutdown` (`AnySignificant`,
+  `AllSignificant`; `NoAutoShutdown` by default) are OTP's: a supervisor ends itself, with `shutdown`,
+  when its significant children end by themselves for good; one it stops
+  does not count. A permanent child cannot be significant.
 
 ## Later
 

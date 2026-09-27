@@ -1,0 +1,20 @@
+// grpcproc.actor.v1 is what grpcproc/actor's supervisors are called with.
+syntax = "proto3";
+
+package grpcproc.actor.v1;
+
+import "grpcproc/v1/grpcproc.proto";
+
+option go_package = "github.com/floatdrop/grpcproc/proto/grpcproc/actor/v1;actorv1";
+
+// Control asks a supervisor to start a child, or to stop one.
+message Control {
+  oneof op {
+    // A child spec its caller registered in the actor package under this
+    // id. A spec holds Go functions, so only a supervisor on the caller's
+    // node can start it.
+    uint64 start = 1;
+    // A running child to stop and forget.
+    grpcproc.v1.PID stop = 2;
+  }
+}

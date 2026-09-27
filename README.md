@@ -275,14 +275,33 @@ then: grpcproc: no such process
 
 A supervisor starts its children in order, monitors them from before they
 run, and restarts those that exit. Its children are also linked to it, a
-safeguard beside the orderly stop it makes when it ends. `Strategy` says which: `OneForOne` only
-the child that exited, `OneForAll` every child, `RestForOne` the child and
-those started after it. A child's `Restart` says when: `Permanent` always,
-`Transient` after an abnormal exit only, `Temporary` never. More than
-`MaxRestarts` restarts `Within` the window (3 in 5s by default) and the
-supervisor exits with `max restarts`; its own supervisor, a
-`ChildSupervisor`, then restarts it, which is how failure moves up the tree.
-A child told to exit has `Shutdown` (5s) to do so.
+safeguard beside the orderly stop it makes when it ends. `Strategy` says
+which: `OneForOne` only the child that exited, `OneForAll` every child,
+`RestForOne` the child and those started after it. A child's `Restart` says
+when: `Permanent` always, `Transient` after an abnormal exit only,
+`Temporary` never. More than `MaxRestarts` restarts `Within` the window (3 in
+5s by default) and the supervisor exits with `max restarts`; its own
+supervisor, a `ChildSupervisor`, then restarts it, which is how failure
+moves up the tree.
+
+A worker told to exit has `Shutdown` (5s) to do so, or its own
+`WithShutdown(d)`. A child supervisor has as long as it takes
+(`actor.Infinity`) to stop its subtree in order. grpcproc cannot kill a
+goroutine, so a worker that outlives its `Shutdown` is logged and left
+behind. A named one keeps its name until it exits, and its supervisor starts
+it again, or ends, only once it has, handling its mailbox meanwhile: nothing
+is ever started under a name an old process still holds.
+
+| | |
+| --- | --- |
+| `ChildFunc("", fn)` | An anonymous child: registered under no name, known by its PID. A supervisor can have any number. |
+| `actor.StartChild(ctx, node, sup, spec) (PID, error)` | Adds a child to a running supervisor on `node` and starts it. Once it ends for good, the supervisor forgets it: a pool of workers is anonymous children added as they are needed. |
+| `actor.StopChild(ctx, node, sup, child) error` | Stops a child, which is not restarted until the supervisor itself starts again from its `Spec`. `sup` may be on another node. |
+| `Spec.AutoShutdown`, `WithSignificant(true)` | A supervisor that ends itself, with `shutdown`, when any or all of its significant children end by themselves: a job's subtree that is done. |
+
+A supervisor that waits more than 100ms for a child to exit answers calls,
+these included, with `actor.ErrBusy` until it is done; from a process, call
+it with `p.Context()`.
 
 `actor.Child` builds the handler afresh at every start, so a restart never
 sees the state that crashed; `ChildFunc` runs a plain process function. What

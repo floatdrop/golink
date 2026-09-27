@@ -280,7 +280,7 @@ func TestStartFailures(t *testing.T) {
 	_, err := actor.Supervise(n, actor.Spec{Children: []actor.ChildSpec{
 		actor.ChildFunc("first", worker), actor.ChildFunc("taken", worker),
 	}})
-	if err == nil || !strings.Contains(err.Error(), `start "taken"`) {
+	if err == nil || !strings.Contains(err.Error(), `start child 1, "taken"`) {
 		t.Fatalf("got %v", err)
 	}
 	settle()
@@ -301,16 +301,20 @@ func TestSpecValidation(t *testing.T) {
 	n := c.Node("a")
 	for _, spec := range []actor.Spec{
 		{Children: []actor.ChildSpec{{Name: "raw"}}},
-		{Children: []actor.ChildSpec{actor.ChildFunc("", worker)}},
 		{Children: []actor.ChildSpec{actor.ChildFunc("x", worker), actor.ChildFunc("x", worker)}},
 		{Strategy: 9},
+		{AutoShutdown: 9},
 		{Children: []actor.ChildSpec{actor.ChildFunc("x", worker).WithRestart(9)}},
+		{Children: []actor.ChildSpec{actor.ChildFunc("x", worker).WithShutdown(-5)}},
+		{Shutdown: -5},
+		{AutoShutdown: actor.AnySignificant, Children: []actor.ChildSpec{actor.ChildFunc("x", worker).WithSignificant(true)}},
+		{Children: []actor.ChildSpec{actor.ChildFunc("x", worker).WithRestart(actor.Transient).WithSignificant(true)}},
 	} {
 		if _, err := actor.Supervise(n, spec); err == nil {
 			t.Errorf("accepted %+v", spec)
 		}
 	}
-	if s := actor.Strategy(9).String() + actor.Restart(9).String(); s != "Strategy(9)Restart(9)" {
+	if s := actor.Strategy(9).String() + actor.Restart(9).String() + actor.AutoShutdown(9).String(); s != "Strategy(9)Restart(9)AutoShutdown(9)" {
 		t.Fatal(s)
 	}
 	c.Stop("a")
