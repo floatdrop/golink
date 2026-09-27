@@ -70,6 +70,19 @@ func (i *Inventory) HandleCall(_ *grpcproc.Process[*shoppb.Stock], m grpcproc.Ms
 	return &shoppb.Reserved{Sku: r.Sku, Left: i.left[r.Sku]}, nil
 }
 
+// tree is the supervision tree: one child, restarted alone when it exits,
+// up to 3 times a minute.
+func tree(ledger *Ledger) actor.Spec {
+	return actor.Spec{
+		Strategy:    actor.OneForOne,
+		MaxRestarts: 3,
+		Within:      time.Minute,
+		Children: []actor.ChildSpec{
+			actor.Child("inventory", func() *Inventory { return &Inventory{ledger: ledger} }),
+		},
+	}
+}
+
 func main() {
 	ctx := context.Background()
 	node, err := grpcproc.NewNode(grpcproc.Config{Name: "shop", Resolver: grpcproc.StaticResolver{}})
@@ -79,22 +92,7 @@ func main() {
 	defer func() { _ = node.Stop(ctx) }()
 
 	ledger := &Ledger{left: map[string]int64{}}
-	sup, err := actor.Supervise(node, actor.Spec{
-		// Restart only the child that exited. OneForAll restarts every
-		// child; RestForOne, the child and those started after it.
-		Strategy: actor.OneForOne,
-		// More restarts than this and the supervisor gives up: it exits
-		// with "max restarts", and its own supervisor, if any, restarts it.
-		MaxRestarts: 3,
-		Within:      time.Minute,
-		Children: []actor.ChildSpec{
-			// A child is registered under its name. Child builds a new
-			// handler for every start, so a restart never sees the state
-			// that crashed. ChildFunc runs a plain process function, and
-			// ChildSupervisor nests another Spec.
-			actor.Child("inventory", func() *Inventory { return &Inventory{ledger: ledger} }),
-		},
-	}, grpcproc.WithName("supervisor"))
+	sup, err := actor.Supervise(node, tree(ledger), grpcproc.WithName("supervisor"))
 	if err != nil {
 		log.Fatal(err)
 	}
