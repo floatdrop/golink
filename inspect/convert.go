@@ -126,6 +126,8 @@ func processInfoTo(p grpcproc.ProcessInfo) *inspectv1.ProcessInfo {
 		Watchers:      uint32(p.Watchers),
 		Wakeups:       p.Wakeups,
 		LogLevel:      int32(p.LogLevel),
+		Links:         uint32(p.Links),
+		TrapExit:      p.TrapExit,
 	}
 }
 
@@ -196,9 +198,11 @@ func ProcessInfo(p *inspectv1.ProcessInfo) grpcproc.ProcessInfo {
 		CallsInFlight: p.GetCallsInFlight(),
 		LastMessage:   p.GetLastMessage(),
 		Monitors:      int(p.GetMonitors()),
+		Links:         int(p.GetLinks()),
 		Watchers:      int(p.GetWatchers()),
 		Wakeups:       p.GetWakeups(),
 		LogLevel:      slog.Level(p.GetLogLevel()),
+		TrapExit:      p.GetTrapExit(),
 	}
 }
 

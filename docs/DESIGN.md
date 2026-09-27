@@ -2,8 +2,8 @@
 
 `grpcproc` gives goroutines Erlang-style network transparency on top of the gRPC
 server a service already runs. A process is addressed by a PID or a name; the
-same `Send`, `Call`, `Monitor` and `Exit` work whether the target is in this
-binary or on another node.
+same `Send`, `Call`, `Monitor`, `Link` and `Exit` work whether the target is
+in this binary or on another node.
 
 It is a library, not a framework, in the same sense that `fsm` and `di` are:
 
@@ -58,7 +58,7 @@ resp, err := node.Call[*orderspb.Reserved](ctx, addr, &orderspb.OrderMsg{}) // r
 ## Package layout
 
 ```
-grpcproc/                    core: Node, Process, PID, Send/Call/Monitor/Exit, links, inspection API
+grpcproc/                    core: Node, Process, PID, Send/Call/Monitor/Link/Exit, node links, inspection API
 grpcproc/proto/grpcproc/v1       wire protocol (.proto + generated code)
 grpcproc/grpcproctest            in-memory clusters over bufconn: Cluster, Partition, Kill
 grpcproc/inspect             grpcproc.v1.Inspector gRPC service + Go client (optional to register)
@@ -216,14 +216,20 @@ func (p *Process[M]) SendTo(to Target, m proto.Message) error
 func (p *Process[M]) Reply(m Msg[M], resp proto.Message, err error) error   // may be deferred
 func (p *Process[M]) Monitor(to Target) Ref
 func (p *Process[M]) Demonitor(ref Ref)
+func (p *Process[M]) Link(to Target)           // one way: to's exit ends p
+func (p *Process[M]) Unlink(to Target)
+func (p *Process[M]) SetTrapExit(trap bool)    // links' exits arrive as messages
+func (p *Process[M]) TrapExit() bool
+func (p *Process[M]) Parent() PID              // the spawning process, if any
 func (p *Process[M]) Exit(to Target, reason string) error
 func (p *Process[M]) Log() *slog.Logger        // pid and label attrs attached
-func (p *Process[M]) Context() context.Context // cancelled on Exit / node stop
+func (p *Process[M]) Context() context.Context // cancelled on Exit, a link's exit, node stop
 
 type Msg[M proto.Message] struct {
     From     PID
-    Body     M        // zero when Down is set
+    Body     M        // zero when Down or Exited is set
     Down     *Down    // set when a monitored process is gone
+    Exited   *Exited  // set when a linked process is gone, if p traps exits
     Metadata Metadata
 }
 func (m Msg[M]) IsCall() bool
@@ -260,6 +266,46 @@ Observability) so it can be one.
 Exit reasons: `normal`, `noproc`, `noconnection`, `shutdown`, `killed`, a
 panic (`panic: …` with the stack logged), or the error string the function
 returned.
+
+### Links
+
+A link is one way, as in ergo: after `p.Link(b)`, `b`'s exit ends `p`, with
+`b`'s reason, whatever it is, `normal` included; `p`'s exit leaves `b` alone,
+and `b` links to `p` for the other way. A link says "this process cannot go
+on without that one", so a normal end of the target ends the linker too:
+a child linked to a supervisor that was stopped cleanly must still go. The
+linker takes the reason as it is, so a transient child whose dependency
+ended `normal` or `shutdown` ended normally too, and is not restarted.
+
+- **On the wire, a link is a monitor.** Only the linker's node tells the two
+  apart: when the `Down` arrives, a monitor's is queued as a message, a
+  link's ends the process (its context is cancelled with an `*ExitError`,
+  as `Exit` does). So everything monitors get, links get: `noproc` for a
+  process that does not exist, `noconnection` when its node cannot be
+  reached or the connection breaks, stale incarnations, ordering behind the
+  target's last messages. A peer on an older version needs nothing new.
+- **Trapping exits.** `p.SetTrapExit(true)` turns links' exits into messages,
+  `Msg{Exited: &Exited{PID, Name, Reason}}`, in order with the rest. A
+  request to exit, `Exit` from a process or `Node.Exit`, is never trapped: a
+  goroutine cannot be killed, so `Exit` is the one request a process cannot
+  refuse by configuration. That is where grpcproc parts from Erlang and
+  ergo, whose explicit exit signals trap like a link's.
+- **Spawning linked.** `LinkParent()` links the child to its parent and
+  `LinkChild()` the parent to the child, both inside the critical section
+  that admits the child, as `SpawnMonitor` does its monitor, so neither
+  side's exit is missed however soon it comes. Both together are Erlang's
+  `spawn_link`.
+- **The parent's exit ends an actor even when it traps exits**, as it ends a
+  gen_server and an ergo actor. That rule is in `actor.Run`, not the core: a
+  raw process that traps exits decides for itself.
+
+Two-way links, Erlang's, were the alternative. They need Erlang's rule that
+a non-trapping process ignores a `normal` exit, or a helper that finishes
+would take its parent with it, and so a child whose supervisor stops
+cleanly is not stopped by the link. They also need both nodes to agree:
+Erlang's link protocol gained unlink ids and acknowledgements in OTP 23 to
+settle races between link, unlink and crossing exits. A one-way link is a
+monitor, which each side already handles alone.
 
 ### Discovery interfaces
 
@@ -336,9 +382,11 @@ type ProcessInfo struct {
     CallsInFlight uint32
     LastMessage string           // proto full name of the last body handled
     Monitors   int               // held by this process
-    Watchers   int               // processes monitoring this one
+    Links      int               // process links held by this process
+    Watchers   int               // processes monitoring or linked to this one
     Wakeups    uint64            // Receive returns
     LogLevel   slog.Level
+    TrapExit   bool
 }
 
 func (n *Node) Processes() []ProcessInfo          // ordered by PID.ID
@@ -471,7 +519,8 @@ them. Two primitives went into the core because they need process internals:
   whichever request is being handled when it fires. For that, inheritance
   moved from the send internals to the public `Send`/`Call` methods.
 - `p.Spawn[N](fn, …)` / `p.SpawnMonitor[N](fn, …)`: a child recorded with
-  `p` as its parent, for inspection; the second is Erlang's `spawn_monitor`.
+  `p` as its parent, linked to it only with `LinkParent` or `LinkChild`; the
+  second is Erlang's `spawn_monitor`.
   The monitor exists before the child runs, so a child that exits at once is
   reported with its real reason instead of `noproc`. A supervisor that
   monitored after spawning would misread a transient child's instant normal
@@ -481,7 +530,7 @@ them. Two primitives went into the core because they need process internals:
 
 - `actor.Run(h)`, spawned as `n.Spawn(actor.Run(h))`: the handler loop.
   `Handler[M]` has `HandleMessage`; `CallHandler`, `DownHandler`,
-  `Initializer`, `Terminator` are optional interfaces, found by type assertion
+  `ExitedHandler`, `Initializer`, `Terminator` are optional interfaces, found by type assertion
   once. A call-only actor embeds `CallsOnly[M]`, whose `HandleMessage` logs
   and drops what is sent without a call: gen_server's default `handle_info`,
   so that a stray sender cannot crash the actor. It is not a dead letter,
@@ -491,6 +540,8 @@ them. Two primitives went into the core because they need process internals:
   `ErrNoReply` defers the answer. `Terminate` also runs on a panic, which then
   continues so grpcproc reports it.
 - `actor.Supervise(n, Spec)`: one-for-one, one-for-all, rest-for-one;
+  children monitored from before they run, and linked to the supervisor
+  (`LinkParent`), a safeguard beside the orderly stop it makes when it ends;
   permanent, transient, temporary children; restart intensity (`MaxRestarts`
   within `Within`, default 3 in 5s). Giving up is exit reason
   `max restarts`, abnormal, so a parent supervisor restarts the child
@@ -521,6 +572,7 @@ them. Two primitives went into the core because they need process internals:
 | Own TCP protocol | ergo, GoAkt, Hollywood (dRPC) | The whole point is to reuse the gRPC server, TLS, interceptors and tooling the service already has |
 | One monitor = one stream | — | Loses message-before-Down ordering, costs a goroutine per monitor |
 | Priority mailbox queues | ergo (4 queues) | Inspection runs inside `Receive` instead; `Down` must stay in order with messages |
+| Two-way links | Erlang/OTP | A one-way link is a monitor on the wire and needs no agreement between nodes; see Links |
 | Bounded mailboxes | GoAkt | A full mailbox would stall the shared link for everyone |
 | Metrics per PID by default | GoAkt | Cardinality; label is the key, PID is available on request |
 | Embedded web UI | ergo Observer | A UI is a client; the core exposes the gRPC surface it would need |

@@ -461,7 +461,7 @@ func TestWatchEndsWhenNodeStops(t *testing.T) {
 func TestEventConversions(t *testing.T) {
 	now := time.Now()
 	pid := grpcproc.PID{Node: "a", Incarnation: 1, ID: 2}
-	info := grpcproc.ProcessInfo{PID: pid, Label: "l", StartedAt: now, LogLevel: slog.LevelWarn}
+	info := grpcproc.ProcessInfo{PID: pid, Label: "l", StartedAt: now, LogLevel: slog.LevelWarn, Links: 2, TrapExit: true}
 	events := []grpcproc.Event{
 		{Kind: grpcproc.EventSpawn, Process: info},
 		{Kind: grpcproc.EventExit, Process: info, Reason: "boom"},
@@ -474,7 +474,8 @@ func TestEventConversions(t *testing.T) {
 		got := inspect.Event(inspect.EventToProto(ev))
 		if got.Kind != ev.Kind || got.Reason != ev.Reason || got.Peer != ev.Peer || got.Err != ev.Err ||
 			got.From != ev.From || got.Type != ev.Type || got.Missed != 3 || !got.Time.Equal(now) ||
-			got.Process.PID != ev.Process.PID || got.Process.LogLevel != ev.Process.LogLevel || !got.Process.StartedAt.Equal(ev.Process.StartedAt) {
+			got.Process.PID != ev.Process.PID || got.Process.LogLevel != ev.Process.LogLevel || !got.Process.StartedAt.Equal(ev.Process.StartedAt) ||
+			got.Process.Links != ev.Process.Links || got.Process.TrapExit != ev.Process.TrapExit {
 			t.Errorf("%v: got %+v", ev.Kind, got)
 		}
 	}

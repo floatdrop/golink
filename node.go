@@ -1004,7 +1004,11 @@ func (n *Node) deliverDown(from, to PID, ref uint64, reason string) {
 		return
 	}
 	r := Ref{Node: n.id.Name, ID: ref}
-	if t, ok := p.dropMonitor(r); ok {
+	switch t, link, ok := p.dropWatch(r); {
+	case !ok: // demonitored or unlinked meanwhile
+	case link:
+		p.exitSignal(from, t.name, reason)
+	default:
 		p.push(item{from: from, down: &Down{Ref: r, PID: from, Name: t.name, Reason: reason}})
 	}
 }
@@ -1076,8 +1080,9 @@ func (n *Node) dispatch(peer string, env *grpcprocv1.Envelope) {
 }
 
 // nodeDown fails everything that depended on peer: pending calls get
-// ErrNoConnection, monitors of its processes fire Down{noconnection}, and
-// monitors its processes held on ours are dropped.
+// ErrNoConnection, monitors of its processes fire Down{noconnection}, links
+// to them exit their processes with noconnection, and monitors and links its
+// processes held on ours are dropped.
 func (n *Node) nodeDown(peer string, err error) {
 	n.mu.RLock()
 	procs := slices.Collect(maps.Values(n.procs))
@@ -1101,8 +1106,12 @@ func (n *Node) nodeDown(peer string, err error) {
 		pc.ch <- callResult{err: &LinkError{Peer: peer, Err: cause}}
 	}
 	for _, p := range procs {
-		for _, d := range p.peerDown(peer) {
+		downs, exits := p.peerDown(peer)
+		for _, d := range downs {
 			p.push(item{from: d.PID, down: &d})
+		}
+		for _, e := range exits {
+			p.exitSignal(e.PID, e.Name, e.Reason)
 		}
 	}
 	n.log.Debug("node down", "peer", peer, "err", err)

@@ -80,7 +80,8 @@ func (c ChildSpec) WithRestart(r Restart) ChildSpec {
 	return c
 }
 
-// ChildFunc is a child that runs fn, registered as name.
+// ChildFunc is a child that runs fn, registered as name and linked to its
+// supervisor. opts are for the child: grpcproc.LinkChild is not one of them.
 func ChildFunc[M proto.Message](name string, fn func(*grpcproc.Process[M]) error, opts ...grpcproc.SpawnOption) ChildSpec {
 	return ChildSpec{Name: name, start: func(sup *grpcproc.Process[proto.Message]) (grpcproc.PID, grpcproc.Ref, error) {
 		a, ref, err := sup.SpawnMonitor[M](fn, childOpts(name, opts)...)
@@ -106,8 +107,12 @@ func ChildSupervisor(name string, spec Spec, opts ...grpcproc.SpawnOption) Child
 	}}
 }
 
+// childOpts names a child and links it to its supervisor, a safeguard beside
+// the orderly stop the supervisor makes when it ends. opts must not hold
+// grpcproc.LinkChild: the supervisor, which does not trap exits, would end
+// whenever the child did.
 func childOpts(name string, opts []grpcproc.SpawnOption) []grpcproc.SpawnOption {
-	return append([]grpcproc.SpawnOption{grpcproc.WithName(name)}, opts...)
+	return append([]grpcproc.SpawnOption{grpcproc.WithName(name), grpcproc.LinkParent()}, opts...)
 }
 
 // Spec describes a supervisor.

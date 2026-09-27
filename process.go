@@ -17,14 +17,15 @@ import (
 	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
-// item is what sits in a mailbox: a message, a call, or a Down.
+// item is what sits in a mailbox: a message, a call, a Down or an Exited.
 type item struct {
-	from PID
-	body proto.Message // nil for a Down
-	down *Down
-	md   Metadata
-	ref  uint64 // call ref; 0 for a plain message
-	at   int64  // unix nanos, when it was queued; only when hooks want the wait
+	from   PID
+	body   proto.Message // nil for a Down or an Exited
+	down   *Down
+	exited *Exited
+	md     Metadata
+	ref    uint64 // call ref; 0 for a plain message
+	at     int64  // unix nanos, when it was queued; only when hooks want the wait
 }
 
 type inspectReq struct {
@@ -61,12 +62,14 @@ type proc struct {
 	lastMsg                 atomic.Pointer[string]
 	level                   atomic.Int64
 	levelSet                atomic.Bool
+	trapExit                atomic.Bool
 
 	// mu guards what follows. Taken inside Node.mu, never around it.
 	mu       sync.Mutex
 	exited   bool
-	watchers map[Ref]PID                    // who monitors me
+	watchers map[Ref]PID                    // who monitors me, or is linked to me
 	monitors map[Ref]monitorTarget          // whom I monitor
+	links    map[Ref]monitorTarget          // whom I am linked to: one per target
 	open     map[openCall]chan<- callResult // calls queued or taken, not yet answered: what a caller of this node waits on, nil for a peer's
 	timers   map[*Timer]struct{}            // SendAfter timers not yet fired
 }
@@ -89,9 +92,10 @@ func (t monitorTarget) target() (PID, string) { return t.pid, t.name }
 type SpawnOption func(*spawnOpts)
 
 type spawnOpts struct {
-	name    string
-	label   string
-	inspect func() map[string]string
+	name                  string
+	label                 string
+	inspect               func() map[string]string
+	linkParent, linkChild bool
 }
 
 // WithName registers the process under name on its node before it runs.
@@ -112,6 +116,20 @@ func WithInspect(fn func() map[string]string) SpawnOption {
 	return func(o *spawnOpts) { o.inspect = fn }
 }
 
+// LinkParent links the child to the process that spawns it, before the child
+// runs: when the parent exits, the child does too, with the parent's reason,
+// or receives an Exited if it traps exits. See Process.Link. It is for
+// Process.Spawn and SpawnMonitor: Node.Spawn, which has no parent, refuses it.
+func LinkParent() SpawnOption { return func(o *spawnOpts) { o.linkParent = true } }
+
+// LinkChild links the spawning process to the child, before the child runs:
+// when the child exits, the parent does too, with the child's reason, or
+// receives an Exited if it traps exits. With LinkParent as well, the two are
+// linked both ways, as Erlang's spawn_link does. Node.Spawn refuses it.
+func LinkChild() SpawnOption { return func(o *spawnOpts) { o.linkChild = true } }
+
+var errNoParent = errors.New("grpcproc: LinkParent and LinkChild need a parent: spawn with Process.Spawn")
+
 func parentPID(p *proc) PID {
 	if p == nil {
 		return PID{}
@@ -122,11 +140,13 @@ func parentPID(p *proc) PID {
 // Process is a goroutine with a mailbox of M and a cluster-wide PID.
 type Process[M proto.Message] struct{ *proc }
 
-// Msg is what Receive returns: a message (Body) or a Down, never both.
+// Msg is what Receive returns: a message (Body), a Down or an Exited, one
+// of them only.
 type Msg[M proto.Message] struct {
 	From     PID
 	Body     M
 	Down     *Down
+	Exited   *Exited
 	Metadata Metadata
 	ref      uint64
 	taker    *proc // for a call: the process that took it, which holds it until it is answered
@@ -157,9 +177,10 @@ func (n *Node) Spawn[M proto.Message](fn func(*Process[M]) error, opts ...SpawnO
 }
 
 // Spawn starts fn as a process on p's node, like Node.Spawn, with p
-// recorded as its parent. That is for inspection only: p does not monitor
-// the child, and neither exits when the other does. A process that has
-// exited spawns nothing: the error is ErrNoProc.
+// recorded as its parent. By itself that is for inspection: p does not
+// monitor the child, and neither exits when the other does, unless
+// LinkParent or LinkChild links them. A process that has exited spawns
+// nothing: the error is ErrNoProc.
 func (p *Process[M]) Spawn[N proto.Message](fn func(*Process[N]) error, opts ...SpawnOption) (Addr[N], error) {
 	a, _, err := spawn(p.n, fn, opts, p.proc, false)
 	return a, err
@@ -174,12 +195,16 @@ func (p *Process[M]) SpawnMonitor[N proto.Message](fn func(*Process[N]) error, o
 }
 
 // spawn starts fn on n. parent, when set, is recorded as the child's parent,
-// and monitors the child from before it runs if monitor is set.
+// and monitors the child from before it runs if monitor is set; so are the
+// links LinkParent and LinkChild ask for.
 func spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts []SpawnOption, parent *proc, monitor bool) (Addr[M], Ref, error) {
 	monitor = monitor && parent != nil
 	var o spawnOpts
 	for _, opt := range opts {
 		opt(&o)
+	}
+	if parent == nil && (o.linkParent || o.linkChild) {
+		return Addr[M]{}, Ref{}, errNoParent
 	}
 	typ := typeString[M]()
 	if o.label == "" {
@@ -208,8 +233,8 @@ func spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts []SpawnOpt
 	// One critical section admits the child: under n.mu, with the parent's
 	// lock inside it (n.mu first, then a process's lock: the one order), a
 	// parent's exit either precedes the spawn, which then fails, or finds the
-	// child registered and its monitor in place. A monitoring parent's
-	// monitor exists before the child runs, so its Down cannot be missed.
+	// child registered and its monitor and links in place. They exist before
+	// the child runs, so no exit on either side is missed.
 	n.mu.Lock()
 	if parent != nil {
 		parent.mu.Lock()
@@ -224,13 +249,28 @@ func spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts []SpawnOpt
 		err = ErrNameTaken
 	}
 	var ref Ref
-	if err == nil && monitor {
-		ref = Ref{Node: n.id.Name, ID: n.nextRef.Add(1)}
-		if parent.monitors == nil {
-			parent.monitors = map[Ref]monitorTarget{}
+	if err == nil && parent != nil {
+		watch := func(watched, watcher *proc, into *map[Ref]monitorTarget) Ref {
+			r := Ref{Node: n.id.Name, ID: n.nextRef.Add(1)}
+			if *into == nil {
+				*into = map[Ref]monitorTarget{}
+			}
+			(*into)[r] = monitorTarget{pid: watched.pid}
+			if watched.watchers == nil {
+				watched.watchers = map[Ref]PID{}
+			}
+			watched.watchers[r] = watcher.pid
+			return r
 		}
-		parent.monitors[ref] = monitorTarget{pid: p.pid}
-		p.watchers = map[Ref]PID{ref: parent.pid}
+		if monitor {
+			ref = watch(p, parent, &parent.monitors)
+		}
+		if o.linkChild {
+			watch(p, parent, &parent.links)
+		}
+		if o.linkParent {
+			watch(parent, p, &p.links)
+		}
 	}
 	if parent != nil {
 		parent.mu.Unlock()
@@ -270,16 +310,18 @@ func (p *proc) Node() *Node { return p.n }
 // Addr returns the process's typed address.
 func (p *Process[M]) Addr() Addr[M] { return Addr[M]{pid: p.pid} }
 
-// Context is cancelled when the process is asked to exit or its node stops.
-// context.Cause is an *ExitError after Exit.
+// Context is cancelled when the process is asked to exit, a process it is
+// linked to exits, or its node stops. context.Cause is then an *ExitError,
+// or context.Canceled.
 func (p *proc) Context() context.Context { return p.ctx }
 
 // Log returns a logger with the process's pid and label attached. Its
 // threshold can be changed at runtime with Node.SetLogLevel.
 func (p *proc) Log() *slog.Logger { return p.log }
 
-// Receive blocks until a message or a Down arrives, or the process is told
-// to exit. The error is then context.Canceled (node stop) or an *ExitError.
+// Receive blocks until a message, a Down or an Exited arrives, or the process
+// is told to exit. The error is then context.Canceled (node stop) or an
+// *ExitError: after Exit, or the exit of a process it is linked to.
 func (p *Process[M]) Receive() (Msg[M], error) {
 	it, err := p.receive(p.ctx)
 	return toMsg[M](p.proc, it), err
@@ -297,7 +339,7 @@ func (p *Process[M]) ReceiveTimeout(d time.Duration) (Msg[M], error) {
 }
 
 func toMsg[M proto.Message](taker *proc, it item) Msg[M] {
-	m := Msg[M]{From: it.from, Down: it.down, Metadata: it.md, ref: it.ref}
+	m := Msg[M]{From: it.from, Down: it.down, Exited: it.exited, Metadata: it.md, ref: it.ref}
 	if it.ref != 0 {
 		m.taker = taker
 	}
@@ -413,10 +455,79 @@ func (*Process[M]) Reply(m Msg[M], resp proto.Message, err error) error {
 }
 
 // Exit asks another process, anywhere, to terminate with reason. A first
-// exit to a node with no link yet waits for the dial as Send does.
+// exit to a node with no link yet waits for the dial as Send does. It is not
+// trapped: a process that traps exits ends all the same.
 func (p *proc) Exit(to Target, reason string) error {
 	return p.n.exit(context.Background(), p.pid, to, reason)
 }
+
+// Link links p to target, one way: when target exits, p exits too, with
+// target's reason, whatever it is, normal included. If p traps exits (see
+// SetTrapExit), it receives a Msg with Exited set instead. A target that does
+// not exist ends p with noproc, and one whose node cannot be reached, now or
+// later, with noconnection. p's own exit does not affect target, which can
+// link to p for that.
+//
+// A second link to the same target is the same link. Linking to itself, or
+// from a process that has exited, does nothing.
+func (p *proc) Link(target Target) {
+	pid, name := target.target()
+	if name == "" && pid == p.pid || name != "" && name == p.name && pid.Node == p.n.id.Name {
+		return // itself
+	}
+	t := monitorTarget{pid: pid, name: name}
+	ref := Ref{Node: p.n.id.Name, ID: p.n.nextRef.Add(1)}
+	p.mu.Lock()
+	if _, linked := p.linkTo(t); linked || p.exited {
+		p.mu.Unlock()
+		return
+	}
+	if p.links == nil {
+		p.links = map[Ref]monitorTarget{}
+	}
+	p.links[ref] = t
+	p.mu.Unlock()
+	// On the wire a link is a monitor: only this node tells its Down from a
+	// monitor's, so peers need nothing new.
+	p.placeWatch(target, ref)
+}
+
+// Unlink removes p's link to target. An Exited already in the mailbox stays
+// there.
+func (p *proc) Unlink(target Target) {
+	pid, name := target.target()
+	t := monitorTarget{pid: pid, name: name}
+	p.mu.Lock()
+	ref, linked := p.linkTo(t)
+	delete(p.links, ref)
+	p.mu.Unlock()
+	if linked {
+		_ = p.n.demonitor(p.pid, t, ref.ID)
+	}
+}
+
+// linkTo finds p's link to t. Called with p.mu held.
+func (p *proc) linkTo(t monitorTarget) (Ref, bool) {
+	for ref, l := range p.links {
+		if l == t {
+			return ref, true
+		}
+	}
+	return Ref{}, false
+}
+
+// SetTrapExit sets whether p traps exits: whether the exit of a process it
+// is linked to reaches it as a Msg with Exited set, rather than ending it.
+// It takes effect for exits that arrive from then on. A request to exit,
+// Process.Exit or Node.Exit, is never trapped.
+func (p *proc) SetTrapExit(trap bool) { p.trapExit.Store(trap) }
+
+// TrapExit reports whether p traps exits.
+func (p *proc) TrapExit() bool { return p.trapExit.Load() }
+
+// Parent returns the process that spawned p with Process.Spawn or
+// SpawnMonitor, or the zero PID.
+func (p *proc) Parent() PID { return p.parent }
 
 // Monitor watches target. When it exits, or its node becomes unreachable,
 // this process receives a Msg with Down set and the returned Ref. Monitoring
@@ -434,10 +545,26 @@ func (p *proc) Monitor(target Target) Ref {
 	}
 	p.monitors[ref] = monitorTarget{pid: pid, name: name}
 	p.mu.Unlock()
+	p.placeWatch(target, ref)
+	return ref
+}
+
+// placeWatch sends p's monitor of target, or its link, which is the same on
+// the wire. One that cannot be sent is Down at once, with noconnection. If p
+// exited while it was on its way, p's exit may have taken it back before it
+// arrived, and it would stay on target: it is taken back again, after it.
+func (p *proc) placeWatch(target Target, ref Ref) {
+	pid, _ := target.target()
 	if err := p.n.monitor(p.pid, target, ref.ID); err != nil {
 		p.n.deliverDown(pid, p.pid, ref.ID, ReasonNoConnection)
+		return
 	}
-	return ref
+	p.mu.Lock()
+	exited := p.exited
+	p.mu.Unlock()
+	if exited {
+		_ = p.n.demonitor(p.pid, target, ref.ID)
+	}
 }
 
 // Demonitor stops a monitor. A Down already in the mailbox stays there.
@@ -554,7 +681,7 @@ func (p *proc) took(it item) item {
 		}
 	}
 	if p.n.hooks != nil {
-		r := ReceiveInfo{PID: p.pid, Label: p.label, From: it.from, Body: it.body, Down: it.down, Call: it.ref != 0}
+		r := ReceiveInfo{PID: p.pid, Label: p.label, From: it.from, Body: it.body, Down: it.down, Exited: it.exited, Call: it.ref != 0}
 		if it.at != 0 {
 			r.Waited = time.Since(time.Unix(0, it.at))
 		}
@@ -620,7 +747,7 @@ func typeString[M proto.Message]() string {
 
 func (p *proc) info() ProcessInfo {
 	p.mu.Lock()
-	monitors, watchers := len(p.monitors), len(p.watchers)
+	monitors, links, watchers := len(p.monitors), len(p.links), len(p.watchers)
 	p.mu.Unlock()
 	info := ProcessInfo{
 		PID:           p.pid,
@@ -634,7 +761,9 @@ func (p *proc) info() ProcessInfo {
 		Sent:          p.sent.Load(),
 		CallsInFlight: uint32(p.callsInFlight.Load()),
 		Monitors:      monitors,
+		Links:         links,
 		Watchers:      watchers,
+		TrapExit:      p.trapExit.Load(),
 		Wakeups:       p.wakeups.Load(),
 		LogLevel:      p.logLevel(),
 	}
@@ -677,24 +806,44 @@ func (p *proc) removeWatcher(ref Ref) {
 	p.mu.Unlock()
 }
 
-func (p *proc) dropMonitor(ref Ref) (monitorTarget, bool) {
+// dropWatch removes the monitor or link ref: link says which it was.
+func (p *proc) dropWatch(ref Ref) (t monitorTarget, link, ok bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	t, ok := p.monitors[ref]
-	delete(p.monitors, ref)
-	return t, ok
+	if t, ok = p.monitors[ref]; ok {
+		delete(p.monitors, ref)
+		return t, false, true
+	}
+	t, ok = p.links[ref]
+	delete(p.links, ref)
+	return t, true, ok
 }
 
-// peerDown drops every monitor and watcher that crossed the link to peer and
-// returns the Downs to deliver.
-func (p *proc) peerDown(peer string) []Down {
+// exitSignal delivers the exit of a process p is linked to: an Exited message
+// if p traps exits, otherwise p's own end, with the same reason.
+func (p *proc) exitSignal(from PID, name, reason string) {
+	if p.trapExit.Load() {
+		p.push(item{from: from, exited: &Exited{PID: from, Name: name, Reason: reason}})
+		return
+	}
+	p.cancel(&ExitError{Reason: reason})
+}
+
+// peerDown drops every monitor, link and watcher that crossed the link to
+// peer, and returns the Downs to deliver and the links' exits.
+func (p *proc) peerDown(peer string) (downs []Down, exits []Exited) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	var downs []Down
 	for ref, t := range p.monitors {
 		if t.pid.Node == peer {
 			delete(p.monitors, ref)
 			downs = append(downs, Down{Ref: ref, PID: t.pid, Name: t.name, Reason: ReasonNoConnection})
+		}
+	}
+	for ref, t := range p.links {
+		if t.pid.Node == peer {
+			delete(p.links, ref)
+			exits = append(exits, Exited{PID: t.pid, Name: t.name, Reason: ReasonNoConnection})
 		}
 	}
 	for ref := range p.watchers {
@@ -702,7 +851,7 @@ func (p *proc) peerDown(peer string) []Down {
 			delete(p.watchers, ref)
 		}
 	}
-	return downs
+	return downs, exits
 }
 
 func (p *proc) run(fn func() error) {
@@ -747,8 +896,8 @@ func (p *proc) terminate(reason string) {
 	p.setState(StateExiting)
 	p.mu.Lock()
 	p.exited = true
-	watchers, monitors, open, timers := p.watchers, p.monitors, p.open, p.timers
-	p.watchers, p.monitors, p.open, p.timers = nil, nil, nil, nil
+	watchers, monitors, links, open, timers := p.watchers, p.monitors, p.links, p.open, p.timers
+	p.watchers, p.monitors, p.links, p.open, p.timers = nil, nil, nil, nil, nil
 	p.mu.Unlock()
 	for tm := range timers {
 		tm.t.Stop()
@@ -788,6 +937,9 @@ func (p *proc) terminate(reason string) {
 		_ = n.down(p.pid, w, ref.ID, reason, false)
 	}
 	for ref, t := range monitors {
+		_ = n.demonitor(p.pid, t, ref.ID)
+	}
+	for ref, t := range links {
 		_ = n.demonitor(p.pid, t, ref.ID)
 	}
 }

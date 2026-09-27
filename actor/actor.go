@@ -71,6 +71,15 @@ type DownHandler[M proto.Message] interface {
 	HandleDown(p *grpcproc.Process[M], d grpcproc.Down) error
 }
 
+// ExitedHandler is told when a process the actor is linked to exits, if the
+// actor traps exits (p.SetTrapExit(true), in Init, say). Without it, those
+// Exiteds are ignored. One from the actor's parent ends the actor all the
+// same, with the parent's reason, as it ends a gen_server: an actor spawned
+// with grpcproc.LinkParent never outlives its parent.
+type ExitedHandler[M proto.Message] interface {
+	HandleExited(p *grpcproc.Process[M], e grpcproc.Exited) error
+}
+
 // Initializer runs before the first message. An error ends the actor
 // before it handles anything, and Terminate is not called.
 type Initializer[M proto.Message] interface {
@@ -78,9 +87,9 @@ type Initializer[M proto.Message] interface {
 }
 
 // Terminator runs when the actor ends, however it ends: err is nil after
-// ErrStop, the handler's error, an *grpcproc.ExitError after Exit,
-// context.Canceled when the node stops, or "panic: …" (after which the panic
-// continues, and grpcproc reports it).
+// ErrStop, the handler's error, an *grpcproc.ExitError after Exit or the exit
+// of a process it is linked to, context.Canceled when the node stops, or
+// "panic: …" (after which the panic continues, and grpcproc reports it).
 type Terminator[M proto.Message] interface {
 	Terminate(p *grpcproc.Process[M], err error)
 }
@@ -102,6 +111,7 @@ func Run[M proto.Message](h Handler[M]) func(*grpcproc.Process[M]) error {
 		panic(fmt.Sprintf("actor: %T embeds CallsOnly but has no HandleCall; with a pointer receiver, pass a pointer", h))
 	}
 	downs, _ := h.(DownHandler[M])
+	exits, _ := h.(ExitedHandler[M])
 	init, _ := h.(Initializer[M])
 	term, _ := h.(Terminator[M])
 	return func(p *grpcproc.Process[M]) (err error) {
@@ -128,6 +138,13 @@ func Run[M proto.Message](h Handler[M]) func(*grpcproc.Process[M]) error {
 			case m.Down != nil:
 				if downs != nil {
 					err = downs.HandleDown(p, *m.Down)
+				}
+			case m.Exited != nil:
+				if parent := p.Parent(); !parent.IsZero() && m.Exited.PID == parent {
+					return &grpcproc.ExitError{Reason: m.Exited.Reason}
+				}
+				if exits != nil {
+					err = exits.HandleExited(p, *m.Exited)
 				}
 			case m.IsCall():
 				err = call(p, calls, m)

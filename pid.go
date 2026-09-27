@@ -1,7 +1,7 @@
 // Package grpcproc gives goroutines Erlang-style network transparency on top of
 // the gRPC server a service already runs. A process is addressed by a PID or
-// a name; Send, Call, Monitor and Exit work the same whether the target lives
-// in this binary or on another node.
+// a name; Send, Call, Monitor, Link and Exit work the same whether the target
+// lives in this binary or on another node.
 package grpcproc
 
 import (
@@ -54,11 +54,26 @@ func (r Ref) String() string { return "#" + r.Node + "." + strconv.FormatUint(r.
 // that process's node becomes unreachable.
 type Down struct {
 	Ref Ref
-	// PID is the process that exited. For a monitor placed by name on a
-	// node that became unreachable, which process held the name is not
-	// known: PID has only its Node, and Name says what was monitored.
+	// PID is the process that exited. For a monitor placed by name, when no
+	// process held the name or its node became unreachable, which process
+	// it would have been is not known: PID has only its Node, and Name says
+	// what was monitored.
 	PID    PID
 	Name   string // the registered name, when the monitor was placed by name
+	Reason string
+}
+
+// Exited is what a process that traps exits (see Process.SetTrapExit)
+// receives when a process it is linked to exits, or that process's node
+// becomes unreachable; a process that does not trap exits ends instead. See
+// Process.Link.
+type Exited struct {
+	// PID is the process that exited. For a link placed by name, when no
+	// process held the name or its node became unreachable, which process
+	// it would have been is not known: PID has only its Node, and Name says
+	// what was linked to.
+	PID    PID
+	Name   string // the registered name, when the link was placed by name
 	Reason string
 }
 
@@ -91,7 +106,8 @@ type RemoteError struct{ Msg string }
 
 func (e *RemoteError) Error() string { return e.Msg }
 
-// ExitError is the cause of a process's context when it was asked to exit.
+// ExitError is the cause of a process's context when it was asked to exit,
+// or a process it is linked to exited.
 type ExitError struct{ Reason string }
 
 func (e *ExitError) Error() string { return "grpcproc: exit: " + e.Reason }

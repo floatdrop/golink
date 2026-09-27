@@ -22,8 +22,9 @@ type ReceiveInfo struct {
 	PID    PID
 	Label  string
 	From   PID
-	Body   proto.Message // nil for a Down
+	Body   proto.Message // nil for a Down or an Exited
 	Down   *Down
+	Exited *Exited
 	Call   bool // the sender waits for a Reply
 	Waited time.Duration
 }

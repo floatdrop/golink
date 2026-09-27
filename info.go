@@ -48,9 +48,11 @@ type ProcessInfo struct {
 	CallsInFlight uint32
 	LastMessage   string // proto full name of the last body taken from the mailbox
 	Monitors      int    // held by this process
-	Watchers      int    // processes monitoring this one
+	Links         int    // process links held by this one: whose exits end it, or reach it as an Exited
+	Watchers      int    // processes monitoring or linked to this one
 	Wakeups       uint64 // Receive returns
 	LogLevel      slog.Level
+	TrapExit      bool // see Process.SetTrapExit
 }
 
 // LinkState is the state of a link to a peer.

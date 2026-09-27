@@ -100,10 +100,16 @@ message ProcessInfo {
   uint32 calls_in_flight = 11;
   string last_message = 12;
   uint32 monitors = 13;
+  // Processes monitoring or linked to this one.
   uint32 watchers = 14;
   uint64 wakeups = 15;
   // slog.Level: -4 debug, 0 info, 4 warn, 8 error.
   sint32 log_level = 16;
+  // Process links this one holds: whose exits end it, or reach it as an
+  // Exited message. Not links to nodes.
+  uint32 links = 17;
+  // Whether the exits of processes it is linked to reach it as messages.
+  bool trap_exit = 18;
 }
 
 // Target names a process by pid or by name, on the request's node.

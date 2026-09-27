@@ -143,18 +143,20 @@ calls carry the `Metadata` in that ctx with the message.
 
 | | |
 | --- | --- |
-| `Receive() (Msg[M], error)` | Blocks for a message or a `Down`. The error is an `*ExitError` after `Exit`, `context.Canceled` when the node stops. |
+| `Receive() (Msg[M], error)` | Blocks for a message, a `Down` or an `Exited`. The error is an `*ExitError` after `Exit` or the exit of a process this one is linked to, `context.Canceled` when the node stops. |
 | `ReceiveTimeout(d) (Msg[M], error)` | The same, or `context.DeadlineExceeded`. |
 | `Reply(m Msg[M], resp proto.Message, err error) error` | Answers a call. It may run later, from any goroutine. |
 | `Send[N](to Addr[N], m N) error`, `SendTo(to Target, m proto.Message) error` | As on `Node`, with the process as the sender and the metadata of the message it is handling. |
 | `Call[R, N](ctx, to Addr[N], req N) (R, error)`, `CallTo[R](ctx, to Target, req proto.Message) (R, error)` | As on `Node`. Replies bypass the mailbox, so a call from a process never reorders its messages. |
 | `SendAfter[N](d, to Addr[N], m N) *Timer` | A send after `d`, as this process, cancelled if it exits first; `Timer.Stop` cancels it too. |
 | `Monitor(target Target) Ref`, `Demonitor(ref)` | A `Down` with the ref when the target exits or its node is unreachable; at once, with `noproc`, for a process that does not exist. |
+| `Link(target Target)`, `Unlink(target)` | One way: when the target exits, this process exits too, with the target's reason, `normal` included; with `noproc` if there is no such process, `noconnection` if its node cannot be reached. The target is not affected by this process's exit. These are links between processes, not the links between nodes that `NodeInfo.Links` lists. |
+| `SetTrapExit(trap bool)`, `TrapExit() bool` | Whether the exit of a process this one is linked to arrives as an `Exited` message instead of ending it. A request to exit, `Exit`, is never trapped. |
 | `Exit(to Target, reason string) error` | Asks another process to exit. |
-| `Spawn[N](fn, opts...) (Addr[N], error)`, `SpawnMonitor[N](fn, opts...) (Addr[N], Ref, error)` | A child on the same node, with this process recorded as its parent, for inspection: neither exits with the other. The second is monitored before it runs, so no exit is missed. |
-| `Context() context.Context` | Cancelled when the process is asked to exit or the node stops; after `Exit`, `context.Cause` is the `*ExitError`. |
+| `Spawn[N](fn, opts...) (Addr[N], error)`, `SpawnMonitor[N](fn, opts...) (Addr[N], Ref, error)` | A child on the same node, with this process recorded as its parent. Neither exits with the other, unless `LinkParent` or `LinkChild` links them. The second is monitored before it runs, so no exit is missed. |
+| `Context() context.Context` | Cancelled when the process is asked to exit, a process it is linked to exits, or the node stops; `context.Cause` is then the `*ExitError`, or `context.Canceled`. |
 | `Log() *slog.Logger` | With pid and label attached. |
-| `Addr()`, `PID()`, `Node()` | The process's typed address, its PID, its node. |
+| `Addr()`, `PID()`, `Node()`, `Parent()` | The process's typed address, its PID, its node, and the process that spawned it. |
 
 ### Addresses and messages
 
@@ -164,8 +166,9 @@ calls carry the `Metadata` in that ctx with the message.
 | `Name{Node, Name}` | A process by the name it registered. |
 | `Addr[M]` | A PID or a Name plus the message type. `Spawn` returns one, `Named[M](node, name)` makes one, `AddrOf[M](target)` types a target. |
 | `Target` | What a message can go to: a `PID`, a `Name` or any `Addr`. |
-| `Msg[M]{From, Body, Down, Metadata}` | What `Receive` returns: a `Body` or a `Down`, never both. `IsCall()` says whether a `Reply` is awaited; `Context(parent)` carries the metadata into a ctx. |
+| `Msg[M]{From, Body, Down, Exited, Metadata}` | What `Receive` returns: a `Body`, a `Down` or an `Exited`, one only. `IsCall()` says whether a `Reply` is awaited; `Context(parent)` carries the metadata into a ctx. |
 | `Down{Ref, PID, Name, Reason}` | A monitored process exited, or its node is unreachable. |
+| `Exited{PID, Name, Reason}` | A process this one is linked to exited, or its node is unreachable. Only a process that traps exits receives one. |
 | `Metadata` | `map[string]string` carried with every message, untouched: trace context, tenant. `WithMetadata(ctx, md)` sets it for `Node` sends and every `Call`, `MetadataFrom(ctx)` reads it back. |
 
 ### Spawn options
@@ -175,6 +178,7 @@ calls carry the `Metadata` in that ctx with the message.
 | `WithName(name)` | Registers the process under `name` on its node until it exits; `ErrNameTaken` while another holds it. |
 | `WithLabel(label)` | The low-cardinality key metrics aggregate by. Defaults to the type of `M`. |
 | `WithInspect(fn func() map[string]string)` | What `Node.Inspect` and the Inspector show. `fn` runs on the process's goroutine, between two messages, so it reads the process's state without a lock. |
+| `LinkParent()`, `LinkChild()` | Link the child to its parent, or the parent to the child, before the child runs. Both together is Erlang's `spawn_link`. For `Process.Spawn` and `SpawnMonitor`: `Node.Spawn` has no parent. |
 
 ### Errors and exit reasons
 
@@ -187,10 +191,11 @@ calls carry the `Metadata` in that ctx with the message.
 | `ErrNameTaken`, `ErrNodeStopped`, `ErrNotCall` | A `Spawn` under a held name; the node has stopped; a `Reply` to a message nobody waits on. |
 
 A process exits with a reason, a string: `normal` for a `nil` return, the
-error's text otherwise, `panic: …`, or what `Exit` asked for. The node stops
-its processes with `shutdown`; the Inspector's `Exit` defaults to `killed`.
-A `Down` alone carries `noproc`, for a process that does not exist, and
-`noconnection`, for a node that cannot be reached. Reasons and the type
+error's text otherwise, `panic: …`, what `Exit` asked for, or the reason of a
+process it is linked to. The node stops its processes with `shutdown`; the
+Inspector's `Exit` defaults to `killed`. Only a `Down` or a link carries
+`noproc`, for a process that does not exist, and `noconnection`, for a node
+that cannot be reached. Reasons and the type
 check on delivery are the whole error model: a message of the wrong type is
 a dead letter with reason `type` (and `ErrType` to a caller), never a panic
 in the process.
@@ -220,6 +225,7 @@ instead of a receive loop. All but `HandleMessage` are optional:
 | `HandleMessage` | a message sent with `Send` | an error ends the actor with it as the reason; `actor.ErrStop` ends it normally |
 | `HandleCall` | a message sent with `Call` | the reply, a message or an error, and the actor carries on; `actor.ErrNoReply` answers later with `p.Reply` |
 | `HandleDown` | a `Down` from a monitor | as for `HandleMessage` |
+| `HandleExited` | an `Exited` from a link, when the actor traps exits; one from its parent ends the actor instead | as for `HandleMessage` |
 | `Terminate` | once, when the actor ends, however it ends | none: the exit reason is already decided |
 
 `actor.Run(h)` turns an actor into a process function for `Spawn`. An actor
@@ -268,7 +274,8 @@ then: grpcproc: no such process
 ```
 
 A supervisor starts its children in order, monitors them from before they
-run, and restarts those that exit. `Strategy` says which: `OneForOne` only
+run, and restarts those that exit. Its children are also linked to it, a
+safeguard beside the orderly stop it makes when it ends. `Strategy` says which: `OneForOne` only
 the child that exited, `OneForAll` every child, `RestForOne` the child and
 those started after it. A child's `Restart` says when: `Permanent` always,
 `Transient` after an abnormal exit only, `Temporary` never. More than

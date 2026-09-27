@@ -484,10 +484,16 @@ type ProcessInfo struct {
 	CallsInFlight uint32                 `protobuf:"varint,11,opt,name=calls_in_flight,json=callsInFlight,proto3" json:"calls_in_flight,omitempty"`
 	LastMessage   string                 `protobuf:"bytes,12,opt,name=last_message,json=lastMessage,proto3" json:"last_message,omitempty"`
 	Monitors      uint32                 `protobuf:"varint,13,opt,name=monitors,proto3" json:"monitors,omitempty"`
-	Watchers      uint32                 `protobuf:"varint,14,opt,name=watchers,proto3" json:"watchers,omitempty"`
-	Wakeups       uint64                 `protobuf:"varint,15,opt,name=wakeups,proto3" json:"wakeups,omitempty"`
+	// Processes monitoring or linked to this one.
+	Watchers uint32 `protobuf:"varint,14,opt,name=watchers,proto3" json:"watchers,omitempty"`
+	Wakeups  uint64 `protobuf:"varint,15,opt,name=wakeups,proto3" json:"wakeups,omitempty"`
 	// slog.Level: -4 debug, 0 info, 4 warn, 8 error.
-	LogLevel      int32 `protobuf:"zigzag32,16,opt,name=log_level,json=logLevel,proto3" json:"log_level,omitempty"`
+	LogLevel int32 `protobuf:"zigzag32,16,opt,name=log_level,json=logLevel,proto3" json:"log_level,omitempty"`
+	// Process links this one holds: whose exits end it, or reach it as an
+	// Exited message. Not links to nodes.
+	Links uint32 `protobuf:"varint,17,opt,name=links,proto3" json:"links,omitempty"`
+	// Whether the exits of processes it is linked to reach it as messages.
+	TrapExit      bool `protobuf:"varint,18,opt,name=trap_exit,json=trapExit,proto3" json:"trap_exit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -632,6 +638,20 @@ func (x *ProcessInfo) GetLogLevel() int32 {
 		return x.LogLevel
 	}
 	return 0
+}
+
+func (x *ProcessInfo) GetLinks() uint32 {
+	if x != nil {
+		return x.Links
+	}
+	return 0
+}
+
+func (x *ProcessInfo) GetTrapExit() bool {
+	if x != nil {
+		return x.TrapExit
+	}
+	return false
 }
 
 // Target names a process by pid or by name, on the request's node.
@@ -1805,7 +1825,7 @@ const file_grpcproc_inspect_v1_inspect_proto_rawDesc = "" +
 	"\x05depth\x18\x01 \x01(\rR\x05depth\x12\x12\n" +
 	"\x04peak\x18\x02 \x01(\rR\x04peak\x128\n" +
 	"\n" +
-	"oldest_age\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\toldestAge\"\xaf\x04\n" +
+	"oldest_age\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\toldestAge\"\xe2\x04\n" +
 	"\vProcessInfo\x12\"\n" +
 	"\x03pid\x18\x01 \x01(\v2\x10.grpcproc.v1.PIDR\x03pid\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -1824,7 +1844,9 @@ const file_grpcproc_inspect_v1_inspect_proto_rawDesc = "" +
 	"\bmonitors\x18\r \x01(\rR\bmonitors\x12\x1a\n" +
 	"\bwatchers\x18\x0e \x01(\rR\bwatchers\x12\x18\n" +
 	"\awakeups\x18\x0f \x01(\x04R\awakeups\x12\x1b\n" +
-	"\tlog_level\x18\x10 \x01(\x11R\blogLevel\"L\n" +
+	"\tlog_level\x18\x10 \x01(\x11R\blogLevel\x12\x14\n" +
+	"\x05links\x18\x11 \x01(\rR\x05links\x12\x1b\n" +
+	"\ttrap_exit\x18\x12 \x01(\bR\btrapExit\"L\n" +
 	"\x06Target\x12$\n" +
 	"\x03pid\x18\x01 \x01(\v2\x10.grpcproc.v1.PIDH\x00R\x03pid\x12\x14\n" +
 	"\x04name\x18\x02 \x01(\tH\x00R\x04nameB\x06\n" +
