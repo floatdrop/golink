@@ -15,6 +15,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -271,11 +272,15 @@ func TestMCPCommand(t *testing.T) {
 				return f.C.Conn("a"), func() error { return nil }, nil
 			},
 			MCPTransport: serverT, Getenv: func(string) string { return "" },
+			BuildInfo: stamped("v9.9.9"),
 		})
 	}()
 	session, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil).Connect(t.Context(), clientT, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if v := session.InitializeResult().ServerInfo.Version; v != "v9.9.9" {
+		t.Fatalf("mcp reports version %q", v)
 	}
 	tools, err := session.ListTools(t.Context(), nil)
 	if err != nil || len(tools.Tools) != 7 {
@@ -353,5 +358,50 @@ func TestDialErrors(t *testing.T) {
 		if code := cli.Main(t.Context(), args, cli.Env{Stderr: &errOut}); code != 1 || !strings.HasPrefix(errOut.String(), "golinkctl: ") {
 			t.Errorf("%q: %d %s", args, code, errOut.String())
 		}
+	}
+}
+
+// stamped is build info as `go install …@version` leaves it.
+func stamped(v string) func() (*debug.BuildInfo, bool) {
+	return func() (*debug.BuildInfo, bool) {
+		return &debug.BuildInfo{Main: debug.Module{Path: "github.com/floatdrop/golink/tools", Version: v}}, true
+	}
+}
+
+func TestVersion(t *testing.T) {
+	versionOf := func(read func() (*debug.BuildInfo, bool)) string {
+		t.Helper()
+		var out bytes.Buffer
+		// --version answers before anything is dialed: this Dial would fail.
+		code := cli.Main(t.Context(), []string{"--version"}, cli.Env{Stdout: &out, BuildInfo: read,
+			Dial: func(context.Context, cli.Conn) (grpc.ClientConnInterface, func() error, error) {
+				return nil, nil, errors.New("dialed")
+			}})
+		if code != 0 {
+			t.Fatalf("exit %d", code)
+		}
+		return strings.TrimSpace(out.String())
+	}
+	if got := versionOf(stamped("v0.0.2")); got != "golinkctl v0.0.2" {
+		t.Fatal(got)
+	}
+	// Built from a checkout, or without build info: dev.
+	if got := versionOf(stamped("(devel)")); got != "golinkctl dev" {
+		t.Fatal(got)
+	}
+	if got := versionOf(func() (*debug.BuildInfo, bool) { return nil, false }); got != "golinkctl dev" {
+		t.Fatal(got)
+	}
+	// -ldflags -X overrides the build info.
+	cli.Version = "v1.2.3-custom"
+	defer func() { cli.Version = "" }()
+	if got := versionOf(stamped("v0.0.2")); got != "golinkctl v1.2.3-custom" {
+		t.Fatal(got)
+	}
+	// This binary's own build info, read the default way.
+	cli.Version = ""
+	var out bytes.Buffer
+	if code := cli.Main(t.Context(), []string{"--version"}, cli.Env{Stdout: &out}); code != 0 || !strings.HasPrefix(out.String(), "golinkctl ") {
+		t.Fatalf("%d %q", code, out.String())
 	}
 }

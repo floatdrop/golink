@@ -15,6 +15,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -48,10 +49,25 @@ type Env struct {
 	Dial           func(ctx context.Context, c Conn) (grpc.ClientConnInterface, func() error, error)
 	MCPTransport   mcp.Transport
 	Getenv         func(string) string
+	// BuildInfo is where the version comes from; debug.ReadBuildInfo when nil.
+	BuildInfo func() (*debug.BuildInfo, bool)
 }
 
-// Version is reported by golinkctl mcp.
-var Version = "dev"
+// Version, when set, overrides the version golinkctl reports:
+// -ldflags "-X github.com/floatdrop/golink/tools/cli.Version=v1.2.3". Left
+// empty, it is read from the build: the module version that `go install
+// …@v1.2.3` stamps, or "dev" for a binary built from a checkout.
+var Version string
+
+func version(read func() (*debug.BuildInfo, bool)) string {
+	if Version != "" {
+		return Version
+	}
+	if bi, ok := read(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return "dev"
+}
 
 const usage = `golinkctl inspects and operates golink nodes through their Inspector.
 
@@ -76,6 +92,7 @@ Flags:
 
 type app struct {
 	env     Env
+	version string
 	conn    Conn
 	timeout time.Duration
 	json    bool
@@ -96,7 +113,11 @@ func Main(ctx context.Context, args []string, env Env) int {
 	if env.Getenv == nil {
 		env.Getenv = os.Getenv
 	}
-	a := &app{env: env}
+	if env.BuildInfo == nil {
+		env.BuildInfo = debug.ReadBuildInfo
+	}
+	a := &app{env: env, version: version(env.BuildInfo)}
+	var showVersion bool
 	fs := flag.NewFlagSet("golinkctl", flag.ContinueOnError)
 	fs.SetOutput(env.Stderr)
 	fs.Usage = func() {
@@ -111,8 +132,13 @@ func Main(ctx context.Context, args []string, env Env) int {
 	fs.StringVar(&a.conn.ServerName, "servername", "", "server name to verify, when it differs from the address")
 	fs.DurationVar(&a.timeout, "timeout", 5*time.Second, "time limit for each request")
 	fs.BoolVar(&a.json, "json", false, "print JSON instead of tables")
+	fs.BoolVar(&showVersion, "version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if showVersion {
+		fmt.Fprintf(env.Stdout, "golinkctl %s\n", a.version)
+		return 0
 	}
 	if fs.NArg() == 0 {
 		fs.Usage()
@@ -494,7 +520,7 @@ func cmdMCP(ctx context.Context, a *app, args []string) error {
 	}); err != nil {
 		return err
 	}
-	s := mcpserver.New(a.client, mcpserver.Options{AllowWrites: writes, Version: Version, Timeout: a.timeout})
+	s := mcpserver.New(a.client, mcpserver.Options{AllowWrites: writes, Version: a.version, Timeout: a.timeout})
 	if err := s.Run(ctx, a.env.MCPTransport); err != nil && ctx.Err() == nil {
 		return err
 	}

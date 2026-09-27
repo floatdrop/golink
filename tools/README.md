@@ -71,6 +71,9 @@ monitors:              2
 | `dot` | Graphviz of processes and who started whom: `--node`, `--cluster` |
 | `mcp` | serve these as MCP tools over stdio: `--allow-writes` |
 
+`golinkctl --version` prints the version it was installed at, which is also
+what its MCP server reports.
+
 A pid is written as golink prints it, `<node.incarnation.id>`; a name is
 looked up on `--node`, by default the node serving the Inspector. Any
 command takes `--json` before it for the same data as JSON (the same shapes
