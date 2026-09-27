@@ -1,5 +1,10 @@
 # <img src="site/public/favicon.svg" alt="" height="32" align="absmiddle"> grpcproc
 
+[![CI](https://github.com/floatdrop/grpcproc/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/floatdrop/grpcproc/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/floatdrop/grpcproc.svg)](https://pkg.go.dev/github.com/floatdrop/grpcproc)
+[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](https://github.com/floatdrop/grpcproc/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 Erlang-style processes for Go, on the gRPC server you already run.
 
 ```sh
