@@ -231,6 +231,15 @@ func (n *Node) failCall(ref uint64, err error) {
 	}
 }
 
+// outTo returns the link to peer, or nil if there is none. The caller holds
+// n.mu, shared or not.
+func (n *Node) outTo(peer string) (*outLink, error) {
+	if n.stopped {
+		return nil, ErrNodeStopped
+	}
+	return n.out[peer], nil
+}
+
 type dialOp struct {
 	done      chan struct{}
 	l         *outLink
@@ -245,18 +254,20 @@ type dialOp struct {
 // callers share one dial, which runs on its own goroutine: a caller whose ctx
 // ends stops waiting, and the dial goes on for the others.
 func (n *Node) getOut(ctx context.Context, peer string) (*outLink, error) {
-	n.mu.Lock()
-	if n.stopped {
-		n.mu.Unlock()
-		return nil, ErrNodeStopped
-	}
-	if l := n.out[peer]; l != nil {
-		n.mu.Unlock()
-		return l, nil
+	// A send over a live link only reads, so it shares n.mu.
+	n.mu.RLock()
+	l, err := n.outTo(peer)
+	n.mu.RUnlock()
+	if l != nil || err != nil {
+		return l, err
 	}
 	if err := ctx.Err(); err != nil {
-		n.mu.Unlock()
 		return nil, err // it would not wait for the dial, so it starts none
+	}
+	n.mu.Lock()
+	if l, err := n.outTo(peer); l != nil || err != nil { // it came up, or the node stopped
+		n.mu.Unlock()
+		return l, err
 	}
 	d, err := n.dialFor(peer)
 	n.mu.Unlock()

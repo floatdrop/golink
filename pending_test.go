@@ -50,8 +50,8 @@ func TestCallsLeaveNothingPending(t *testing.T) {
 		defer func() { _ = recover() }()
 		_, _ = n.Call[*ping](ctx, Named[*ping]("a", "nobody"), &ping{})
 	}()
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	n.pendingMu.Lock()
+	defer n.pendingMu.Unlock()
 	if len(n.pending) != 0 {
 		t.Fatalf("%d calls left pending", len(n.pending))
 	}

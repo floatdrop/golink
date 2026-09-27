@@ -149,12 +149,18 @@ type Node struct {
 	startMu  sync.Mutex                  // one Start at a time
 	withdraw func(context.Context) error // from Registrar; guarded by mu
 
+	// pending is the calls waiting for an answer. pendingMu guards it, and
+	// nothing is locked while pendingMu is held: every call takes it twice,
+	// and shares it with no one else's state.
+	pendingMu sync.Mutex
+	pending   map[uint64]*pendingCall
+
 	// mu guards the fields below, through stopped. A process's lock may be
-	// taken inside it (spawn does), never the reverse.
-	mu       sync.Mutex
+	// taken inside it (spawn does), never the reverse. Deliveries, and sends
+	// over a live link, only read, so they take it shared.
+	mu       sync.RWMutex
 	procs    map[uint64]*proc
 	names    map[string]*proc
-	pending  map[uint64]*pendingCall
 	out      map[string]*outLink
 	in       map[string]*inLink
 	dialing  map[string]*dialOp
@@ -171,16 +177,16 @@ type Node struct {
 type pendingCall struct {
 	node string
 	// ch has room for the one answer. Whoever answers first removes the call
-	// from n.pending, under n.mu, so no one else can: takePending, nodeDown,
-	// Stop.
+	// from n.pending, under n.pendingMu, so no one else can: takePending,
+	// nodeDown, Stop.
 	ch chan callResult
 }
 
 // takePending removes and returns the call waiting on ref, or nil: the
 // caller that gets it answers it.
 func (n *Node) takePending(ref uint64) *pendingCall {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	n.pendingMu.Lock()
+	defer n.pendingMu.Unlock()
 	pc := n.pending[ref]
 	delete(n.pending, ref)
 	return pc
@@ -404,10 +410,10 @@ func (n *Node) Stop(ctx context.Context) error {
 	}
 	// Calls still waiting on a peer will get no answer, and nothing declares
 	// the peers down any more: fail them. They may have been handled.
-	n.mu.Lock()
+	n.pendingMu.Lock()
 	pending := n.pending
 	n.pending = map[uint64]*pendingCall{}
-	n.mu.Unlock()
+	n.pendingMu.Unlock()
 	for _, pc := range pending {
 		pc.ch <- callResult{err: ErrNodeStopped}
 	}
@@ -446,8 +452,8 @@ func (n *Node) Stop(ctx context.Context) error {
 
 // Whereis resolves a name registered on this node.
 func (n *Node) Whereis(name string) (PID, bool) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	n.mu.RLock()
+	defer n.mu.RUnlock()
 	if p := n.names[name]; p != nil {
 		return p.pid, true
 	}
@@ -456,9 +462,10 @@ func (n *Node) Whereis(name string) (PID, bool) {
 
 // Processes snapshots every local process, ordered by PID.
 func (n *Node) Processes() []ProcessInfo {
-	n.mu.Lock()
-	procs := slices.SortedFunc(maps.Values(n.procs), func(a, b *proc) int { return cmp.Compare(a.pid.ID, b.pid.ID) })
-	n.mu.Unlock()
+	n.mu.RLock()
+	procs := slices.Collect(maps.Values(n.procs))
+	n.mu.RUnlock()
+	slices.SortFunc(procs, func(a, b *proc) int { return cmp.Compare(a.pid.ID, b.pid.ID) }) // PIDs never change
 	out := make([]ProcessInfo, len(procs))
 	for i, p := range procs {
 		out[i] = p.info()
@@ -559,8 +566,8 @@ func (n *Node) disconnect(peer string, cause error) bool {
 
 // Peers lists nodes with a live link in either direction.
 func (n *Node) Peers() []string {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	n.mu.RLock()
+	defer n.mu.RUnlock()
 	seen := make(map[string]struct{}, len(n.out)+len(n.in))
 	for p := range n.out {
 		seen[p] = struct{}{}
@@ -575,16 +582,16 @@ func (n *Node) local(pid PID) *proc {
 	if pid.Node != n.id.Name || pid.Incarnation != n.id.Incarnation {
 		return nil
 	}
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	n.mu.RLock()
+	defer n.mu.RUnlock()
 	return n.procs[pid.ID]
 }
 
 // lookup resolves a delivery target on this node. A PID from another
 // incarnation resolves to nothing.
 func (n *Node) lookup(pid PID, name string) *proc {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	n.mu.RLock()
+	defer n.mu.RUnlock()
 	if name != "" {
 		return n.names[name]
 	}
@@ -688,19 +695,19 @@ func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to dest, req 
 	}
 	ref := n.nextRef.Add(1)
 	pc := &pendingCall{node: pid.Node, ch: make(chan callResult, 1)}
-	n.mu.Lock()
+	n.pendingMu.Lock()
 	n.pending[ref] = pc
-	n.mu.Unlock()
+	n.pendingMu.Unlock()
 	// Whatever answers the call removes it from pending first (see
 	// pendingCall), so only a call that ends unanswered does it here, and
-	// takes n.mu again: an encode or route error, ctx, or a panic on the way,
-	// such as a hook's.
+	// takes pendingMu again: an encode or route error, ctx, or a panic on the
+	// way, such as a hook's.
 	answered := false
 	defer func() {
 		if !answered {
-			n.mu.Lock()
+			n.pendingMu.Lock()
 			delete(n.pending, ref)
-			n.mu.Unlock()
+			n.pendingMu.Unlock()
 		}
 	}()
 	if caller != nil {
@@ -996,19 +1003,18 @@ func (n *Node) dispatch(peer string, env *grpcprocv1.Envelope) {
 // ErrNoConnection, monitors of its processes fire Down{noconnection}, and
 // monitors its processes held on ours are dropped.
 func (n *Node) nodeDown(peer string, err error) {
-	n.mu.Lock()
-	procs := make([]*proc, 0, len(n.procs))
-	for _, p := range n.procs {
-		procs = append(procs, p)
-	}
+	n.mu.RLock()
+	procs := slices.Collect(maps.Values(n.procs))
+	n.mu.RUnlock()
 	var failed []*pendingCall
+	n.pendingMu.Lock()
 	for ref, pc := range n.pending {
 		if pc.node == peer {
 			delete(n.pending, ref)
 			failed = append(failed, pc)
 		}
 	}
-	n.mu.Unlock()
+	n.pendingMu.Unlock()
 	// The cause travels with the error (a transport error, "left the
 	// cluster"); LinkError matches ErrNoConnection either way.
 	cause := err

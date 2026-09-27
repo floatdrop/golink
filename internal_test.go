@@ -272,9 +272,11 @@ func TestOutboundWriteFailure(t *testing.T) {
 		}}
 		n.mu.Lock()
 		n.out["b"] = l
-		written, unwritten := &pendingCall{node: "b", ch: make(chan callResult, 1)}, &pendingCall{node: "b", ch: make(chan callResult, 1)}
-		n.pending[9], n.pending[10] = written, unwritten
 		n.mu.Unlock()
+		written, unwritten := &pendingCall{node: "b", ch: make(chan callResult, 1)}, &pendingCall{node: "b", ch: make(chan callResult, 1)}
+		n.pendingMu.Lock()
+		n.pending[9], n.pending[10] = written, unwritten
+		n.pendingMu.Unlock()
 		// The first call fills a frame on its own, so the second waits for
 		// the next.
 		_ = l.send(&grpcprocv1.Envelope{Kind: grpcprocv1.Kind_KIND_CALL, Ref: 9, Body: make([]byte, 2*maxFrame)})
@@ -610,9 +612,9 @@ func TestFailedDialBackoff(t *testing.T) {
 func TestLostEnvelopes(t *testing.T) {
 	n := newTestNode(t, "a")
 	pc := &pendingCall{node: "b", ch: make(chan callResult, 1)}
-	n.mu.Lock()
+	n.pendingMu.Lock()
 	n.pending[7] = pc
-	n.mu.Unlock()
+	n.pendingMu.Unlock()
 	events := n.Subscribe(t.Context(), 8)
 	l := &outLink{node: n, peer: NodeID{Name: "b"}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
 		drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
@@ -825,5 +827,32 @@ func TestStopWithdrawsAfterALongFlush(t *testing.T) {
 	_ = n.Stop(ctx)
 	if err := <-r.withdrawCtxErr; err != nil {
 		t.Fatalf("withdraw ran with a ctx already done: %v", err)
+	}
+}
+
+// errHook is a ctx whose Err runs f first: getOut asks it between its shared
+// look for a link and its exclusive one.
+type errHook struct {
+	context.Context
+	f func()
+}
+
+func (c errHook) Err() error { c.f(); return nil }
+
+// getOut looks again under the exclusive lock: a link may have come up, or
+// the node stopped, since its shared look. A dial then would be a second link.
+func TestGetOutLooksAgainBeforeDialing(t *testing.T) {
+	n := newTestNode(t, "a")
+	unlink := func() { n.mu.Lock(); delete(n.out, "b"); n.mu.Unlock() }
+	t.Cleanup(unlink) // before the node's Stop, which would flush the stand-in link
+	l := &outLink{peer: NodeID{Name: "b"}}
+	up := errHook{t.Context(), func() { n.mu.Lock(); n.out["b"] = l; n.mu.Unlock() }}
+	if got, err := n.getOut(up, "b"); got != l || err != nil {
+		t.Fatalf("got %p, %v", got, err)
+	}
+	unlink()
+	stopped := errHook{t.Context(), func() { n.mu.Lock(); n.stopped = true; n.mu.Unlock() }}
+	if _, err := n.getOut(stopped, "b"); !errors.Is(err, ErrNodeStopped) {
+		t.Fatalf("got %v", err)
 	}
 }
