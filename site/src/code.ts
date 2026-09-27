@@ -37,7 +37,7 @@ NODE=front LISTEN=127.0.0.1:9101 PLACEMENT=inventory=warehouse,payments=billing 
 sleep 1
 curl -d '{"sku":"pear","qty":3,"card":"4242"}' localhost:8080/orders`;
 
-const inspect = `go install github.com/floatdrop/grpcproc/tools/cmd/grpcprocctl@main
+const inspect = `go install github.com/floatdrop/grpcproc/tools/cmd/grpcprocctl@latest
 export GRPCPROC_ADDR=127.0.0.1:9101          # the front's Inspector
 grpcprocctl --plaintext nodes                # the nodes it is linked to, and their links
 grpcprocctl --plaintext ps --node warehouse  # the warehouse's processes, asked there

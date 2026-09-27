@@ -22,7 +22,7 @@ export const content: Content = {
 				this binary or on another node.
 			</>
 		),
-		install: 'go get github.com/floatdrop/grpcproc@main'
+		install: 'go get github.com/floatdrop/grpcproc'
 	},
 
 	labels: {
