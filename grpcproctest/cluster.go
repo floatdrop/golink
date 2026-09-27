@@ -65,11 +65,13 @@ type Cluster struct {
 }
 
 type member struct {
-	name string
-	ln   *bufconn.Listener
-	srv  *grpc.Server
-	node *grpcproc.Node
-	dead bool
+	name   string
+	ln     *bufconn.Listener
+	srv    *grpc.Server
+	node   *grpcproc.Node
+	dead   bool
+	killed bool       // it dials no one: a crashed node sends nothing
+	conns  []net.Conn // what it dialed, for Kill to close; guarded by Cluster.mu
 }
 
 // New starts one node per name and stops them all when the test ends.
@@ -123,7 +125,7 @@ func (*Cluster) Resolver() grpcproc.Resolver {
 func (c *Cluster) DialOptions() []grpc.DialOption {
 	return []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithContextDialer(c.dialer("")),
+		grpc.WithContextDialer(c.dialer("", nil)),
 	}
 }
 
@@ -195,7 +197,9 @@ func (c *Cluster) Kill(name string) {
 		c.mu.Unlock()
 		c.t.Fatalf("grpcproctest: no running node %q", name)
 	}
-	m.dead = true
+	m.dead, m.killed = true, true
+	conns := m.conns
+	m.conns = nil
 	var peers []*grpcproc.Node
 	for _, other := range c.nodes {
 		if !other.dead {
@@ -216,6 +220,11 @@ func (c *Cluster) Kill(name string) {
 		}
 	}
 
+	// Its connections go first, including one a dial just made that its
+	// node has not yet linked over.
+	for _, conn := range conns {
+		_ = conn.Close()
+	}
 	for _, peer := range m.node.Peers() {
 		m.node.Disconnect(peer)
 	}
@@ -263,6 +272,9 @@ func (c *Cluster) start(name string) *grpcproc.Node {
 	c.t.Helper()
 	ln := bufconn.Listen(1 << 20)
 	srv := grpc.NewServer()
+	// The member exists before its node, so the node's dialer is bound to
+	// this start of it, not to whatever runs under its name later.
+	m := &member{name: name, ln: ln, srv: srv}
 	cfg := grpcproc.Config{
 		Name:        name,
 		Advertise:   name,
@@ -270,7 +282,7 @@ func (c *Cluster) start(name string) *grpcproc.Node {
 		Resolver:    c.Resolver(),
 		DialOptions: []grpc.DialOption{
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithContextDialer(c.dialer(name)),
+			grpc.WithContextDialer(c.dialer(name, m)),
 		},
 		Logger:      c.logger,
 		Hooks:       c.hooks,
@@ -292,7 +304,7 @@ func (c *Cluster) start(name string) *grpcproc.Node {
 	if err := node.Start(context.Background()); err != nil {
 		c.t.Fatal(err)
 	}
-	m := &member{name: name, ln: ln, srv: srv, node: node}
+	m.node = node
 	c.mu.Lock()
 	c.nodes[name] = m
 	c.mu.Unlock()
@@ -307,18 +319,37 @@ func stopMember(m *member, timeout time.Duration) {
 	_ = m.ln.Close()
 }
 
-func (c *Cluster) dialer(from string) func(context.Context, string) (net.Conn, error) {
+// dialer connects src, the node called from (or, with from empty, a client
+// outside the cluster), to the node a dial names.
+func (c *Cluster) dialer(from string, src *member) func(context.Context, string) (net.Conn, error) {
 	return func(ctx context.Context, to string) (net.Conn, error) {
 		c.mu.Lock()
 		cut := c.cut[[2]string{from, to}]
 		m := c.nodes[to]
+		killed := src != nil && src.killed
+		down := m == nil || m.dead
 		c.mu.Unlock()
 		switch {
+		case killed:
+			// Its processes exit as it stops, and would tell their callers
+			// and watchers so; a crash tells no one.
+			return nil, fmt.Errorf("grpcproctest: %s was killed", from)
 		case cut:
 			return nil, fmt.Errorf("grpcproctest: %s -> %s is partitioned", from, to)
-		case m == nil || m.dead:
+		case down:
 			return nil, errors.New("grpcproctest: connection refused")
 		}
-		return m.ln.DialContext(ctx)
+		conn, err := m.ln.DialContext(ctx)
+		if err != nil || src == nil {
+			return conn, err
+		}
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if src.killed { // killed while this dial connected
+			_ = conn.Close()
+			return nil, fmt.Errorf("grpcproctest: %s was killed", from)
+		}
+		src.conns = append(src.conns, conn)
+		return conn, nil
 	}
 }
