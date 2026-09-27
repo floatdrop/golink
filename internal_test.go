@@ -166,8 +166,8 @@ func TestConnLostStaleAndSendClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	out.closeNoConn(io.EOF)
-	if err := out.send(nil); !errors.Is(err, ErrNoConnection) {
-		t.Fatalf("send on closed: %v", err)
+	if le, ok := errors.AsType[*LinkError](out.send(nil)); !ok || !le.Unsent || !errors.Is(le, ErrNoConnection) {
+		t.Fatalf("send on closed: %v", le)
 	}
 	n.connLost("b", out, nil, io.EOF, false)
 	n.connLost("b", out, in, io.EOF, true)

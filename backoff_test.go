@@ -39,7 +39,8 @@ func downLink(t *testing.T, a *grpcproc.Node) grpcproc.LinkInfo {
 }
 
 func backedOff(err error) bool {
-	return errors.Is(err, grpcproc.ErrNoConnection) && strings.Contains(err.Error(), "next dial in")
+	le, ok := errors.AsType[*grpcproc.LinkError](err)
+	return ok && le.Unsent && errors.Is(err, grpcproc.ErrNoConnection) && strings.Contains(err.Error(), "next dial in")
 }
 
 // eventually polls cond until it holds, for up to 5s.
@@ -173,8 +174,10 @@ func TestUnroutableReplyOrDownCutsThePeersLink(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	// A reply from a process. b is told why its link went.
-	if _, err := b.Call[*testpb.Ping](ctx, grpcproc.Named[*testpb.Ping]("a", "echo"), &testpb.Ping{}); !errors.Is(err, grpcproc.ErrNoConnection) || !strings.Contains(err.Error(), "a cannot reach b back: no route to b") {
+	// A reply from a process. b is told why its link went, and that its
+	// call may have been handled: it was.
+	_, err = b.Call[*testpb.Ping](ctx, grpcproc.Named[*testpb.Ping]("a", "echo"), &testpb.Ping{})
+	if le, ok := errors.AsType[*grpcproc.LinkError](err); !ok || le.Unsent || !strings.Contains(err.Error(), "a cannot reach b back: no route to b") {
 		t.Fatalf("call: %v", err)
 	}
 	// A reply a sends while dispatching b's frame: no such process.

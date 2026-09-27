@@ -181,7 +181,7 @@ calls carry the `Metadata` in that ctx with the message.
 | | |
 | --- | --- |
 | `ErrNoProc` | No such process, or a callee that exited before answering. |
-| `ErrNoConnection` | The peer cannot be reached. It comes as a `*LinkError` wrapping the transport error, which `errors.Is` matches. |
+| `ErrNoConnection` | The peer cannot be reached. It comes as a `*LinkError` wrapping the transport error, which `errors.Is` matches. Its `Unsent` says the message never left this node, so sending it again cannot deliver it twice; otherwise it may have been handled. |
 | `ErrType` | The process does not accept this message type, or the reply is not an `R`. |
 | `*RemoteError` | The error a `Call` handler returned, carried back as text. |
 | `ErrNameTaken`, `ErrNodeStopped`, `ErrNotCall` | A `Spawn` under a held name; the node has stopped; a `Reply` to a message nobody waits on. |

@@ -103,10 +103,16 @@ func exitReasonOf(ctx context.Context) (string, bool) {
 	return "", false
 }
 
-// LinkError wraps the transport error that closed a link to a peer.
+// LinkError reports that a link to a peer closed or could not open; Err says
+// why.
 type LinkError struct {
 	Peer string
 	Err  error
+	// Unsent reports that the message never left this node, so sending it
+	// again cannot deliver it twice: the peer could not be reached, or dials
+	// to it are backed off. Otherwise it may have been handled: a Call whose
+	// link broke while it waited for the reply.
+	Unsent bool
 }
 
 func (e *LinkError) Error() string { return fmt.Sprintf("grpcproc: link to %s: %v", e.Peer, e.Err) }

@@ -530,7 +530,10 @@ func (n *Node) SendTo(ctx context.Context, to Target, m proto.Message) error {
 //	resp, err := node.Call[*orderspb.Reserved](ctx, addr, &orderspb.Order{…})
 //
 // A reply of another type is ErrType; a handler error is a *RemoteError; a
-// callee that is gone, or exits before answering, is ErrNoProc.
+// callee that is gone, or exits before answering, is ErrNoProc; a peer that
+// cannot be reached is a *LinkError, whose Unsent says that req never left.
+// If ctx ends first, Call returns its error, and req may have been handled;
+// a ctx already done sends nothing.
 func (n *Node) Call[R, N proto.Message](ctx context.Context, to Addr[N], req N) (R, error) {
 	return typed[R](n.doCall(ctx, n.PID(), nil, to.dest(), req, MetadataFrom(ctx)))
 }
@@ -591,6 +594,9 @@ func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to dest, req 
 	md, done := n.hookSend(from, caller, pid, name, req, md, true)
 	if done != nil {
 		defer func() { done(err) }()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err // sends nothing: a ctx error from a call is otherwise ambiguous
 	}
 	ref := n.nextRef.Add(1)
 	pc := &pendingCall{node: pid.Node, ch: make(chan callResult, 1)}

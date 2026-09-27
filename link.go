@@ -81,7 +81,7 @@ type outLink struct {
 
 func (l *outLink) send(env *grpcprocv1.Envelope) error {
 	if !l.q.push(env) {
-		return &LinkError{Peer: l.peer.Name, Err: ErrNoConnection}
+		return &LinkError{Peer: l.peer.Name, Err: ErrNoConnection, Unsent: true}
 	}
 	return nil
 }
@@ -197,7 +197,7 @@ func (n *Node) getOut(ctx context.Context, peer string) (*outLink, error) {
 		if d == nil {
 			next = fmt.Sprintf("next dial in %v", max(time.Until(r.at), time.Millisecond).Round(time.Millisecond))
 		}
-		return nil, &LinkError{Peer: peer, Err: fmt.Errorf("dialing it failed, %s: %w", next, r.err)}
+		return nil, &LinkError{Peer: peer, Err: fmt.Errorf("dialing it failed, %s: %w", next, r.err), Unsent: true}
 	}
 	if d == nil {
 		d = &dialOp{done: make(chan struct{})}
@@ -277,7 +277,7 @@ func (n *Node) finishDial(peer string, d *dialOp) {
 		if !n.stopped && !d.forgotten {
 			n.failedDial(peer, err, why)
 		}
-		err = &LinkError{Peer: peer, Err: err}
+		err = &LinkError{Peer: peer, Err: err, Unsent: true}
 	} else {
 		delete(n.backoff, peer)
 		if n.stopped {

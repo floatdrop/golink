@@ -133,7 +133,11 @@ message Envelope {                                   // one flat message, decode
   dispatched, in order), or when there is no inbound link at all; an outbound
   failure alone drops that link and the next send dials again. Then every
   monitor that crossed the link fires `Down{noconnection}` and every pending
-  call fails with `ErrNoConnection`. gRPC keepalive on both sides (client
+  call fails with `ErrNoConnection`: the peer may have handled it. Only a
+  `LinkError` whose `Unsent` is set is known safe to retry: the message never
+  left this node. A call that ends with its ctx may have been handled too.
+  `Unsent` is the field, not `Sent`, so that a `LinkError` built without it
+  claims nothing. gRPC keepalive on both sides (client
   `keepalive.ClientParameters`, server `keepalive.ServerParameters`) is what
   turns a silent partition into a stream error in seconds; the library does
   not set it, the application's gRPC configuration does.
