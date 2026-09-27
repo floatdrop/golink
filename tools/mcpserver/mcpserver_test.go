@@ -10,10 +10,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/tools/client"
-	"github.com/floatdrop/golink/tools/internal/testcluster"
-	"github.com/floatdrop/golink/tools/mcpserver"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/tools/client"
+	"github.com/floatdrop/grpcproc/tools/internal/testcluster"
+	"github.com/floatdrop/grpcproc/tools/mcpserver"
 )
 
 func connect(t *testing.T, f *testcluster.Fixture, o mcpserver.Options) *mcp.ClientSession {
@@ -86,7 +86,7 @@ func TestToolsOnOffer(t *testing.T) {
 	if got := toolNames(t, cs); !slices.Equal(got, all) {
 		t.Fatalf("with writes: %v", got)
 	}
-	if init := cs.InitializeResult(); init.ServerInfo.Name != "golink" || init.ServerInfo.Version != "v1" || !strings.Contains(init.Instructions, "mailbox") {
+	if init := cs.InitializeResult(); init.ServerInfo.Name != "grpcproc" || init.ServerInfo.Version != "v1" || !strings.Contains(init.Instructions, "mailbox") {
 		t.Fatalf("%+v", init)
 	}
 }
@@ -152,7 +152,7 @@ func TestWatchEvents(t *testing.T) {
 			case <-stop:
 				return
 			case <-time.After(10 * time.Millisecond):
-				_, _ = golink.Spawn(f.C.Node("a"), func(*golink.Process[proto.Message]) error { return nil })
+				_, _ = grpcproc.Spawn(f.C.Node("a"), func(*grpcproc.Process[proto.Message]) error { return nil })
 			}
 		}
 	}()

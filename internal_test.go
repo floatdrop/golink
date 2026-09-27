@@ -1,4 +1,4 @@
-package golink
+package grpcproc
 
 import (
 	"context"
@@ -14,8 +14,8 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/floatdrop/golink/internal/testpb"
-	golinkv1 "github.com/floatdrop/golink/proto/golink/v1"
+	"github.com/floatdrop/grpcproc/internal/testpb"
+	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
 func TestQueue(t *testing.T) {
@@ -78,11 +78,11 @@ func TestProtoHelpers(t *testing.T) {
 	if typeName(nil) != "" {
 		t.Fatal("nil helpers")
 	}
-	if _, err := decodeBody(&golinkv1.Envelope{}); err == nil {
+	if _, err := decodeBody(&grpcprocv1.Envelope{}); err == nil {
 		t.Fatal("decode without a body")
 	}
 	// A body whose type is known but whose bytes are not that type.
-	if _, err := decodeBody(&golinkv1.Envelope{BodyType: "golink.test.v1.Ping", Body: []byte{0xff}}); err == nil {
+	if _, err := decodeBody(&grpcprocv1.Envelope{BodyType: "grpcproc.test.v1.Ping", Body: []byte{0xff}}); err == nil {
 		t.Fatal("decoded garbage")
 	}
 	if first(metadata.MD{}, "k") != "" {
@@ -110,12 +110,12 @@ func newTestNode(t *testing.T, name string) *Node {
 func TestDispatchMalformed(t *testing.T) {
 	n := newTestNode(t, "a")
 	me := n.PID()
-	unknown := func(kind golinkv1.Kind, ref uint64) *golinkv1.Envelope {
-		return &golinkv1.Envelope{Kind: kind, FromIncarnation: 1, FromId: 1, ToIncarnation: 1, ToId: 1, Ref: ref,
+	unknown := func(kind grpcprocv1.Kind, ref uint64) *grpcprocv1.Envelope {
+		return &grpcprocv1.Envelope{Kind: kind, FromIncarnation: 1, FromId: 1, ToIncarnation: 1, ToId: 1, Ref: ref,
 			BodyType: "no.such.Type", Body: []byte{1}}
 	}
-	n.dispatch("b", unknown(golinkv1.Kind_KIND_SEND, 0))
-	n.dispatch("b", unknown(golinkv1.Kind_KIND_CALL, 1))
+	n.dispatch("b", unknown(grpcprocv1.Kind_KIND_SEND, 0))
+	n.dispatch("b", unknown(grpcprocv1.Kind_KIND_CALL, 1))
 	if n.deadLetters.Load() != 1 {
 		t.Fatalf("dead letters %d", n.deadLetters.Load())
 	}
@@ -123,16 +123,16 @@ func TestDispatchMalformed(t *testing.T) {
 	// one nobody waits for is dropped.
 	pc := &pendingCall{node: "b", ch: make(chan callResult, 1)}
 	n.pending[7] = pc
-	n.dispatch("b", unknown(golinkv1.Kind_KIND_REPLY, 7))
+	n.dispatch("b", unknown(grpcprocv1.Kind_KIND_REPLY, 7))
 	if r := <-pc.ch; !errors.Is(r.err, ErrType) {
 		t.Fatalf("%v", r.err)
 	}
-	n.dispatch("b", &golinkv1.Envelope{Kind: golinkv1.Kind_KIND_REPLY, Ref: 8, Status: golinkv1.Status_STATUS_OK})
+	n.dispatch("b", &grpcprocv1.Envelope{Kind: grpcprocv1.Kind_KIND_REPLY, Ref: 8, Status: grpcprocv1.Status_STATUS_OK})
 	// Down for a process that does not exist, and for a ref it never held.
-	n.dispatch("b", &golinkv1.Envelope{Kind: golinkv1.Kind_KIND_DOWN, FromIncarnation: 1, FromId: 1, ToIncarnation: 1, ToId: 1, Ref: 1})
+	n.dispatch("b", &grpcprocv1.Envelope{Kind: grpcprocv1.Kind_KIND_DOWN, FromIncarnation: 1, FromId: 1, ToIncarnation: 1, ToId: 1, Ref: 1})
 	p := &proc{n: n, pid: PID{Node: "a", Incarnation: 1, ID: 5}, mbox: newQueue[item](true)}
 	n.procs[5] = p
-	n.dispatch("b", &golinkv1.Envelope{Kind: golinkv1.Kind_KIND_DOWN, FromIncarnation: 1, FromId: 1, ToIncarnation: p.pid.Incarnation, ToId: p.pid.ID, Ref: 1})
+	n.dispatch("b", &grpcprocv1.Envelope{Kind: grpcprocv1.Kind_KIND_DOWN, FromIncarnation: 1, FromId: 1, ToIncarnation: p.pid.Incarnation, ToId: p.pid.ID, Ref: 1})
 	if p.mbox.len() != 0 {
 		t.Fatal("unknown ref must not deliver")
 	}
@@ -157,7 +157,7 @@ func TestDispatchMalformed(t *testing.T) {
 func TestConnLostStaleAndSendClosed(t *testing.T) {
 	n := newTestNode(t, "a")
 	// Stale links are just closed.
-	out := &outLink{peer: NodeID{Name: "b"}, q: newQueue[*golinkv1.Envelope](false), done: make(chan struct{}), drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
+	out := &outLink{peer: NodeID{Name: "b"}, q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}), drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
 	out.cc = nil
 	in := &inLink{peer: NodeID{Name: "b"}, closed: make(chan struct{})}
 	n.connLost("b", nil, in, nil, false)
@@ -196,14 +196,14 @@ type fakeStream struct {
 	ctx     context.Context
 	sendErr error
 	recvErr error
-	recv    chan *golinkv1.Frame
+	recv    chan *grpcprocv1.Frame
 }
 
 func (f *fakeStream) Context() context.Context { return f.ctx }
-func (f *fakeStream) Send(*golinkv1.Frame) error {
+func (f *fakeStream) Send(*grpcprocv1.Frame) error {
 	return f.sendErr
 }
-func (f *fakeStream) Recv() (*golinkv1.Frame, error) {
+func (f *fakeStream) Recv() (*grpcprocv1.Frame, error) {
 	if env, ok := <-f.recv; ok {
 		return env, nil
 	}
@@ -214,12 +214,12 @@ func TestLinkHandlerBranches(t *testing.T) {
 	n := newTestNode(t, "a")
 	ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(mdNode, "b", mdIncarnation, "2", mdVersion, "1"))
 	// Hello cannot be sent.
-	fs := &fakeStream{ctx: ctx, sendErr: io.ErrClosedPipe, recv: make(chan *golinkv1.Frame)}
+	fs := &fakeStream{ctx: ctx, sendErr: io.ErrClosedPipe, recv: make(chan *grpcprocv1.Frame)}
 	if err := n.Link(fs); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatalf("%v", err)
 	}
 	// Closed from this side while the peer is still sending.
-	fs = &fakeStream{ctx: ctx, recvErr: io.EOF, recv: make(chan *golinkv1.Frame)}
+	fs = &fakeStream{ctx: ctx, recvErr: io.EOF, recv: make(chan *grpcprocv1.Frame)}
 	done := make(chan error, 1)
 	go func() { done <- n.Link(fs) }()
 	time.Sleep(20 * time.Millisecond)
@@ -232,7 +232,7 @@ func TestLinkHandlerBranches(t *testing.T) {
 	close(fs.recv)
 	// A node that has stopped refuses links.
 	_ = n.Stop(context.Background())
-	fs = &fakeStream{ctx: ctx, recv: make(chan *golinkv1.Frame)}
+	fs = &fakeStream{ctx: ctx, recv: make(chan *grpcprocv1.Frame)}
 	if err := n.Link(fs); err == nil {
 		t.Fatal("link after stop")
 	}
@@ -246,13 +246,13 @@ func TestOutboundWriteFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := &outLink{
-		peer: NodeID{Name: "b"}, cc: cc, q: newQueue[*golinkv1.Envelope](false), done: make(chan struct{}),
+		peer: NodeID{Name: "b"}, cc: cc, q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
 		drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {},
 		stream: &fakeClientStream{sendErr: io.ErrClosedPipe},
 	}
 	n.out["b"] = l
 	go l.writeLoop(n)
-	_ = l.send(&golinkv1.Envelope{})
+	_ = l.send(&grpcprocv1.Envelope{})
 	select {
 	case <-l.done:
 	case <-time.After(time.Second):
@@ -270,13 +270,13 @@ type fakeClientStream struct {
 	sendErr error
 }
 
-func (f *fakeClientStream) Send(*golinkv1.Frame) error     { return f.sendErr }
-func (f *fakeClientStream) Recv() (*golinkv1.Frame, error) { select {} }
-func (f *fakeClientStream) CloseSend() error               { return nil }
+func (f *fakeClientStream) Send(*grpcprocv1.Frame) error     { return f.sendErr }
+func (f *fakeClientStream) Recv() (*grpcprocv1.Frame, error) { select {} }
+func (f *fakeClientStream) CloseSend() error                 { return nil }
 
 func TestShutdownArms(t *testing.T) {
 	mk := func() *outLink {
-		return &outLink{peer: NodeID{Name: "b"}, q: newQueue[*golinkv1.Envelope](false), done: make(chan struct{}),
+		return &outLink{peer: NodeID{Name: "b"}, q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
 			drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
 	}
 	// Caller's ctx expires before anything drains.
@@ -310,7 +310,7 @@ func TestInspectNowOnExited(t *testing.T) {
 
 func TestOutboundLostWhileInboundAlive(t *testing.T) {
 	n := newTestNode(t, "a")
-	out := &outLink{peer: NodeID{Name: "b"}, q: newQueue[*golinkv1.Envelope](false), done: make(chan struct{}),
+	out := &outLink{peer: NodeID{Name: "b"}, q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
 		drained: make(chan struct{}), recvDone: make(chan struct{}), cancel: func() {}}
 	out.once.Do(func() {})
 	in := &inLink{peer: NodeID{Name: "b"}, closed: make(chan struct{})}
@@ -338,14 +338,14 @@ func TestOutboundLostWhileInboundAlive(t *testing.T) {
 func TestRecvGoroutineStopsWhenClosed(t *testing.T) {
 	n := newTestNode(t, "a")
 	ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(mdNode, "b", mdIncarnation, "2", mdVersion, "1"))
-	fs := &fakeStream{ctx: ctx, recvErr: io.EOF, recv: make(chan *golinkv1.Frame)}
+	fs := &fakeStream{ctx: ctx, recvErr: io.EOF, recv: make(chan *grpcprocv1.Frame)}
 	done := make(chan error, 1)
 	go func() { done <- n.Link(fs) }()
 	time.Sleep(20 * time.Millisecond)
 	n.Disconnect("b")
 	<-done
 	// The handler is gone; an envelope arriving now finds nobody to hand it to.
-	fs.recv <- &golinkv1.Frame{}
+	fs.recv <- &grpcprocv1.Frame{}
 	close(fs.recv)
 }
 
@@ -434,30 +434,30 @@ func TestSubscribersEdges(t *testing.T) {
 }
 
 func TestFrameSplitting(t *testing.T) {
-	env := func(body, md int) *golinkv1.Envelope {
-		e := &golinkv1.Envelope{Kind: golinkv1.Kind_KIND_SEND, Body: make([]byte, body)}
+	env := func(body, md int) *grpcprocv1.Envelope {
+		e := &grpcprocv1.Envelope{Kind: grpcprocv1.Kind_KIND_SEND, Body: make([]byte, body)}
 		if md > 0 {
 			e.Metadata = map[string]string{"k": string(make([]byte, md))}
 		}
 		return e
 	}
 	// Small envelopes all fit; their bodies are counted.
-	if n, body := frameOf([]*golinkv1.Envelope{env(10, 0), env(20, 5), {Kind: golinkv1.Kind_KIND_MONITOR}}); n != 3 || body != 30 {
+	if n, body := frameOf([]*grpcprocv1.Envelope{env(10, 0), env(20, 5), {Kind: grpcprocv1.Kind_KIND_MONITOR}}); n != 3 || body != 30 {
 		t.Fatalf("%d %d", n, body)
 	}
 	// A frame stops before it would pass maxFrame, metadata included.
 	half := maxFrame/2 - 100
-	if n, _ := frameOf([]*golinkv1.Envelope{env(half, 0), env(half, 0), env(10, 0)}); n != 2 {
+	if n, _ := frameOf([]*grpcprocv1.Envelope{env(half, 0), env(half, 0), env(10, 0)}); n != 2 {
 		t.Fatalf("split at %d", n)
 	}
-	if n, _ := frameOf([]*golinkv1.Envelope{env(half, 0), env(10, half+200)}); n != 1 {
+	if n, _ := frameOf([]*grpcprocv1.Envelope{env(half, 0), env(10, half+200)}); n != 1 {
 		t.Fatalf("metadata ignored: %d", n)
 	}
 	// An envelope larger than a frame still goes, alone.
-	if n, body := frameOf([]*golinkv1.Envelope{env(2*maxFrame, 0), env(1, 0)}); n != 1 || body != 2*maxFrame {
+	if n, body := frameOf([]*grpcprocv1.Envelope{env(2*maxFrame, 0), env(1, 0)}); n != 1 || body != 2*maxFrame {
 		t.Fatalf("%d %d", n, body)
 	}
-	if bodySize(&golinkv1.Envelope{Kind: golinkv1.Kind_KIND_REPLY, Body: []byte("ab")}) != 2 {
+	if bodySize(&grpcprocv1.Envelope{Kind: grpcprocv1.Kind_KIND_REPLY, Body: []byte("ab")}) != 2 {
 		t.Fatal("reply body not counted")
 	}
 }
@@ -467,7 +467,7 @@ func TestNoDispatchAfterClose(t *testing.T) {
 	n := newTestNode(t, "a")
 	l := &inLink{peer: NodeID{Name: "b"}, closed: make(chan struct{})}
 	l.close()
-	if l.deliver(n, &golinkv1.Frame{Envelopes: []*golinkv1.Envelope{{}}}) {
+	if l.deliver(n, &grpcprocv1.Frame{Envelopes: []*grpcprocv1.Envelope{{}}}) {
 		t.Fatal("dispatched after close")
 	}
 }

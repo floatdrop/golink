@@ -7,14 +7,14 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/floatdrop/golink"
-	inspectv1 "github.com/floatdrop/golink/proto/golink/inspect/v1"
+	"github.com/floatdrop/grpcproc"
+	inspectv1 "github.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1"
 )
 
 // Dialer reaches other nodes' Inspectors through the same resolver the node
 // uses, keeping one connection per peer. Its Peer method is a PeerFunc.
 type Dialer struct {
-	resolver golink.Resolver
+	resolver grpcproc.Resolver
 	opts     []grpc.DialOption
 
 	mu    sync.Mutex
@@ -22,7 +22,7 @@ type Dialer struct {
 }
 
 // NewDialer returns a Dialer that resolves node names with r and dials with opts.
-func NewDialer(r golink.Resolver, opts ...grpc.DialOption) *Dialer {
+func NewDialer(r grpcproc.Resolver, opts ...grpc.DialOption) *Dialer {
 	return &Dialer{resolver: r, opts: opts, conns: map[string]*grpc.ClientConn{}}
 }
 

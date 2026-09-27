@@ -1,4 +1,4 @@
-// Package inspect serves golink.inspect.v1.Inspector: a node's processes,
+// Package inspect serves grpcproc.inspect.v1.Inspector: a node's processes,
 // links and events over gRPC, for tools and for people. It is optional —
 // register it next to the node on the same server, behind whatever
 // interceptors guard the application's other services.
@@ -18,8 +18,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/floatdrop/golink"
-	inspectv1 "github.com/floatdrop/golink/proto/golink/inspect/v1"
+	"github.com/floatdrop/grpcproc"
+	inspectv1 "github.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1"
 )
 
 // PeerFunc returns the Inspector of another node, to forward a request to.
@@ -35,16 +35,16 @@ func WithPeers(f PeerFunc) Option { return func(s *Server) { s.peers = f } }
 // ReadOnly refuses SetLogLevel, Send and Exit with PermissionDenied.
 func ReadOnly() Option { return func(s *Server) { s.readOnly = true } }
 
-// Server implements golink.inspect.v1.Inspector for one node.
+// Server implements grpcproc.inspect.v1.Inspector for one node.
 type Server struct {
 	inspectv1.UnimplementedInspectorServer
-	node     *golink.Node
+	node     *grpcproc.Node
 	peers    PeerFunc
 	readOnly bool
 }
 
 // New returns an Inspector for node.
-func New(node *golink.Node, opts ...Option) *Server {
+func New(node *grpcproc.Node, opts ...Option) *Server {
 	s := &Server{node: node}
 	for _, o := range opts {
 		o(s)
@@ -94,7 +94,7 @@ func (s *Server) writable() error {
 }
 
 // local resolves a target on this node to a PID.
-func (s *Server) local(t *inspectv1.Target) (golink.PID, error) {
+func (s *Server) local(t *inspectv1.Target) (grpcproc.PID, error) {
 	switch k := t.GetKind().(type) {
 	case *inspectv1.Target_Pid:
 		return pidFrom(k.Pid), nil
@@ -102,20 +102,20 @@ func (s *Server) local(t *inspectv1.Target) (golink.PID, error) {
 		if pid, ok := s.node.Whereis(k.Name); ok {
 			return pid, nil
 		}
-		return golink.PID{}, status.Errorf(codes.NotFound, "inspect: no process named %q", k.Name)
+		return grpcproc.PID{}, status.Errorf(codes.NotFound, "inspect: no process named %q", k.Name)
 	default:
-		return golink.PID{}, status.Error(codes.InvalidArgument, "inspect: target is required")
+		return grpcproc.PID{}, status.Error(codes.InvalidArgument, "inspect: target is required")
 	}
 }
 
-// addr turns a target into something golink can send to, without requiring
+// addr turns a target into something grpcproc can send to, without requiring
 // the name to resolve here first.
-func (s *Server) addr(t *inspectv1.Target) (golink.Target, error) {
+func (s *Server) addr(t *inspectv1.Target) (grpcproc.Target, error) {
 	switch k := t.GetKind().(type) {
 	case *inspectv1.Target_Pid:
 		return pidFrom(k.Pid), nil
 	case *inspectv1.Target_Name:
-		return golink.Name{Node: s.node.Name(), Name: k.Name}, nil
+		return grpcproc.Name{Node: s.node.Name(), Name: k.Name}, nil
 	default:
 		return nil, status.Error(codes.InvalidArgument, "inspect: target is required")
 	}
@@ -141,7 +141,7 @@ func (s *Server) ListProcesses(ctx context.Context, req *inspectv1.ListProcesses
 	return resp, nil
 }
 
-func matches(p golink.ProcessInfo, req *inspectv1.ListProcessesRequest) bool {
+func matches(p grpcproc.ProcessInfo, req *inspectv1.ListProcessesRequest) bool {
 	switch {
 	case req.GetLabel() != "" && p.Label != req.GetLabel():
 		return false
@@ -239,7 +239,7 @@ func (s *Server) Exit(ctx context.Context, req *inspectv1.ExitRequest) (*inspect
 		return nil, err
 	}
 	// Exit is local here, so it cannot fail to route.
-	_ = s.node.Exit(to, cmp.Or(req.GetReason(), golink.ReasonKilled))
+	_ = s.node.Exit(to, cmp.Or(req.GetReason(), grpcproc.ReasonKilled))
 	return &inspectv1.ExitResponse{}, nil
 }
 

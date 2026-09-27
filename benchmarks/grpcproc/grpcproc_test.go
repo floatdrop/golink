@@ -1,6 +1,6 @@
-// Package golink benchmarks golink the way the others are benchmarked; see
+// Package grpcproc benchmarks grpcproc the way the others are benchmarked; see
 // ../README.md.
-package golink
+package grpcproc
 
 import (
 	"context"
@@ -12,17 +12,17 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/benchmarks/internal/shared"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/benchmarks/internal/shared"
 )
 
-func glNode(b *testing.B, name string, peers golink.StaticResolver) (*golink.Node, string) {
+func glNode(b *testing.B, name string, peers grpcproc.StaticResolver) (*grpcproc.Node, string) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		b.Fatal(err)
 	}
 	srv := grpc.NewServer()
-	n, err := golink.NewNode(golink.Config{
+	n, err := grpcproc.NewNode(grpcproc.Config{
 		Name: name, Advertise: ln.Addr().String(), Resolver: peers,
 		DialOptions: []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 	})
@@ -40,21 +40,21 @@ func glNode(b *testing.B, name string, peers golink.StaticResolver) (*golink.Nod
 	return n, ln.Addr().String()
 }
 
-func glPair(b *testing.B) (a, z *golink.Node) {
-	peers := golink.StaticResolver{}
+func glPair(b *testing.B) (a, z *grpcproc.Node) {
+	peers := grpcproc.StaticResolver{}
 	a, addrA := glNode(b, "a", peers)
 	z, addrZ := glNode(b, "z", peers)
 	peers["a"], peers["z"] = addrA, addrZ
 	return a, z
 }
 
-func glLocal(b *testing.B) *golink.Node {
-	n, _ := glNode(b, "solo", golink.StaticResolver{})
+func glLocal(b *testing.B) *grpcproc.Node {
+	n, _ := glNode(b, "solo", grpcproc.StaticResolver{})
 	return n
 }
 
-func glEcho(b *testing.B, n *golink.Node) golink.Addr[*shared.Msg] {
-	e, err := golink.Spawn(n, func(p *golink.Process[*shared.Msg]) error {
+func glEcho(b *testing.B, n *grpcproc.Node) grpcproc.Addr[*shared.Msg] {
+	e, err := grpcproc.Spawn(n, func(p *grpcproc.Process[*shared.Msg]) error {
 		for {
 			m, err := p.Receive()
 			if err != nil {
@@ -69,11 +69,11 @@ func glEcho(b *testing.B, n *golink.Node) golink.Addr[*shared.Msg] {
 	return e
 }
 
-func glSend(b *testing.B, from, to *golink.Node) {
+func glSend(b *testing.B, from, to *grpcproc.Node) {
 	var got atomic.Int64
 	want := int64(b.N)
 	done := make(chan struct{})
-	sink, _ := golink.Spawn(to, func(p *golink.Process[*shared.Msg]) error {
+	sink, _ := grpcproc.Spawn(to, func(p *grpcproc.Process[*shared.Msg]) error {
 		for {
 			if _, err := p.Receive(); err != nil {
 				return err
@@ -96,7 +96,7 @@ func glSend(b *testing.B, from, to *golink.Node) {
 	<-done
 }
 
-func glCall(b *testing.B, from, to *golink.Node, parallel bool) {
+func glCall(b *testing.B, from, to *grpcproc.Node, parallel bool) {
 	echo := glEcho(b, to)
 	ctx := b.Context()
 	if _, err := from.Call[*shared.Msg](ctx, echo, &shared.Msg{Value: 1}); err != nil {

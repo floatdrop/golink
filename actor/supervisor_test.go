@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/actor"
-	"github.com/floatdrop/golink/golinktest"
-	"github.com/floatdrop/golink/internal/testpb"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/actor"
+	"github.com/floatdrop/grpcproc/grpcproctest"
+	"github.com/floatdrop/grpcproc/internal/testpb"
 )
 
 // worker exits normally on N == 0, fails on N < 0, and otherwise waits.
@@ -28,7 +28,7 @@ func worker(p *P) error {
 	}
 }
 
-func pidOf(t *testing.T, n *golink.Node, name string) golink.PID {
+func pidOf(t *testing.T, n *grpcproc.Node, name string) grpcproc.PID {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -43,7 +43,7 @@ func pidOf(t *testing.T, n *golink.Node, name string) golink.PID {
 }
 
 // restarted waits until name is registered to a PID other than old.
-func restarted(t *testing.T, n *golink.Node, name string, old golink.PID) golink.PID {
+func restarted(t *testing.T, n *grpcproc.Node, name string, old grpcproc.PID) grpcproc.PID {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -57,8 +57,8 @@ func restarted(t *testing.T, n *golink.Node, name string, old golink.PID) golink
 	}
 }
 
-func send(n *golink.Node, name string, v int64) {
-	_ = n.Send(golink.Named[*testpb.Ping](n.Name(), name), &testpb.Ping{N: v})
+func send(n *grpcproc.Node, name string, v int64) {
+	_ = n.Send(grpcproc.Named[*testpb.Ping](n.Name(), name), &testpb.Ping{N: v})
 }
 
 func settle() { time.Sleep(50 * time.Millisecond) }
@@ -82,13 +82,13 @@ func TestStrategies(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.strategy.String(), func(t *testing.T) {
-			c := golinktest.New(t, "a")
+			c := grpcproctest.New(t, "a")
 			n := c.Node("a")
 			sup, err := actor.Supervise(n, actor.Spec{Strategy: tc.strategy, Children: children()})
 			if err != nil {
 				t.Fatal(err)
 			}
-			before := map[string]golink.PID{}
+			before := map[string]grpcproc.PID{}
 			for _, name := range names {
 				before[name] = pidOf(t, n, name)
 			}
@@ -114,7 +114,7 @@ func TestStrategies(t *testing.T) {
 }
 
 func TestRestartPolicies(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	_, err := actor.Supervise(n, actor.Spec{Strategy: actor.OneForOne, Children: []actor.ChildSpec{
 		actor.ChildFunc("perm", worker),
@@ -147,7 +147,7 @@ func TestRestartPolicies(t *testing.T) {
 }
 
 func TestOneForAllKeepsFinishedChildrenFinished(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	_, err := actor.Supervise(n, actor.Spec{Strategy: actor.OneForAll, Children: []actor.ChildSpec{
 		actor.ChildFunc("done", worker).WithRestart(actor.Transient),
@@ -172,7 +172,7 @@ func TestOneForAllKeepsFinishedChildrenFinished(t *testing.T) {
 }
 
 func TestIntensityAndEscalation(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	// The inner supervisor gives up after one restart; the outer restarts it.
 	outer, err := actor.Supervise(n, actor.Spec{Children: []actor.ChildSpec{
@@ -202,7 +202,7 @@ func TestIntensityAndEscalation(t *testing.T) {
 }
 
 func TestNoRestartsAllowed(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	sup, err := actor.Supervise(n, actor.Spec{MaxRestarts: -1, Children: []actor.ChildSpec{actor.ChildFunc("w", worker)}})
 	if err != nil {
@@ -216,11 +216,11 @@ func TestNoRestartsAllowed(t *testing.T) {
 }
 
 func TestSupervisorExitStopsChildren(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	sup, err := actor.Supervise(n, actor.Spec{Children: []actor.ChildSpec{
 		actor.ChildFunc("w1", worker), actor.ChildFunc("w2", worker),
-	}}, golink.WithName("sup"))
+	}}, grpcproc.WithName("sup"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,16 +231,16 @@ func TestSupervisorExitStopsChildren(t *testing.T) {
 		t.Fatal("a supervisor answered a call")
 	}
 	_ = n.SendTo(sup, &testpb.Ping{})
-	_ = n.Exit(golink.Name{Node: "a", Name: "sup"}, golink.ReasonKilled)
-	for _, ch := range []<-chan golink.Down{w1, w2} {
-		if d := down(t, ch); d.Reason != golink.ReasonShutdown {
+	_ = n.Exit(grpcproc.Name{Node: "a", Name: "sup"}, grpcproc.ReasonKilled)
+	for _, ch := range []<-chan grpcproc.Down{w1, w2} {
+		if d := down(t, ch); d.Reason != grpcproc.ReasonShutdown {
 			t.Fatalf("child exited with %q", d.Reason)
 		}
 	}
 }
 
 func TestChildIgnoringExit(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	release := make(chan struct{})
 	defer close(release)
@@ -273,10 +273,10 @@ func TestChildIgnoringExit(t *testing.T) {
 }
 
 func TestStartFailures(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	// A name already taken: Supervise fails and stops what it started.
-	_, _ = golink.Spawn(n, worker, golink.WithName("taken"))
+	_, _ = grpcproc.Spawn(n, worker, grpcproc.WithName("taken"))
 	_, err := actor.Supervise(n, actor.Spec{Children: []actor.ChildSpec{
 		actor.ChildFunc("first", worker), actor.ChildFunc("taken", worker),
 	}})
@@ -297,7 +297,7 @@ func TestStartFailures(t *testing.T) {
 }
 
 func TestSpecValidation(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	for _, spec := range []actor.Spec{
 		{Children: []actor.ChildSpec{{Name: "raw"}}},
@@ -315,7 +315,7 @@ func TestSpecValidation(t *testing.T) {
 }
 
 func TestChildHandlerIsFreshOnRestart(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	built := 0
 	_, err := actor.Supervise(n, actor.Spec{Children: []actor.ChildSpec{
@@ -324,7 +324,7 @@ func TestChildHandlerIsFreshOnRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	addr := golink.Named[*testpb.Ping]("a", "counter")
+	addr := grpcproc.Named[*testpb.Ping]("a", "counter")
 	pidOf(t, n, "counter")
 	_ = n.Send(addr, &testpb.Ping{N: 1})
 	_ = n.Send(addr, &testpb.Ping{N: 1})

@@ -25,7 +25,7 @@ jobs:
         run: go test -race -count=1 ./...
       - name: README embeds the current examples
         run: go run github.com/campoy/embedmd@v1.0.0 -d README.md
-      - name: Coverage (golink, inspect and actor must stay at 100%)
+      - name: Coverage (grpcproc, inspect and actor must stay at 100%)
         run: |
           for pkg in . ./inspect ./actor; do
             go test -count=1 -coverprofile=coverage.out -coverpkg=$pkg $pkg
@@ -34,7 +34,7 @@ jobs:
             [ "$total" = "100.0%" ] || { go tool cover -func=coverage.out | awk '$3 != "100.0%"'; exit 1; }
           done
   modules:
-    # Nested modules: adapters with dependencies golink itself does not have.
+    # Nested modules: adapters with dependencies grpcproc itself does not have.
     strategy:
       matrix:
         include:

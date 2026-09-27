@@ -1,4 +1,4 @@
-// golink.v1 is the wire protocol between golink nodes. One stream per
+// grpcproc.v1 is the wire protocol between grpcproc nodes. One stream per
 // (sender node -> receiver node) direction carries every interaction between
 // the two, in order: messages, calls, replies, monitors and down notifications.
 
@@ -6,9 +6,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             (unknown)
-// source: golink/v1/golink.proto
+// source: grpcproc/v1/grpcproc.proto
 
-package golinkv1
+package grpcprocv1
 
 import (
 	context "context"
@@ -23,7 +23,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Node_Link_FullMethodName = "/golink.v1.Node/Link"
+	Node_Link_FullMethodName = "/grpcproc.v1.Node/Link"
 )
 
 // NodeClient is the client API for Node service.
@@ -33,7 +33,7 @@ const (
 // Node is registered by a node on the application's gRPC server.
 type NodeClient interface {
 	// Link is opened by the sending node. The client sends its identity in the
-	// request metadata (golink-node, golink-incarnation, golink-version); the
+	// request metadata (grpcproc-node, grpcproc-incarnation, grpcproc-version); the
 	// server answers with one Frame holding a Hello and then only reads.
 	// Application envelopes flow client -> server only.
 	Link(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[Frame, Frame], error)
@@ -67,7 +67,7 @@ type Node_LinkClient = grpc.BidiStreamingClient[Frame, Frame]
 // Node is registered by a node on the application's gRPC server.
 type NodeServer interface {
 	// Link is opened by the sending node. The client sends its identity in the
-	// request metadata (golink-node, golink-incarnation, golink-version); the
+	// request metadata (grpcproc-node, grpcproc-incarnation, grpcproc-version); the
 	// server answers with one Frame holding a Hello and then only reads.
 	// Application envelopes flow client -> server only.
 	Link(grpc.BidiStreamingServer[Frame, Frame]) error
@@ -116,7 +116,7 @@ type Node_LinkServer = grpc.BidiStreamingServer[Frame, Frame]
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var Node_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "golink.v1.Node",
+	ServiceName: "grpcproc.v1.Node",
 	HandlerType: (*NodeServer)(nil),
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
@@ -127,5 +127,5 @@ var Node_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "golink/v1/golink.proto",
+	Metadata: "grpcproc/v1/grpcproc.proto",
 }

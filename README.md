@@ -1,4 +1,4 @@
-# golink
+# grpcproc
 
 Erlang-style processes for Go, on the gRPC server you already run.
 
@@ -8,7 +8,7 @@ binary or on another node; the node-to-node traffic is one gRPC stream per
 direction, registered on your `*grpc.Server` next to your other services.
 
 - **A library, not a framework.** You bring the gRPC server, credentials,
-  discovery, `slog` and lifecycle. golink never opens a listener, reads env
+  discovery, `slog` and lifecycle. grpcproc never opens a listener, reads env
   vars, installs globals or starts a goroutine outside `Start`/`Stop`.
 - **Typed mailboxes.** The message type lives on the address, so a send to
   `Addr[*shoppb.Reserve]` is checked by the compiler, locally and remotely.
@@ -22,10 +22,11 @@ direction, registered on your `*grpc.Server` next to your other services.
 - **Core depends on `grpc` and `protobuf` only.**
 
 ```sh
-go get github.com/floatdrop/golink
+go get github.com/floatdrop/grpcproc
 ```
 
-Requires **Go 1.27** (generic methods).
+Requires **Go 1.27** (generic methods). Versions up to v0.0.1 were published
+as `github.com/floatdrop/golink`.
 
 ## Quick start
 
@@ -49,18 +50,18 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/examples/shoppb"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/examples/shoppb"
 )
 
 func main() {
 	ctx := context.Background()
 
 	// Where each node's gRPC server listens: a static address book here,
-	// golink/etcd in a real cluster.
+	// grpcproc/etcd in a real cluster.
 	warehouseLis := listen()
 	shopLis := listen()
-	peers := golink.StaticResolver{
+	peers := grpcproc.StaticResolver{
 		"warehouse": warehouseLis.Addr().String(),
 		"shop":      shopLis.Addr().String(),
 	}
@@ -72,7 +73,7 @@ func main() {
 
 	// A process on warehouse. Its mailbox holds *shoppb.Reserve and
 	// nothing else; it answers each call with *shoppb.Reserved.
-	_, err := golink.Spawn(warehouse, func(p *golink.Process[*shoppb.Reserve]) error {
+	_, err := grpcproc.Spawn(warehouse, func(p *grpcproc.Process[*shoppb.Reserve]) error {
 		left := map[string]int64{"apple": 3}
 		for {
 			m, err := p.Receive()
@@ -86,18 +87,18 @@ func main() {
 			left[m.Body.Sku] -= m.Body.Qty
 			_ = p.Reply(m, &shoppb.Reserved{Sku: m.Body.Sku, Left: left[m.Body.Sku]}, nil)
 		}
-	}, golink.WithName("stock"))
+	}, grpcproc.WithName("stock"))
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// From shop, the process is a node name and a process name. The address
 	// carries the mailbox type, so the compiler checks what is sent to it.
-	stock := golink.Named[*shoppb.Reserve]("warehouse", "stock")
+	stock := grpcproc.Named[*shoppb.Reserve]("warehouse", "stock")
 	for range 2 {
 		r, err := shop.Call[*shoppb.Reserved](ctx, stock, &shoppb.Reserve{Sku: "apple", Qty: 2})
 		if err != nil {
-			fmt.Println("reserve failed:", err) // the handler's error, as a *golink.RemoteError
+			fmt.Println("reserve failed:", err) // the handler's error, as a *grpcproc.RemoteError
 			continue
 		}
 		fmt.Println("reserved, left:", r.Left)
@@ -106,8 +107,8 @@ func main() {
 	// A process on shop monitors stock, then asks it to exit. The Down
 	// arrives with the reason, as it would for a crash or a lost node. It
 	// expects no messages, so its mailbox is untyped: proto.Message.
-	done := make(chan golink.Down)
-	_, err = golink.Spawn(shop, func(p *golink.Process[proto.Message]) error {
+	done := make(chan grpcproc.Down)
+	_, err = grpcproc.Spawn(shop, func(p *grpcproc.Process[proto.Message]) error {
 		p.Monitor(stock)
 		if err := p.Exit(stock, "closing"); err != nil {
 			return err
@@ -129,7 +130,7 @@ func main() {
 	fmt.Println("stock exited:", (<-done).Reason)
 
 	_, err = shop.Call[*shoppb.Reserved](ctx, stock, &shoppb.Reserve{Sku: "apple", Qty: 1})
-	fmt.Println("no such process:", errors.Is(err, golink.ErrNoProc))
+	fmt.Println("no such process:", errors.Is(err, grpcproc.ErrNoProc))
 }
 
 func listen() net.Listener {
@@ -142,8 +143,8 @@ func listen() net.Listener {
 
 // serve runs a node on its own gRPC server, the one the service already has
 // for its other APIs.
-func serve(ctx context.Context, name string, lis net.Listener, peers golink.Resolver) (*golink.Node, func()) {
-	node, err := golink.NewNode(golink.Config{
+func serve(ctx context.Context, name string, lis net.Listener, peers grpcproc.Resolver) (*grpcproc.Node, func()) {
+	node, err := grpcproc.NewNode(grpcproc.Config{
 		Name:        name,
 		Resolver:    peers,
 		DialOptions: []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
@@ -152,7 +153,7 @@ func serve(ctx context.Context, name string, lis net.Listener, peers golink.Reso
 		log.Fatal(err)
 	}
 	srv := grpc.NewServer()
-	node.Register(srv) // golink.v1.Node, next to the service's own
+	node.Register(srv) // grpcproc.v1.Node, next to the service's own
 	go func() { _ = srv.Serve(lis) }()
 	if err := node.Start(ctx); err != nil {
 		log.Fatal(err)
@@ -178,7 +179,7 @@ no such process: true
 
 ## Actors and supervisors
 
-`golink/actor` adds structure on top of processes, using only the public
+`grpcproc/actor` adds structure on top of processes, using only the public
 API. An actor is a plain struct holding its dependencies, which is what a
 constructor or a DI container builds. Instead of a receive loop it has a
 method per kind of message; all but `HandleMessage` are optional:
@@ -208,9 +209,9 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/actor"
-	"github.com/floatdrop/golink/examples/shoppb"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/actor"
+	"github.com/floatdrop/grpcproc/examples/shoppb"
 )
 
 // Ledger records reservations. It stands for whatever the actor depends on:
@@ -225,18 +226,18 @@ func (Ledger) Record(r *shoppb.Reserve) { fmt.Println("ledger:", r.Qty, r.Sku) }
 type Inventory struct {
 	ledger  *Ledger
 	left    map[string]int64
-	waiting []golink.Msg[*shoppb.Stock] // reservations parked until a restock
+	waiting []grpcproc.Msg[*shoppb.Stock] // reservations parked until a restock
 }
 
 // Init runs on the actor's goroutine before the first message.
-func (i *Inventory) Init(*golink.Process[*shoppb.Stock]) error {
+func (i *Inventory) Init(*grpcproc.Process[*shoppb.Stock]) error {
 	i.left = map[string]int64{}
 	return nil
 }
 
 // HandleCall gets what was sent with Call. The returned message, or error,
 // is the reply, and the actor carries on either way.
-func (i *Inventory) HandleCall(_ *golink.Process[*shoppb.Stock], m golink.Msg[*shoppb.Stock]) (proto.Message, error) {
+func (i *Inventory) HandleCall(_ *grpcproc.Process[*shoppb.Stock], m grpcproc.Msg[*shoppb.Stock]) (proto.Message, error) {
 	r := m.Body.GetReserve()
 	switch {
 	case r == nil:
@@ -255,7 +256,7 @@ func (i *Inventory) HandleCall(_ *golink.Process[*shoppb.Stock], m golink.Msg[*s
 // HandleMessage gets what was sent with Send; nobody waits for an answer.
 // An error ends the actor, with the error as its exit reason, and
 // actor.ErrStop ends it normally.
-func (i *Inventory) HandleMessage(p *golink.Process[*shoppb.Stock], m golink.Msg[*shoppb.Stock]) error {
+func (i *Inventory) HandleMessage(p *grpcproc.Process[*shoppb.Stock], m grpcproc.Msg[*shoppb.Stock]) error {
 	r := m.Body.GetRestock()
 	if r == nil {
 		return errors.New("a reservation must be a call")
@@ -274,8 +275,8 @@ func (i *Inventory) HandleMessage(p *golink.Process[*shoppb.Stock], m golink.Msg
 }
 
 // Terminate runs however the actor ends. Calls it never answered fail with
-// golink.ErrNoProc on their own.
-func (*Inventory) Terminate(_ *golink.Process[*shoppb.Stock], err error) {
+// grpcproc.ErrNoProc on their own.
+func (*Inventory) Terminate(_ *grpcproc.Process[*shoppb.Stock], err error) {
 	fmt.Println("inventory stopped:", err)
 }
 
@@ -287,13 +288,13 @@ func (i *Inventory) reserve(r *shoppb.Reserve) *shoppb.Reserved {
 
 func main() {
 	ctx := context.Background()
-	node, err := golink.NewNode(golink.Config{Name: "shop", Resolver: golink.StaticResolver{}})
+	node, err := grpcproc.NewNode(grpcproc.Config{Name: "shop", Resolver: grpcproc.StaticResolver{}})
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer func() { _ = node.Stop(ctx) }()
 
-	inventory, err := actor.Spawn(node, &Inventory{ledger: &Ledger{}}, golink.WithName("inventory"))
+	inventory, err := actor.Spawn(node, &Inventory{ledger: &Ledger{}}, grpcproc.WithName("inventory"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -351,7 +352,7 @@ reserve failed: cannot reserve -1
 ledger: 1 apple
 reserved, left: 2
 inventory stopped: a reservation must be a call
-then: golink: no such process
+then: grpcproc: no such process
 ```
 
 A supervisor starts its children in order, monitors them, and restarts
@@ -384,9 +385,9 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/actor"
-	"github.com/floatdrop/golink/examples/shoppb"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/actor"
+	"github.com/floatdrop/grpcproc/examples/shoppb"
 )
 
 // Ledger stands for a database. What must outlive a crash lives outside the
@@ -414,12 +415,12 @@ type Inventory struct {
 	left   map[string]int64
 }
 
-func (i *Inventory) Init(*golink.Process[*shoppb.Stock]) error {
+func (i *Inventory) Init(*grpcproc.Process[*shoppb.Stock]) error {
 	i.left = i.ledger.Load()
 	return nil
 }
 
-func (i *Inventory) HandleMessage(_ *golink.Process[*shoppb.Stock], m golink.Msg[*shoppb.Stock]) error {
+func (i *Inventory) HandleMessage(_ *grpcproc.Process[*shoppb.Stock], m grpcproc.Msg[*shoppb.Stock]) error {
 	r := m.Body.GetRestock()
 	if r.GetQty() <= 0 {
 		// A bad message, or a bug: the error ends the actor with it as the
@@ -431,7 +432,7 @@ func (i *Inventory) HandleMessage(_ *golink.Process[*shoppb.Stock], m golink.Msg
 	return nil
 }
 
-func (i *Inventory) HandleCall(_ *golink.Process[*shoppb.Stock], m golink.Msg[*shoppb.Stock]) (proto.Message, error) {
+func (i *Inventory) HandleCall(_ *grpcproc.Process[*shoppb.Stock], m grpcproc.Msg[*shoppb.Stock]) (proto.Message, error) {
 	r := m.Body.GetReserve()
 	if i.left[r.GetSku()] < r.GetQty() {
 		return nil, errors.New("not enough stock")
@@ -443,7 +444,7 @@ func (i *Inventory) HandleCall(_ *golink.Process[*shoppb.Stock], m golink.Msg[*s
 
 func main() {
 	ctx := context.Background()
-	node, err := golink.NewNode(golink.Config{Name: "shop", Resolver: golink.StaticResolver{}})
+	node, err := grpcproc.NewNode(grpcproc.Config{Name: "shop", Resolver: grpcproc.StaticResolver{}})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -465,13 +466,13 @@ func main() {
 			// ChildSupervisor nests another Spec.
 			actor.Child("inventory", func() *Inventory { return &Inventory{ledger: ledger} }),
 		},
-	}, golink.WithName("supervisor"))
+	}, grpcproc.WithName("supervisor"))
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// The name reaches whichever process currently runs the child.
-	inventory := golink.Named[*shoppb.Stock]("shop", "inventory")
+	inventory := grpcproc.Named[*shoppb.Stock]("shop", "inventory")
 	if err := node.Send(inventory, restock("apple", 5)); err != nil {
 		log.Fatal(err)
 	}
@@ -490,10 +491,10 @@ func main() {
 		if !slices.Contains(e.Process.Names, "inventory") {
 			continue
 		}
-		if e.Kind == golink.EventExit {
+		if e.Kind == grpcproc.EventExit {
 			fmt.Println("inventory exited:", e.Reason)
 		}
-		if e.Kind == golink.EventSpawn {
+		if e.Kind == grpcproc.EventSpawn {
 			fmt.Println("inventory started again")
 			break
 		}
@@ -507,7 +508,7 @@ func main() {
 	fmt.Println("reserved, left:", r.Left)
 
 	// The supervisor publishes its state through WithInspect, which is what
-	// the Inspector and golinkctl show.
+	// the Inspector and grpcprocctl show.
 	state, err := node.Inspect(ctx, sup)
 	if err != nil {
 		log.Fatal(err)
@@ -585,7 +586,7 @@ next receives; one that never does reports `busy for 12s`, which is the
 diagnosis. With a state machine that is one line:
 
 ```go
-golink.WithInspect(func() map[string]string { return map[string]string{"state": rec.state.String()} })
+grpcproc.WithInspect(func() map[string]string { return map[string]string{"state": rec.state.String()} })
 ```
 
 `node.Subscribe(ctx, buffer)` streams what happens on the node: spawns,
@@ -598,16 +599,16 @@ in the next one's `Missed`.
 `OnSend` and `OnReceive` return the metadata to use and a `Done` that closes
 what they started, which is all a tracer needs. A process's sends inherit the
 metadata of the message it is handling, so trace chains form without
-threading a context through handlers. `golink.JoinHooks` combines several.
+threading a context through handlers. `grpcproc.JoinHooks` combines several.
 
-[`golink/otel`](otel/README.md) implements them with OpenTelemetry: spans
+[`grpcproc/otel`](otel/README.md) implements them with OpenTelemetry: spans
 for every send, call and handled message, chained across nodes, and metrics
 by process label (throughput, mailbox wait and depth, handling and call
 latency, exits by reason class, dead letters, link traffic).
 
 ## Inspector
 
-`golink/inspect` serves all of the above over gRPC, on the same server:
+`grpcproc/inspect` serves all of the above over gRPC, on the same server:
 
 ```go
 node.Register(grpcServer)
@@ -615,7 +616,7 @@ dialer := inspect.NewDialer(resolver, dialOptions...) // reach other nodes' Insp
 inspect.New(node, inspect.WithPeers(dialer.Peer)).Register(grpcServer)
 ```
 
-`golink.inspect.v1.Inspector` has `GetNode`, `ListProcesses` (filter by
+`grpcproc.inspect.v1.Inspector` has `GetNode`, `ListProcesses` (filter by
 name, label, state, mailbox depth), `GetProcess` (snapshot plus what the
 process publishes through `WithInspect`), `SetLogLevel`, `Send`, `Exit` and
 `Watch`. Every request names a node; one that is not this node is forwarded
@@ -623,30 +624,30 @@ to that node's Inspector, so one endpoint inspects the whole cluster.
 `inspect.ReadOnly()` refuses the three writes; anything finer is the job of
 the interceptors that guard your other services.
 
-[`golinkctl`](tools/README.md) is its command line, and serves it to AI
+[`grpcprocctl`](tools/README.md) is its command line, and serves it to AI
 agents over MCP:
 
 ```sh
-golinkctl --plaintext ps --sort mailbox        # who is falling behind
-golinkctl --plaintext inspect ledger-writer    # what it believes, or that it is busy
-golinkctl --plaintext dot --cluster | dot -Tsvg -o processes.svg
-claude mcp add golink -- golinkctl --plaintext --addr 10.0.0.5:9000 mcp
+grpcprocctl --plaintext ps --sort mailbox        # who is falling behind
+grpcprocctl --plaintext inspect ledger-writer    # what it believes, or that it is busy
+grpcprocctl --plaintext dot --cluster | dot -Tsvg -o processes.svg
+claude mcp add grpcproc -- grpcprocctl --plaintext --addr 10.0.0.5:9000 mcp
 ```
 
 It is a plain gRPC service, so `grpcurl` works on it too.
 
 ## Discovery
 
-`Config.Resolver` is all a node needs to reach peers; `golink.StaticResolver`
+`Config.Resolver` is all a node needs to reach peers; `grpcproc.StaticResolver`
 is a map. `Config.Registrar` publishes the node on `Start` and withdraws it
 on `Stop`, and `Config.Membership` is the cluster's view of who is alive: a
 peer that leaves, or comes back as a new incarnation, has its links dropped,
 so monitors fire and pending calls fail even when its connection never
-closed. [`golink/etcd`](etcd/README.md) implements all three on etcd leases.
+closed. [`grpcproc/etcd`](etcd/README.md) implements all three on etcd leases.
 
 ## Testing a cluster
 
-`golinktest` runs nodes over in-memory connections, so a multi-node scenario
+`grpcproctest` runs nodes over in-memory connections, so a multi-node scenario
 is a plain `go test`:
 
 [embedmd]:# (examples/testing/shop_test.go go)
@@ -657,19 +658,19 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/examples/shoppb"
-	"github.com/floatdrop/golink/golinktest"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/examples/shoppb"
+	"github.com/floatdrop/grpcproc/grpcproctest"
 )
 
 func TestReserveAcrossNodes(t *testing.T) {
 	// Two nodes over in-memory gRPC connections, stopped when the test ends.
-	c := golinktest.New(t, "shop", "warehouse")
+	c := grpcproctest.New(t, "shop", "warehouse")
 	shop := c.Node("shop")
-	if _, err := golink.Spawn(c.Node("warehouse"), Stock(map[string]int64{"apple": 3}), golink.WithName("stock")); err != nil {
+	if _, err := grpcproc.Spawn(c.Node("warehouse"), Stock(map[string]int64{"apple": 3}), grpcproc.WithName("stock")); err != nil {
 		t.Fatal(err)
 	}
-	stock := golink.Named[*shoppb.Reserve]("warehouse", "stock")
+	stock := grpcproc.Named[*shoppb.Reserve]("warehouse", "stock")
 	apple := &shoppb.Reserve{Sku: "apple", Qty: 1}
 
 	if r, err := shop.Call[*shoppb.Reserved](t.Context(), stock, apple); err != nil || r.Left != 2 {
@@ -679,7 +680,7 @@ func TestReserveAcrossNodes(t *testing.T) {
 	// A partition fails calls, and fires monitors with Down{noconnection},
 	// until it heals.
 	c.Partition("shop", "warehouse")
-	if _, err := shop.Call[*shoppb.Reserved](t.Context(), stock, apple); !errors.Is(err, golink.ErrNoConnection) {
+	if _, err := shop.Call[*shoppb.Reserved](t.Context(), stock, apple); !errors.Is(err, grpcproc.ErrNoConnection) {
 		t.Fatal(err)
 	}
 	c.Heal("shop", "warehouse")
@@ -691,14 +692,14 @@ func TestReserveAcrossNodes(t *testing.T) {
 	// the processes the old one ran.
 	c.Kill("warehouse")
 	c.Restart("warehouse")
-	if _, err := shop.Call[*shoppb.Reserved](t.Context(), stock, apple); !errors.Is(err, golink.ErrNoProc) {
+	if _, err := shop.Call[*shoppb.Reserved](t.Context(), stock, apple); !errors.Is(err, grpcproc.ErrNoProc) {
 		t.Fatal(err)
 	}
 }
 ```
 
 `c.Stop(name)` stops a node gracefully, so watchers get `Down{shutdown}`.
-`golinktest.WithServices` registers extra services (an Inspector) on every
+`grpcproctest.WithServices` registers extra services (an Inspector) on every
 node, and `c.Conn(name)` dials one.
 
 ## Examples
@@ -727,7 +728,7 @@ Against [GoAkt](https://github.com/tochemey/goakt),
 (Apple M3 Max), remote over TCP on loopback for all; see
 [benchmarks](benchmarks/README.md) for the method and how to read it:
 
-| | golink | GoAkt | Hollywood | Proto.Actor |
+| | grpcproc | GoAkt | Hollywood | Proto.Actor |
 | --- | --- | --- | --- | --- |
 | Local send | 99 ns | 96 ns | 58 ns | 191 ns |
 | Local request | 738 ns | 565 ns | 2265 ns | 2354 ns |

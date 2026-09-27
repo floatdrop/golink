@@ -8,7 +8,7 @@ import (
 	"github.com/anthdm/hollywood/actor"
 	"github.com/anthdm/hollywood/remote"
 
-	"github.com/floatdrop/golink/benchmarks/internal/shared"
+	"github.com/floatdrop/grpcproc/benchmarks/internal/shared"
 )
 
 type hwSink struct {

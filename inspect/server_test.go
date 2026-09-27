@@ -15,20 +15,20 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/golinktest"
-	"github.com/floatdrop/golink/inspect"
-	"github.com/floatdrop/golink/internal/testpb"
-	inspectv1 "github.com/floatdrop/golink/proto/golink/inspect/v1"
-	golinkv1 "github.com/floatdrop/golink/proto/golink/v1"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/grpcproctest"
+	"github.com/floatdrop/grpcproc/inspect"
+	"github.com/floatdrop/grpcproc/internal/testpb"
+	inspectv1 "github.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1"
+	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
 // cluster starts nodes that each serve an Inspector able to forward to the others.
-func cluster(t *testing.T, opts []inspect.Option, names ...string) *golinktest.Cluster {
+func cluster(t *testing.T, opts []inspect.Option, names ...string) *grpcproctest.Cluster {
 	t.Helper()
-	var c *golinktest.Cluster
+	var c *grpcproctest.Cluster
 	var dialer *inspect.Dialer
-	c = golinktest.NewWith(t, []golinktest.Option{golinktest.WithServices(func(n *golink.Node, s *grpc.Server) {
+	c = grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithServices(func(n *grpcproc.Node, s *grpc.Server) {
 		// A closure, not the method value dialer.Peer: the dialer is created
 		// after the cluster, and the method value would bind a nil receiver.
 		peers := func(ctx context.Context, node string) (inspectv1.InspectorClient, error) {
@@ -41,15 +41,15 @@ func cluster(t *testing.T, opts []inspect.Option, names ...string) *golinktest.C
 	return c
 }
 
-func client(c *golinktest.Cluster, node string) inspectv1.InspectorClient {
+func client(c *grpcproctest.Cluster, node string) inspectv1.InspectorClient {
 	return inspectv1.NewInspectorClient(c.Conn(node))
 }
 
-func pidPB(p golink.PID) *golinkv1.PID {
-	return &golinkv1.PID{Node: p.Node, Incarnation: p.Incarnation, Id: p.ID}
+func pidPB(p grpcproc.PID) *grpcprocv1.PID {
+	return &grpcprocv1.PID{Node: p.Node, Incarnation: p.Incarnation, Id: p.ID}
 }
 
-func byPID(p golink.PID) *inspectv1.Target {
+func byPID(p grpcproc.PID) *inspectv1.Target {
 	return &inspectv1.Target{Kind: &inspectv1.Target_Pid{Pid: pidPB(p)}}
 }
 
@@ -66,9 +66,9 @@ func code(t *testing.T, err error, want codes.Code) {
 
 // worker counts handled pings, publishes the count, and blocks on N == 7
 // until release is closed.
-func worker(release <-chan struct{}) (func(*golink.Process[*testpb.Ping]) error, golink.SpawnOption) {
+func worker(release <-chan struct{}) (func(*grpcproc.Process[*testpb.Ping]) error, grpcproc.SpawnOption) {
 	handled := 0
-	fn := func(p *golink.Process[*testpb.Ping]) error {
+	fn := func(p *grpcproc.Process[*testpb.Ping]) error {
 		for {
 			m, err := p.Receive()
 			if err != nil {
@@ -80,7 +80,7 @@ func worker(release <-chan struct{}) (func(*golink.Process[*testpb.Ping]) error,
 			}
 		}
 	}
-	return fn, golink.WithInspect(func() map[string]string { return map[string]string{"handled": string(rune('0' + handled))} })
+	return fn, grpcproc.WithInspect(func() map[string]string { return map[string]string{"handled": string(rune('0' + handled))} })
 }
 
 func TestGetNodeLocalAndForwarded(t *testing.T) {
@@ -95,7 +95,7 @@ func TestGetNodeLocalAndForwarded(t *testing.T) {
 		t.Fatalf("%+v", info)
 	}
 	// Asking a about b forwards to b's Inspector.
-	e, _ := golink.Spawn(c.Node("b"), func(p *golink.Process[*testpb.Ping]) error { _, err := p.Receive(); return err })
+	e, _ := grpcproc.Spawn(c.Node("b"), func(p *grpcproc.Process[*testpb.Ping]) error { _, err := p.Receive(); return err })
 	if _, err := c.Node("a").Call[*testpb.Pong](t.Context(), e, &testpb.Ping{}); err == nil {
 		t.Fatal("expected no reply")
 	}
@@ -104,7 +104,7 @@ func TestGetNodeLocalAndForwarded(t *testing.T) {
 		t.Fatal(err)
 	}
 	info = inspect.NodeInfo(resp.GetNode())
-	if info.ID.Name != "b" || len(info.Links) != 2 || info.Links[0].Peer.Name != "a" || info.Links[0].EstablishedAt.IsZero() || info.Links[0].State != golink.LinkUp {
+	if info.ID.Name != "b" || len(info.Links) != 2 || info.Links[0].Peer.Name != "a" || info.Links[0].EstablishedAt.IsZero() || info.Links[0].State != grpcproc.LinkUp {
 		t.Fatalf("%+v", info)
 	}
 }
@@ -115,11 +115,11 @@ func TestListProcessesFilters(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
 	fn, insp := worker(release)
-	busy, _ := golink.Spawn(n, fn, golink.WithName("orders-busy"), golink.WithLabel("order"), insp)
+	busy, _ := grpcproc.Spawn(n, fn, grpcproc.WithName("orders-busy"), grpcproc.WithLabel("order"), insp)
 	fn2, insp2 := worker(release)
-	_, _ = golink.Spawn(n, fn2, golink.WithName("orders-idle"), golink.WithLabel("order"), insp2)
+	_, _ = grpcproc.Spawn(n, fn2, grpcproc.WithName("orders-idle"), grpcproc.WithLabel("order"), insp2)
 	fn3, insp3 := worker(release)
-	_, _ = golink.Spawn(n, fn3, golink.WithName("billing"), golink.WithLabel("bill"), insp3)
+	_, _ = grpcproc.Spawn(n, fn3, grpcproc.WithName("billing"), grpcproc.WithLabel("bill"), insp3)
 	_ = n.Send(busy, &testpb.Ping{N: 7})
 	_ = n.Send(busy, &testpb.Ping{N: 1})
 	_ = n.Send(busy, &testpb.Ping{N: 1})
@@ -154,7 +154,7 @@ func TestListProcessesFilters(t *testing.T) {
 	}
 	resp, _ := a.ListProcesses(t.Context(), &inspectv1.ListProcessesRequest{MinMailbox: 2})
 	p := inspect.ProcessInfo(resp.GetProcesses()[0])
-	if p.PID != busy.PID() || p.Mailbox.Depth != 2 || p.Mailbox.OldestAge <= 0 || p.State != golink.StateRunning || p.Label != "order" || p.Names[0] != "orders-busy" {
+	if p.PID != busy.PID() || p.Mailbox.Depth != 2 || p.Mailbox.OldestAge <= 0 || p.State != grpcproc.StateRunning || p.Label != "order" || p.Names[0] != "orders-busy" {
 		t.Fatalf("%+v", p)
 	}
 }
@@ -164,8 +164,8 @@ func TestGetProcess(t *testing.T) {
 	b := c.Node("b")
 	release := make(chan struct{})
 	fn, insp := worker(release)
-	parent := golink.PID{Node: "b", Incarnation: b.ID().Incarnation, ID: 42}
-	pid, _ := golink.Spawn(b, fn, golink.WithName("w"), insp, golink.WithParent(parent))
+	parent := grpcproc.PID{Node: "b", Incarnation: b.ID().Incarnation, ID: 42}
+	pid, _ := grpcproc.Spawn(b, fn, grpcproc.WithName("w"), insp, grpcproc.WithParent(parent))
 	_ = b.Send(pid, &testpb.Ping{N: 1})
 	time.Sleep(20 * time.Millisecond)
 
@@ -197,7 +197,7 @@ func TestGetProcess(t *testing.T) {
 	if !strings.Contains(status.Convert(err).Message(), "node b:") {
 		t.Fatalf("forwarded error does not name the node: %v", err)
 	}
-	_, err = a.GetProcess(t.Context(), &inspectv1.GetProcessRequest{Target: byPID(golink.PID{Node: "b", Incarnation: b.ID().Incarnation, ID: 999})})
+	_, err = a.GetProcess(t.Context(), &inspectv1.GetProcessRequest{Target: byPID(grpcproc.PID{Node: "b", Incarnation: b.ID().Incarnation, ID: 999})})
 	code(t, err, codes.NotFound)
 	_, err = a.GetProcess(t.Context(), &inspectv1.GetProcessRequest{})
 	code(t, err, codes.InvalidArgument)
@@ -206,12 +206,12 @@ func TestGetProcess(t *testing.T) {
 func TestWrites(t *testing.T) {
 	c := cluster(t, nil, "a", "b")
 	a, b := client(c, "a"), c.Node("b")
-	w, _ := golink.Spawn[proto.Message](c.Node("a"), func(p *golink.Process[proto.Message]) error {
+	w, _ := grpcproc.Spawn[proto.Message](c.Node("a"), func(p *grpcproc.Process[proto.Message]) error {
 		_, err := p.Receive()
 		return err
 	})
 	col := make(chan *testpb.Ping, 1)
-	target, _ := golink.Spawn[*testpb.Ping](b, func(p *golink.Process[*testpb.Ping]) error {
+	target, _ := grpcproc.Spawn[*testpb.Ping](b, func(p *grpcproc.Process[*testpb.Ping]) error {
 		for {
 			m, err := p.Receive()
 			if err != nil {
@@ -219,7 +219,7 @@ func TestWrites(t *testing.T) {
 			}
 			col <- m.Body
 		}
-	}, golink.WithName("t"))
+	}, grpcproc.WithName("t"))
 	_ = w
 
 	// SetLogLevel through the inspector of another node.
@@ -229,7 +229,7 @@ func TestWrites(t *testing.T) {
 	if info, _ := b.Process(target.PID()); info.LogLevel != slog.LevelDebug {
 		t.Fatalf("%+v", info)
 	}
-	_, err := a.SetLogLevel(t.Context(), &inspectv1.SetLogLevelRequest{Target: byPID(golink.PID{Node: "b", Incarnation: b.ID().Incarnation, ID: 999})})
+	_, err := a.SetLogLevel(t.Context(), &inspectv1.SetLogLevelRequest{Target: byPID(grpcproc.PID{Node: "b", Incarnation: b.ID().Incarnation, ID: 999})})
 	code(t, err, codes.NotFound)
 	_, err = a.SetLogLevel(t.Context(), &inspectv1.SetLogLevelRequest{Node: "b", Target: byName("nope")})
 	code(t, err, codes.NotFound)
@@ -249,12 +249,12 @@ func TestWrites(t *testing.T) {
 	_, err = a.Send(t.Context(), &inspectv1.SendRequest{Node: "b", Body: body})
 	code(t, err, codes.InvalidArgument)
 	// A PID on a node this one cannot reach: the send fails at the server.
-	_, err = a.Send(t.Context(), &inspectv1.SendRequest{Node: "a", Target: byPID(golink.PID{Node: "nowhere"}), Body: body})
+	_, err = a.Send(t.Context(), &inspectv1.SendRequest{Node: "a", Target: byPID(grpcproc.PID{Node: "nowhere"}), Body: body})
 	code(t, err, codes.Unavailable)
 
 	// Exit by name, default reason; a watcher on a sees it.
-	watchDone := make(chan golink.Down, 1)
-	_, _ = golink.Spawn[proto.Message](c.Node("a"), func(p *golink.Process[proto.Message]) error {
+	watchDone := make(chan grpcproc.Down, 1)
+	_, _ = grpcproc.Spawn[proto.Message](c.Node("a"), func(p *grpcproc.Process[proto.Message]) error {
 		p.Monitor(target)
 		for {
 			m, err := p.Receive()
@@ -273,7 +273,7 @@ func TestWrites(t *testing.T) {
 	}
 	select {
 	case d := <-watchDone:
-		if d.Reason != golink.ReasonKilled {
+		if d.Reason != grpcproc.ReasonKilled {
 			t.Fatalf("%+v", d)
 		}
 	case <-time.After(5 * time.Second):
@@ -299,7 +299,7 @@ func TestReadOnly(t *testing.T) {
 
 func TestRoutingErrors(t *testing.T) {
 	// No peer dialer: another node is FailedPrecondition, for every method.
-	c := golinktest.NewWith(t, []golinktest.Option{golinktest.WithServices(func(n *golink.Node, s *grpc.Server) {
+	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithServices(func(n *grpcproc.Node, s *grpc.Server) {
 		inspect.New(n).Register(s)
 	})}, "a")
 	a := client(c, "a")
@@ -326,7 +326,7 @@ func TestRoutingErrors(t *testing.T) {
 		}
 	}
 	// A peer dialer that fails: Unavailable.
-	c2 := golinktest.NewWith(t, []golinktest.Option{golinktest.WithServices(func(n *golink.Node, s *grpc.Server) {
+	c2 := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithServices(func(n *grpcproc.Node, s *grpc.Server) {
 		inspect.New(n, inspect.WithPeers(func(context.Context, string) (inspectv1.InspectorClient, error) {
 			return nil, errors.New("no route")
 		})).Register(s)
@@ -351,7 +351,7 @@ func TestWatchLocalAndForwarded(t *testing.T) {
 				target = c.Node(node)
 			}
 			// The subscription is set up asynchronously: keep spawning until one is seen.
-			seen := make(chan golink.Event, 16)
+			seen := make(chan grpcproc.Event, 16)
 			go func() {
 				for {
 					resp, err := stream.Recv()
@@ -364,10 +364,10 @@ func TestWatchLocalAndForwarded(t *testing.T) {
 			}()
 			deadline := time.After(5 * time.Second)
 			for {
-				e, _ := golink.Spawn(target, func(p *golink.Process[*testpb.Ping]) error { return nil })
+				e, _ := grpcproc.Spawn(target, func(p *grpcproc.Process[*testpb.Ping]) error { return nil })
 				select {
 				case ev := <-seen:
-					if ev.Kind == golink.EventSpawn && ev.Process.PID.Node == target.Name() {
+					if ev.Kind == grpcproc.EventSpawn && ev.Process.PID.Node == target.Name() {
 						_ = e
 						return
 					}
@@ -395,7 +395,7 @@ func TestWatchEndsWhenNodeStops(t *testing.T) {
 			case <-live:
 				return
 			case <-time.After(10 * time.Millisecond):
-				_, _ = golink.Spawn(c.Node("a"), func(p *golink.Process[*testpb.Ping]) error { return nil })
+				_, _ = grpcproc.Spawn(c.Node("a"), func(p *grpcproc.Process[*testpb.Ping]) error { return nil })
 			}
 		}
 	}()
@@ -416,14 +416,14 @@ func TestWatchEndsWhenNodeStops(t *testing.T) {
 
 func TestEventConversions(t *testing.T) {
 	now := time.Now()
-	pid := golink.PID{Node: "a", Incarnation: 1, ID: 2}
-	info := golink.ProcessInfo{PID: pid, Label: "l", StartedAt: now, LogLevel: slog.LevelWarn}
-	events := []golink.Event{
-		{Kind: golink.EventSpawn, Process: info},
-		{Kind: golink.EventExit, Process: info, Reason: "boom"},
-		{Kind: golink.EventLinkUp, Peer: golink.NodeID{Name: "b", Incarnation: 3}},
-		{Kind: golink.EventLinkDown, Peer: golink.NodeID{Name: "b"}, Err: "eof"},
-		{Kind: golink.EventDeadLetter, From: pid, To: pid, Type: "x.Y", Reason: "type"},
+	pid := grpcproc.PID{Node: "a", Incarnation: 1, ID: 2}
+	info := grpcproc.ProcessInfo{PID: pid, Label: "l", StartedAt: now, LogLevel: slog.LevelWarn}
+	events := []grpcproc.Event{
+		{Kind: grpcproc.EventSpawn, Process: info},
+		{Kind: grpcproc.EventExit, Process: info, Reason: "boom"},
+		{Kind: grpcproc.EventLinkUp, Peer: grpcproc.NodeID{Name: "b", Incarnation: 3}},
+		{Kind: grpcproc.EventLinkDown, Peer: grpcproc.NodeID{Name: "b"}, Err: "eof"},
+		{Kind: grpcproc.EventDeadLetter, From: pid, To: pid, Type: "x.Y", Reason: "type"},
 	}
 	for _, ev := range events {
 		ev.Time, ev.Missed = now, 3
@@ -435,7 +435,7 @@ func TestEventConversions(t *testing.T) {
 		}
 	}
 	// Zero times stay zero across the wire.
-	if n := inspect.NodeInfo(inspect.NodeInfoToProto(golink.NodeInfo{Links: []golink.LinkInfo{{}}})); !n.StartedAt.IsZero() || !n.Links[0].EstablishedAt.IsZero() {
+	if n := inspect.NodeInfo(inspect.NodeInfoToProto(grpcproc.NodeInfo{Links: []grpcproc.LinkInfo{{}}})); !n.StartedAt.IsZero() || !n.Links[0].EstablishedAt.IsZero() {
 		t.Fatalf("%+v", n)
 	}
 }

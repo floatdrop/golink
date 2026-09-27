@@ -1,15 +1,15 @@
-// Separate module, so golink itself depends on grpc and protobuf only:
+// Separate module, so grpcproc itself depends on grpc and protobuf only:
 // OpenTelemetry is a dependency of this adapter alone. It requires a
-// published golink rather than a replace, because a replace is ignored by
+// published grpcproc rather than a replace, because a replace is ignored by
 // whoever imports this module; bumping the requirement below is how this
 // adapter picks up a library change. For local work on both at once, use a
 // go.work (ignored by git): go work init . ./otel
-module github.com/floatdrop/golink/otel
+module github.com/floatdrop/grpcproc/otel
 
 go 1.27.1
 
 require (
-	github.com/floatdrop/golink v0.0.1
+	github.com/floatdrop/grpcproc v0.0.1
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/metric v1.46.0
 	go.opentelemetry.io/otel/sdk v1.46.0

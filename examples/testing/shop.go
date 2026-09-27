@@ -4,13 +4,13 @@ package shop
 import (
 	"fmt"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/examples/shoppb"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/examples/shoppb"
 )
 
 // Stock serves reservations from left.
-func Stock(left map[string]int64) func(*golink.Process[*shoppb.Reserve]) error {
-	return func(p *golink.Process[*shoppb.Reserve]) error {
+func Stock(left map[string]int64) func(*grpcproc.Process[*shoppb.Reserve]) error {
+	return func(p *grpcproc.Process[*shoppb.Reserve]) error {
 		for {
 			m, err := p.Receive()
 			if err != nil {

@@ -14,9 +14,9 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/actor"
-	"github.com/floatdrop/golink/examples/shoppb"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/actor"
+	"github.com/floatdrop/grpcproc/examples/shoppb"
 )
 
 // Ledger stands for a database. What must outlive a crash lives outside the
@@ -44,12 +44,12 @@ type Inventory struct {
 	left   map[string]int64
 }
 
-func (i *Inventory) Init(*golink.Process[*shoppb.Stock]) error {
+func (i *Inventory) Init(*grpcproc.Process[*shoppb.Stock]) error {
 	i.left = i.ledger.Load()
 	return nil
 }
 
-func (i *Inventory) HandleMessage(_ *golink.Process[*shoppb.Stock], m golink.Msg[*shoppb.Stock]) error {
+func (i *Inventory) HandleMessage(_ *grpcproc.Process[*shoppb.Stock], m grpcproc.Msg[*shoppb.Stock]) error {
 	r := m.Body.GetRestock()
 	if r.GetQty() <= 0 {
 		// A bad message, or a bug: the error ends the actor with it as the
@@ -61,7 +61,7 @@ func (i *Inventory) HandleMessage(_ *golink.Process[*shoppb.Stock], m golink.Msg
 	return nil
 }
 
-func (i *Inventory) HandleCall(_ *golink.Process[*shoppb.Stock], m golink.Msg[*shoppb.Stock]) (proto.Message, error) {
+func (i *Inventory) HandleCall(_ *grpcproc.Process[*shoppb.Stock], m grpcproc.Msg[*shoppb.Stock]) (proto.Message, error) {
 	r := m.Body.GetReserve()
 	if i.left[r.GetSku()] < r.GetQty() {
 		return nil, errors.New("not enough stock")
@@ -73,7 +73,7 @@ func (i *Inventory) HandleCall(_ *golink.Process[*shoppb.Stock], m golink.Msg[*s
 
 func main() {
 	ctx := context.Background()
-	node, err := golink.NewNode(golink.Config{Name: "shop", Resolver: golink.StaticResolver{}})
+	node, err := grpcproc.NewNode(grpcproc.Config{Name: "shop", Resolver: grpcproc.StaticResolver{}})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -95,13 +95,13 @@ func main() {
 			// ChildSupervisor nests another Spec.
 			actor.Child("inventory", func() *Inventory { return &Inventory{ledger: ledger} }),
 		},
-	}, golink.WithName("supervisor"))
+	}, grpcproc.WithName("supervisor"))
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// The name reaches whichever process currently runs the child.
-	inventory := golink.Named[*shoppb.Stock]("shop", "inventory")
+	inventory := grpcproc.Named[*shoppb.Stock]("shop", "inventory")
 	if err := node.Send(inventory, restock("apple", 5)); err != nil {
 		log.Fatal(err)
 	}
@@ -120,10 +120,10 @@ func main() {
 		if !slices.Contains(e.Process.Names, "inventory") {
 			continue
 		}
-		if e.Kind == golink.EventExit {
+		if e.Kind == grpcproc.EventExit {
 			fmt.Println("inventory exited:", e.Reason)
 		}
-		if e.Kind == golink.EventSpawn {
+		if e.Kind == grpcproc.EventSpawn {
 			fmt.Println("inventory started again")
 			break
 		}
@@ -137,7 +137,7 @@ func main() {
 	fmt.Println("reserved, left:", r.Left)
 
 	// The supervisor publishes its state through WithInspect, which is what
-	// the Inspector and golinkctl show.
+	// the Inspector and grpcprocctl show.
 	state, err := node.Inspect(ctx, sup)
 	if err != nil {
 		log.Fatal(err)

@@ -1,4 +1,4 @@
-// golink.v1 is the wire protocol between golink nodes. One stream per
+// grpcproc.v1 is the wire protocol between grpcproc nodes. One stream per
 // (sender node -> receiver node) direction carries every interaction between
 // the two, in order: messages, calls, replies, monitors and down notifications.
 
@@ -6,9 +6,9 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        (unknown)
-// source: golink/v1/golink.proto
+// source: grpcproc/v1/grpcproc.proto
 
-package golinkv1
+package grpcprocv1
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -82,11 +82,11 @@ func (x Kind) String() string {
 }
 
 func (Kind) Descriptor() protoreflect.EnumDescriptor {
-	return file_golink_v1_golink_proto_enumTypes[0].Descriptor()
+	return file_grpcproc_v1_grpcproc_proto_enumTypes[0].Descriptor()
 }
 
 func (Kind) Type() protoreflect.EnumType {
-	return &file_golink_v1_golink_proto_enumTypes[0]
+	return &file_grpcproc_v1_grpcproc_proto_enumTypes[0]
 }
 
 func (x Kind) Number() protoreflect.EnumNumber {
@@ -95,7 +95,7 @@ func (x Kind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Kind.Descriptor instead.
 func (Kind) EnumDescriptor() ([]byte, []int) {
-	return file_golink_v1_golink_proto_rawDescGZIP(), []int{0}
+	return file_grpcproc_v1_grpcproc_proto_rawDescGZIP(), []int{0}
 }
 
 type Status int32
@@ -140,11 +140,11 @@ func (x Status) String() string {
 }
 
 func (Status) Descriptor() protoreflect.EnumDescriptor {
-	return file_golink_v1_golink_proto_enumTypes[1].Descriptor()
+	return file_grpcproc_v1_grpcproc_proto_enumTypes[1].Descriptor()
 }
 
 func (Status) Type() protoreflect.EnumType {
-	return &file_golink_v1_golink_proto_enumTypes[1]
+	return &file_grpcproc_v1_grpcproc_proto_enumTypes[1]
 }
 
 func (x Status) Number() protoreflect.EnumNumber {
@@ -153,7 +153,7 @@ func (x Status) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Status.Descriptor instead.
 func (Status) EnumDescriptor() ([]byte, []int) {
-	return file_golink_v1_golink_proto_rawDescGZIP(), []int{1}
+	return file_grpcproc_v1_grpcproc_proto_rawDescGZIP(), []int{1}
 }
 
 // Frame is what a link writes at once: every envelope queued since its last
@@ -167,7 +167,7 @@ type Frame struct {
 
 func (x *Frame) Reset() {
 	*x = Frame{}
-	mi := &file_golink_v1_golink_proto_msgTypes[0]
+	mi := &file_grpcproc_v1_grpcproc_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -179,7 +179,7 @@ func (x *Frame) String() string {
 func (*Frame) ProtoMessage() {}
 
 func (x *Frame) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_v1_golink_proto_msgTypes[0]
+	mi := &file_grpcproc_v1_grpcproc_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -192,7 +192,7 @@ func (x *Frame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Frame.ProtoReflect.Descriptor instead.
 func (*Frame) Descriptor() ([]byte, []int) {
-	return file_golink_v1_golink_proto_rawDescGZIP(), []int{0}
+	return file_grpcproc_v1_grpcproc_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Frame) GetEnvelopes() []*Envelope {
@@ -216,7 +216,7 @@ type PID struct {
 
 func (x *PID) Reset() {
 	*x = PID{}
-	mi := &file_golink_v1_golink_proto_msgTypes[1]
+	mi := &file_grpcproc_v1_grpcproc_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -228,7 +228,7 @@ func (x *PID) String() string {
 func (*PID) ProtoMessage() {}
 
 func (x *PID) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_v1_golink_proto_msgTypes[1]
+	mi := &file_grpcproc_v1_grpcproc_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -241,7 +241,7 @@ func (x *PID) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PID.ProtoReflect.Descriptor instead.
 func (*PID) Descriptor() ([]byte, []int) {
-	return file_golink_v1_golink_proto_rawDescGZIP(), []int{1}
+	return file_grpcproc_v1_grpcproc_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *PID) GetNode() string {
@@ -272,7 +272,7 @@ func (x *PID) GetId() uint64 {
 // allocates little.
 type Envelope struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Kind  Kind                   `protobuf:"varint,1,opt,name=kind,proto3,enum=golink.v1.Kind" json:"kind,omitempty"`
+	Kind  Kind                   `protobuf:"varint,1,opt,name=kind,proto3,enum=grpcproc.v1.Kind" json:"kind,omitempty"`
 	// The process on the sending node; id 0 is the node itself.
 	FromIncarnation uint64 `protobuf:"varint,2,opt,name=from_incarnation,json=fromIncarnation,proto3" json:"from_incarnation,omitempty"`
 	FromId          uint64 `protobuf:"varint,3,opt,name=from_id,json=fromId,proto3" json:"from_id,omitempty"`
@@ -283,7 +283,7 @@ type Envelope struct {
 	// A call's id, echoed by its reply, or a monitor's id, echoed by its down.
 	Ref uint64 `protobuf:"varint,7,opt,name=ref,proto3" json:"ref,omitempty"`
 	// A reply's status.
-	Status Status `protobuf:"varint,8,opt,name=status,proto3,enum=golink.v1.Status" json:"status,omitempty"`
+	Status Status `protobuf:"varint,8,opt,name=status,proto3,enum=grpcproc.v1.Status" json:"status,omitempty"`
 	// A reply's error, or the reason of a down or an exit.
 	Reason string `protobuf:"bytes,9,opt,name=reason,proto3" json:"reason,omitempty"`
 	// The body of a send, a call or a reply: its message type's full name and
@@ -292,7 +292,7 @@ type Envelope struct {
 	Body     []byte `protobuf:"bytes,11,opt,name=body,proto3" json:"body,omitempty"`
 	Hello    *Hello `protobuf:"bytes,12,opt,name=hello,proto3" json:"hello,omitempty"`
 	// Propagated context: trace headers, tenant, deadline. Never interpreted by
-	// golink itself.
+	// grpcproc itself.
 	Metadata      map[string]string `protobuf:"bytes,15,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -300,7 +300,7 @@ type Envelope struct {
 
 func (x *Envelope) Reset() {
 	*x = Envelope{}
-	mi := &file_golink_v1_golink_proto_msgTypes[2]
+	mi := &file_grpcproc_v1_grpcproc_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -312,7 +312,7 @@ func (x *Envelope) String() string {
 func (*Envelope) ProtoMessage() {}
 
 func (x *Envelope) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_v1_golink_proto_msgTypes[2]
+	mi := &file_grpcproc_v1_grpcproc_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -325,7 +325,7 @@ func (x *Envelope) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Envelope.ProtoReflect.Descriptor instead.
 func (*Envelope) Descriptor() ([]byte, []int) {
-	return file_golink_v1_golink_proto_rawDescGZIP(), []int{2}
+	return file_grpcproc_v1_grpcproc_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Envelope) GetKind() Kind {
@@ -432,7 +432,7 @@ type Hello struct {
 
 func (x *Hello) Reset() {
 	*x = Hello{}
-	mi := &file_golink_v1_golink_proto_msgTypes[3]
+	mi := &file_grpcproc_v1_grpcproc_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -444,7 +444,7 @@ func (x *Hello) String() string {
 func (*Hello) ProtoMessage() {}
 
 func (x *Hello) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_v1_golink_proto_msgTypes[3]
+	mi := &file_grpcproc_v1_grpcproc_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -457,7 +457,7 @@ func (x *Hello) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Hello.ProtoReflect.Descriptor instead.
 func (*Hello) Descriptor() ([]byte, []int) {
-	return file_golink_v1_golink_proto_rawDescGZIP(), []int{3}
+	return file_grpcproc_v1_grpcproc_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Hello) GetNode() string {
@@ -481,32 +481,32 @@ func (x *Hello) GetVersion() uint32 {
 	return 0
 }
 
-var File_golink_v1_golink_proto protoreflect.FileDescriptor
+var File_grpcproc_v1_grpcproc_proto protoreflect.FileDescriptor
 
-const file_golink_v1_golink_proto_rawDesc = "" +
+const file_grpcproc_v1_grpcproc_proto_rawDesc = "" +
 	"\n" +
-	"\x16golink/v1/golink.proto\x12\tgolink.v1\":\n" +
-	"\x05Frame\x121\n" +
-	"\tenvelopes\x18\x01 \x03(\v2\x13.golink.v1.EnvelopeR\tenvelopes\"K\n" +
+	"\x1agrpcproc/v1/grpcproc.proto\x12\vgrpcproc.v1\"<\n" +
+	"\x05Frame\x123\n" +
+	"\tenvelopes\x18\x01 \x03(\v2\x15.grpcproc.v1.EnvelopeR\tenvelopes\"K\n" +
 	"\x03PID\x12\x12\n" +
 	"\x04node\x18\x01 \x01(\tR\x04node\x12 \n" +
 	"\vincarnation\x18\x02 \x01(\x04R\vincarnation\x12\x0e\n" +
-	"\x02id\x18\x03 \x01(\x04R\x02id\"\xf2\x03\n" +
-	"\bEnvelope\x12#\n" +
-	"\x04kind\x18\x01 \x01(\x0e2\x0f.golink.v1.KindR\x04kind\x12)\n" +
+	"\x02id\x18\x03 \x01(\x04R\x02id\"\xfa\x03\n" +
+	"\bEnvelope\x12%\n" +
+	"\x04kind\x18\x01 \x01(\x0e2\x11.grpcproc.v1.KindR\x04kind\x12)\n" +
 	"\x10from_incarnation\x18\x02 \x01(\x04R\x0ffromIncarnation\x12\x17\n" +
 	"\afrom_id\x18\x03 \x01(\x04R\x06fromId\x12%\n" +
 	"\x0eto_incarnation\x18\x04 \x01(\x04R\rtoIncarnation\x12\x13\n" +
 	"\x05to_id\x18\x05 \x01(\x04R\x04toId\x12\x17\n" +
 	"\ato_name\x18\x06 \x01(\tR\x06toName\x12\x10\n" +
-	"\x03ref\x18\a \x01(\x04R\x03ref\x12)\n" +
-	"\x06status\x18\b \x01(\x0e2\x11.golink.v1.StatusR\x06status\x12\x16\n" +
+	"\x03ref\x18\a \x01(\x04R\x03ref\x12+\n" +
+	"\x06status\x18\b \x01(\x0e2\x13.grpcproc.v1.StatusR\x06status\x12\x16\n" +
 	"\x06reason\x18\t \x01(\tR\x06reason\x12\x1b\n" +
 	"\tbody_type\x18\n" +
 	" \x01(\tR\bbodyType\x12\x12\n" +
-	"\x04body\x18\v \x01(\fR\x04body\x12&\n" +
-	"\x05hello\x18\f \x01(\v2\x10.golink.v1.HelloR\x05hello\x12=\n" +
-	"\bmetadata\x18\x0f \x03(\v2!.golink.v1.Envelope.MetadataEntryR\bmetadata\x1a;\n" +
+	"\x04body\x18\v \x01(\fR\x04body\x12(\n" +
+	"\x05hello\x18\f \x01(\v2\x12.grpcproc.v1.HelloR\x05hello\x12?\n" +
+	"\bmetadata\x18\x0f \x03(\v2#.grpcproc.v1.Envelope.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"W\n" +
@@ -531,41 +531,41 @@ const file_golink_v1_golink_proto_rawDesc = "" +
 	"\tSTATUS_OK\x10\x01\x12\x10\n" +
 	"\fSTATUS_ERROR\x10\x02\x12\x11\n" +
 	"\rSTATUS_NOPROC\x10\x03\x12\x0f\n" +
-	"\vSTATUS_TYPE\x10\x0426\n" +
-	"\x04Node\x12.\n" +
-	"\x04Link\x12\x10.golink.v1.Frame\x1a\x10.golink.v1.Frame(\x010\x01B6Z4github.com/floatdrop/golink/proto/golink/v1;golinkv1b\x06proto3"
+	"\vSTATUS_TYPE\x10\x042:\n" +
+	"\x04Node\x122\n" +
+	"\x04Link\x12\x12.grpcproc.v1.Frame\x1a\x12.grpcproc.v1.Frame(\x010\x01B<Z:github.com/floatdrop/grpcproc/proto/grpcproc/v1;grpcprocv1b\x06proto3"
 
 var (
-	file_golink_v1_golink_proto_rawDescOnce sync.Once
-	file_golink_v1_golink_proto_rawDescData []byte
+	file_grpcproc_v1_grpcproc_proto_rawDescOnce sync.Once
+	file_grpcproc_v1_grpcproc_proto_rawDescData []byte
 )
 
-func file_golink_v1_golink_proto_rawDescGZIP() []byte {
-	file_golink_v1_golink_proto_rawDescOnce.Do(func() {
-		file_golink_v1_golink_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_golink_v1_golink_proto_rawDesc), len(file_golink_v1_golink_proto_rawDesc)))
+func file_grpcproc_v1_grpcproc_proto_rawDescGZIP() []byte {
+	file_grpcproc_v1_grpcproc_proto_rawDescOnce.Do(func() {
+		file_grpcproc_v1_grpcproc_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_grpcproc_v1_grpcproc_proto_rawDesc), len(file_grpcproc_v1_grpcproc_proto_rawDesc)))
 	})
-	return file_golink_v1_golink_proto_rawDescData
+	return file_grpcproc_v1_grpcproc_proto_rawDescData
 }
 
-var file_golink_v1_golink_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_golink_v1_golink_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
-var file_golink_v1_golink_proto_goTypes = []any{
-	(Kind)(0),        // 0: golink.v1.Kind
-	(Status)(0),      // 1: golink.v1.Status
-	(*Frame)(nil),    // 2: golink.v1.Frame
-	(*PID)(nil),      // 3: golink.v1.PID
-	(*Envelope)(nil), // 4: golink.v1.Envelope
-	(*Hello)(nil),    // 5: golink.v1.Hello
-	nil,              // 6: golink.v1.Envelope.MetadataEntry
+var file_grpcproc_v1_grpcproc_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_grpcproc_v1_grpcproc_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_grpcproc_v1_grpcproc_proto_goTypes = []any{
+	(Kind)(0),        // 0: grpcproc.v1.Kind
+	(Status)(0),      // 1: grpcproc.v1.Status
+	(*Frame)(nil),    // 2: grpcproc.v1.Frame
+	(*PID)(nil),      // 3: grpcproc.v1.PID
+	(*Envelope)(nil), // 4: grpcproc.v1.Envelope
+	(*Hello)(nil),    // 5: grpcproc.v1.Hello
+	nil,              // 6: grpcproc.v1.Envelope.MetadataEntry
 }
-var file_golink_v1_golink_proto_depIdxs = []int32{
-	4, // 0: golink.v1.Frame.envelopes:type_name -> golink.v1.Envelope
-	0, // 1: golink.v1.Envelope.kind:type_name -> golink.v1.Kind
-	1, // 2: golink.v1.Envelope.status:type_name -> golink.v1.Status
-	5, // 3: golink.v1.Envelope.hello:type_name -> golink.v1.Hello
-	6, // 4: golink.v1.Envelope.metadata:type_name -> golink.v1.Envelope.MetadataEntry
-	2, // 5: golink.v1.Node.Link:input_type -> golink.v1.Frame
-	2, // 6: golink.v1.Node.Link:output_type -> golink.v1.Frame
+var file_grpcproc_v1_grpcproc_proto_depIdxs = []int32{
+	4, // 0: grpcproc.v1.Frame.envelopes:type_name -> grpcproc.v1.Envelope
+	0, // 1: grpcproc.v1.Envelope.kind:type_name -> grpcproc.v1.Kind
+	1, // 2: grpcproc.v1.Envelope.status:type_name -> grpcproc.v1.Status
+	5, // 3: grpcproc.v1.Envelope.hello:type_name -> grpcproc.v1.Hello
+	6, // 4: grpcproc.v1.Envelope.metadata:type_name -> grpcproc.v1.Envelope.MetadataEntry
+	2, // 5: grpcproc.v1.Node.Link:input_type -> grpcproc.v1.Frame
+	2, // 6: grpcproc.v1.Node.Link:output_type -> grpcproc.v1.Frame
 	6, // [6:7] is the sub-list for method output_type
 	5, // [5:6] is the sub-list for method input_type
 	5, // [5:5] is the sub-list for extension type_name
@@ -573,27 +573,27 @@ var file_golink_v1_golink_proto_depIdxs = []int32{
 	0, // [0:5] is the sub-list for field type_name
 }
 
-func init() { file_golink_v1_golink_proto_init() }
-func file_golink_v1_golink_proto_init() {
-	if File_golink_v1_golink_proto != nil {
+func init() { file_grpcproc_v1_grpcproc_proto_init() }
+func file_grpcproc_v1_grpcproc_proto_init() {
+	if File_grpcproc_v1_grpcproc_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_golink_v1_golink_proto_rawDesc), len(file_golink_v1_golink_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_grpcproc_v1_grpcproc_proto_rawDesc), len(file_grpcproc_v1_grpcproc_proto_rawDesc)),
 			NumEnums:      2,
 			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_golink_v1_golink_proto_goTypes,
-		DependencyIndexes: file_golink_v1_golink_proto_depIdxs,
-		EnumInfos:         file_golink_v1_golink_proto_enumTypes,
-		MessageInfos:      file_golink_v1_golink_proto_msgTypes,
+		GoTypes:           file_grpcproc_v1_grpcproc_proto_goTypes,
+		DependencyIndexes: file_grpcproc_v1_grpcproc_proto_depIdxs,
+		EnumInfos:         file_grpcproc_v1_grpcproc_proto_enumTypes,
+		MessageInfos:      file_grpcproc_v1_grpcproc_proto_msgTypes,
 	}.Build()
-	File_golink_v1_golink_proto = out.File
-	file_golink_v1_golink_proto_goTypes = nil
-	file_golink_v1_golink_proto_depIdxs = nil
+	File_grpcproc_v1_grpcproc_proto = out.File
+	file_grpcproc_v1_grpcproc_proto_goTypes = nil
+	file_grpcproc_v1_grpcproc_proto_depIdxs = nil
 }

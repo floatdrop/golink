@@ -1,5 +1,5 @@
-// Package cli is golinkctl: inspect and operate golink nodes through their
-// Inspector, from a terminal or, with `golinkctl mcp`, from an AI agent.
+// Package cli is grpcprocctl: inspect and operate grpcproc nodes through their
+// Inspector, from a terminal or, with `grpcprocctl mcp`, from an AI agent.
 package cli
 
 import (
@@ -28,9 +28,9 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	"github.com/floatdrop/golink/tools/client"
-	"github.com/floatdrop/golink/tools/dot"
-	"github.com/floatdrop/golink/tools/mcpserver"
+	"github.com/floatdrop/grpcproc/tools/client"
+	"github.com/floatdrop/grpcproc/tools/dot"
+	"github.com/floatdrop/grpcproc/tools/mcpserver"
 )
 
 // Conn says how to reach an Inspector.
@@ -42,7 +42,7 @@ type Conn struct {
 	ServerName string
 }
 
-// Env is what golinkctl talks to. Main fills what is left zero with the
+// Env is what grpcprocctl talks to. Main fills what is left zero with the
 // process's own: stdout, stderr, a gRPC dial, MCP over stdio.
 type Env struct {
 	Stdout, Stderr io.Writer
@@ -53,8 +53,8 @@ type Env struct {
 	BuildInfo func() (*debug.BuildInfo, bool)
 }
 
-// Version, when set, overrides the version golinkctl reports:
-// -ldflags "-X github.com/floatdrop/golink/tools/cli.Version=v1.2.3". Left
+// Version, when set, overrides the version grpcprocctl reports:
+// -ldflags "-X github.com/floatdrop/grpcproc/tools/cli.Version=v1.2.3". Left
 // empty, it is read from the build: the module version that `go install
 // …@v1.2.3` stamps, or "dev" for a binary built from a checkout.
 var Version string
@@ -69,9 +69,9 @@ func version(read func() (*debug.BuildInfo, bool)) string {
 	return "dev"
 }
 
-const usage = `golinkctl inspects and operates golink nodes through their Inspector.
+const usage = `grpcprocctl inspects and operates grpcproc nodes through their Inspector.
 
-Usage: golinkctl [flags] <command> [command flags] [args]
+Usage: grpcprocctl [flags] <command> [command flags] [args]
 
 Commands:
   node [name]                 a node: counters and links
@@ -84,7 +84,7 @@ Commands:
   dot                         Graphviz of processes and who started whom (--node, --cluster)
   mcp                         serve these as MCP tools over stdio (--allow-writes)
 
-A pid is written as golink prints it, <node.incarnation.id>; a name is
+A pid is written as grpcproc prints it, <node.incarnation.id>; a name is
 looked up on --node, by default the node serving the Inspector.
 
 Flags:
@@ -99,7 +99,7 @@ type app struct {
 	client  *client.Client
 }
 
-// Main runs golinkctl with args (without the program name) and returns the
+// Main runs grpcprocctl with args (without the program name) and returns the
 // exit code: 0, 1 for a failed command, 2 for bad usage.
 func Main(ctx context.Context, args []string, env Env) int {
 	env.Stdout = cmp.Or[io.Writer](env.Stdout, os.Stdout)
@@ -118,13 +118,13 @@ func Main(ctx context.Context, args []string, env Env) int {
 	}
 	a := &app{env: env, version: version(env.BuildInfo)}
 	var showVersion bool
-	fs := flag.NewFlagSet("golinkctl", flag.ContinueOnError)
+	fs := flag.NewFlagSet("grpcprocctl", flag.ContinueOnError)
 	fs.SetOutput(env.Stderr)
 	fs.Usage = func() {
 		fmt.Fprint(env.Stderr, usage)
 		fs.PrintDefaults()
 	}
-	fs.StringVar(&a.conn.Addr, "addr", cmp.Or(env.Getenv("GOLINK_ADDR"), "localhost:9000"), "Inspector address (default $GOLINK_ADDR)")
+	fs.StringVar(&a.conn.Addr, "addr", cmp.Or(env.Getenv("GRPCPROC_ADDR"), "localhost:9000"), "Inspector address (default $GRPCPROC_ADDR)")
 	fs.BoolVar(&a.conn.Plaintext, "plaintext", false, "connect without TLS")
 	fs.StringVar(&a.conn.CACert, "cacert", "", "CA certificate file to verify the server")
 	fs.StringVar(&a.conn.Cert, "cert", "", "client certificate file, for mutual TLS")
@@ -137,7 +137,7 @@ func Main(ctx context.Context, args []string, env Env) int {
 		return 2
 	}
 	if showVersion {
-		fmt.Fprintf(env.Stdout, "golinkctl %s\n", a.version)
+		fmt.Fprintf(env.Stdout, "grpcprocctl %s\n", a.version)
 		return 0
 	}
 	if fs.NArg() == 0 {
@@ -147,13 +147,13 @@ func Main(ctx context.Context, args []string, env Env) int {
 	name, rest := fs.Arg(0), fs.Args()[1:]
 	cmd, ok := commands[name]
 	if !ok {
-		fmt.Fprintf(env.Stderr, "golinkctl: unknown command %q\n\n", name)
+		fmt.Fprintf(env.Stderr, "grpcprocctl: unknown command %q\n\n", name)
 		fs.Usage()
 		return 2
 	}
 	cc, closeConn, err := env.Dial(ctx, a.conn)
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "golinkctl: %v\n", err)
+		fmt.Fprintf(env.Stderr, "grpcprocctl: %v\n", err)
 		return 1
 	}
 	defer func() { _ = closeConn() }()
@@ -163,10 +163,10 @@ func Main(ctx context.Context, args []string, env Env) int {
 			return 2 // the flag package has said what was wrong
 		}
 		if _, ok := errors.AsType[usageError](err); ok {
-			fmt.Fprintf(env.Stderr, "golinkctl %s: %v\n", name, err)
+			fmt.Fprintf(env.Stderr, "grpcprocctl %s: %v\n", name, err)
 			return 2
 		}
-		fmt.Fprintf(env.Stderr, "golinkctl %s: %s\n", name, status.Convert(err).Message())
+		fmt.Fprintf(env.Stderr, "grpcprocctl %s: %s\n", name, status.Convert(err).Message())
 		return 1
 	}
 	return 0
@@ -231,7 +231,7 @@ func init() {
 
 // flags parses a command's flags; positional arguments follow them.
 func (a *app) flags(name string, args []string, define func(*flag.FlagSet)) (*flag.FlagSet, error) {
-	fs := flag.NewFlagSet("golinkctl "+name, flag.ContinueOnError)
+	fs := flag.NewFlagSet("grpcprocctl "+name, flag.ContinueOnError)
 	fs.SetOutput(a.env.Stderr)
 	define(fs)
 	if err := fs.Parse(args); err != nil {

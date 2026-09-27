@@ -1,4 +1,4 @@
-package golink
+package grpcproc
 
 import (
 	"log/slog"

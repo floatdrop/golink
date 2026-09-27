@@ -1,15 +1,15 @@
-# golink/tools
+# grpcproc/tools
 
-`golinkctl`: inspect and operate golink nodes through their
+`grpcprocctl`: inspect and operate grpcproc nodes through their
 [Inspector](../README.md#inspector), from a terminal or, as an MCP server,
-from an AI agent. A separate module, so golink itself carries no CLI or MCP
+from an AI agent. A separate module, so grpcproc itself carries no CLI or MCP
 dependencies.
 
 ```sh
-go install github.com/floatdrop/golink/tools/cmd/golinkctl@latest
+go install github.com/floatdrop/grpcproc/tools/cmd/grpcprocctl@latest
 ```
 
-The node must serve the Inspector next to golink:
+The node must serve the Inspector next to grpcproc:
 
 ```go
 node.Register(grpcServer)
@@ -19,8 +19,8 @@ inspect.New(node, inspect.WithPeers(dialer.Peer)).Register(grpcServer)
 ## In a terminal
 
 ```sh
-export GOLINK_ADDR=10.0.0.5:9000   # or --addr; TLS by default, --plaintext without
-golinkctl --plaintext ps --sort mailbox
+export GRPCPROC_ADDR=10.0.0.5:9000   # or --addr; TLS by default, --plaintext without
+grpcprocctl --plaintext ps --sort mailbox
 ```
 
 ```
@@ -36,18 +36,18 @@ PID                  NAME           LABEL        STATE    MAILBOX  OLDEST  RECEI
 Ask it what it believes, and it cannot answer, because it is busy:
 
 ```sh
-golinkctl --plaintext inspect --wait 50ms ledger-writer
+grpcprocctl --plaintext inspect --wait 50ms ledger-writer
 ```
 
 ```
 state:            running
 mailbox:          41 (peak 42, oldest 1.136s)
 last message:     ledger.v1.Post
-inspect:          golink: inspect <orders-1.1718.4>: busy for 1.187s: context deadline exceeded
+inspect:          grpcproc: inspect <orders-1.1718.4>: busy for 1.187s: context deadline exceeded
 ```
 
 A process that is free answers with whatever it publishes through
-`golink.WithInspect`; a supervisor lists its children:
+`grpcproc.WithInspect`; a supervisor lists its children:
 
 ```
 names:                 orders-sup
@@ -71,17 +71,17 @@ monitors:              2
 | `dot` | Graphviz of processes and who started whom: `--node`, `--cluster` |
 | `mcp` | serve these as MCP tools over stdio: `--allow-writes` |
 
-`golinkctl --version` prints the version it was installed at, which is also
+`grpcprocctl --version` prints the version it was installed at, which is also
 what its MCP server reports.
 
-A pid is written as golink prints it, `<node.incarnation.id>`; a name is
+A pid is written as grpcproc prints it, `<node.incarnation.id>`; a name is
 looked up on `--node`, by default the node serving the Inspector. Any
 command takes `--json` before it for the same data as JSON (the same shapes
 the MCP tools return). Connection flags follow grpcurl: `--plaintext`,
 `--cacert`, `--cert` and `--key` for mutual TLS, `--servername`.
 
 ```sh
-golinkctl --plaintext dot --cluster | dot -Tsvg -o processes.svg
+grpcprocctl --plaintext dot --cluster | dot -Tsvg -o processes.svg
 ```
 
 draws each node as a cluster, each supervisor bold, an edge from each
@@ -90,10 +90,10 @@ process to those it started, and any process with waiting messages in red.
 ## For an AI agent
 
 ```sh
-claude mcp add golink -- golinkctl --plaintext --addr 10.0.0.5:9000 mcp
+claude mcp add grpcproc -- grpcprocctl --plaintext --addr 10.0.0.5:9000 mcp
 ```
 
-The server explains golink to the agent (pids, labels, what a deep mailbox
+The server explains grpcproc to the agent (pids, labels, what a deep mailbox
 or a busy process means) and offers:
 
 | Tool | |

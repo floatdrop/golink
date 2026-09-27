@@ -9,14 +9,14 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/actor"
-	"github.com/floatdrop/golink/golinktest"
-	"github.com/floatdrop/golink/internal/testpb"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/actor"
+	"github.com/floatdrop/grpcproc/grpcproctest"
+	"github.com/floatdrop/grpcproc/internal/testpb"
 )
 
-type P = golink.Process[*testpb.Ping]
-type M = golink.Msg[*testpb.Ping]
+type P = grpcproc.Process[*testpb.Ping]
+type M = grpcproc.Msg[*testpb.Ping]
 
 // counter implements every optional interface and records what happens.
 type counter struct {
@@ -73,7 +73,7 @@ func (c *counter) HandleCall(p *P, m M) (proto.Message, error) {
 	return &testpb.Pong{N: c.count}, nil
 }
 
-func (c *counter) HandleDown(_ *P, d golink.Down) error {
+func (c *counter) HandleDown(_ *P, d grpcproc.Down) error {
 	c.record("down " + d.Reason)
 	return nil
 }
@@ -94,11 +94,11 @@ func (p plain) HandleMessage(_ *P, m M) error {
 	return nil
 }
 
-func watch(t *testing.T, n *golink.Node, target golink.Target) <-chan golink.Down {
+func watch(t *testing.T, n *grpcproc.Node, target grpcproc.Target) <-chan grpcproc.Down {
 	t.Helper()
-	ch := make(chan golink.Down, 16)
+	ch := make(chan grpcproc.Down, 16)
 	ready := make(chan struct{})
-	_, err := golink.Spawn[proto.Message](n, func(p *golink.Process[proto.Message]) error {
+	_, err := grpcproc.Spawn[proto.Message](n, func(p *grpcproc.Process[proto.Message]) error {
 		p.Monitor(target)
 		close(ready)
 		for {
@@ -118,19 +118,19 @@ func watch(t *testing.T, n *golink.Node, target golink.Target) <-chan golink.Dow
 	return ch
 }
 
-func down(t *testing.T, ch <-chan golink.Down) golink.Down {
+func down(t *testing.T, ch <-chan grpcproc.Down) grpcproc.Down {
 	t.Helper()
 	select {
 	case d := <-ch:
 		return d
 	case <-time.After(5 * time.Second):
 		t.Fatal("no Down")
-		return golink.Down{}
+		return grpcproc.Down{}
 	}
 }
 
 func TestRunLifecycle(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	h := &counter{}
 	addr, err := actor.Spawn[*testpb.Ping](n, h)
@@ -156,7 +156,7 @@ func TestRunLifecycle(t *testing.T) {
 	if r, err := n.Call[*testpb.Pong](t.Context(), addr, &testpb.Ping{N: -2}); err != nil || r.GetN() != 3 {
 		t.Fatalf("stop call: %v %v", r, err)
 	}
-	if d := down(t, downs); d.Reason != golink.ReasonNormal {
+	if d := down(t, downs); d.Reason != grpcproc.ReasonNormal {
 		t.Fatalf("%+v", d)
 	}
 	if got := h.Log(); got != "init; terminate" {
@@ -167,18 +167,18 @@ func TestRunLifecycle(t *testing.T) {
 func TestRunExits(t *testing.T) {
 	cases := []struct {
 		name   string
-		act    func(n *golink.Node, a golink.Addr[*testpb.Ping])
+		act    func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping])
 		reason string
 		log    string
 	}{
-		{"message error", func(n *golink.Node, a golink.Addr[*testpb.Ping]) { _ = n.Send(a, &testpb.Ping{N: -1}) }, "bad message", "init; terminate: bad message"},
-		{"stop", func(n *golink.Node, a golink.Addr[*testpb.Ping]) { _ = n.Send(a, &testpb.Ping{N: -2}) }, golink.ReasonNormal, "init; terminate"},
-		{"panic", func(n *golink.Node, a golink.Addr[*testpb.Ping]) { _ = n.Send(a, &testpb.Ping{N: -3}) }, "panic: kaboom", "init; terminate: panic: kaboom"},
-		{"exit", func(n *golink.Node, a golink.Addr[*testpb.Ping]) { _ = n.Exit(a, "bye") }, "bye", "init; terminate: golink: exit: bye"},
+		{"message error", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Send(a, &testpb.Ping{N: -1}) }, "bad message", "init; terminate: bad message"},
+		{"stop", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Send(a, &testpb.Ping{N: -2}) }, grpcproc.ReasonNormal, "init; terminate"},
+		{"panic", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Send(a, &testpb.Ping{N: -3}) }, "panic: kaboom", "init; terminate: panic: kaboom"},
+		{"exit", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Exit(a, "bye") }, "bye", "init; terminate: grpcproc: exit: bye"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c := golinktest.New(t, "a")
+			c := grpcproctest.New(t, "a")
 			n := c.Node("a")
 			h := &counter{}
 			addr, _ := actor.Spawn[*testpb.Ping](n, h)
@@ -195,12 +195,12 @@ func TestRunExits(t *testing.T) {
 }
 
 func TestInitFailureSkipsTerminate(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	h := &counter{failInit: true}
 	addr, _ := actor.Spawn[*testpb.Ping](n, h)
 	downs := watch(t, n, addr)
-	if d := down(t, downs); d.Reason != "init failed" && d.Reason != golink.ReasonNoProc {
+	if d := down(t, downs); d.Reason != "init failed" && d.Reason != grpcproc.ReasonNoProc {
 		t.Fatalf("%+v", d)
 	}
 	time.Sleep(10 * time.Millisecond)
@@ -210,11 +210,11 @@ func TestInitFailureSkipsTerminate(t *testing.T) {
 }
 
 func TestDownsAndOptionalInterfaces(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	// With a DownHandler, Downs reach it.
 	h := &counter{}
-	target, _ := golink.Spawn[*testpb.Ping](n, func(p *P) error { _, err := p.Receive(); return err })
+	target, _ := grpcproc.Spawn[*testpb.Ping](n, func(p *P) error { _, err := p.Receive(); return err })
 	_, _ = actor.Spawn[*testpb.Ping](n, &monitoring{target: target, counter: h})
 	time.Sleep(10 * time.Millisecond)
 	_ = n.Exit(target, "gone")
@@ -235,7 +235,7 @@ func TestDownsAndOptionalInterfaces(t *testing.T) {
 
 // monitoring monitors target in Init and hands Downs to counter.
 type monitoring struct {
-	target golink.Addr[*testpb.Ping]
+	target grpcproc.Addr[*testpb.Ping]
 	*counter
 }
 
@@ -245,10 +245,10 @@ func (m *monitoring) Init(p *P) error {
 }
 
 func TestPlainIgnoresDowns(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	seen := make(chan int64, 4)
-	target, _ := golink.Spawn[*testpb.Ping](n, func(p *P) error { _, err := p.Receive(); return err })
+	target, _ := grpcproc.Spawn[*testpb.Ping](n, func(p *P) error { _, err := p.Receive(); return err })
 	pa, _ := actor.Spawn[*testpb.Ping](n, &monitoringPlain{plain: plain{seen: seen}, target: target})
 	_ = n.Exit(target, "gone")
 	time.Sleep(20 * time.Millisecond)
@@ -260,7 +260,7 @@ func TestPlainIgnoresDowns(t *testing.T) {
 
 type monitoringPlain struct {
 	plain
-	target golink.Addr[*testpb.Ping]
+	target grpcproc.Addr[*testpb.Ping]
 }
 
 func (m *monitoringPlain) Init(p *P) error {

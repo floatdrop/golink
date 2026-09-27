@@ -9,26 +9,26 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/actor"
-	"github.com/floatdrop/golink/golinktest"
-	"github.com/floatdrop/golink/inspect"
-	"github.com/floatdrop/golink/internal/testpb"
-	inspectv1 "github.com/floatdrop/golink/proto/golink/inspect/v1"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/actor"
+	"github.com/floatdrop/grpcproc/grpcproctest"
+	"github.com/floatdrop/grpcproc/inspect"
+	"github.com/floatdrop/grpcproc/internal/testpb"
+	inspectv1 "github.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1"
 )
 
 // Fixture is what Start leaves running on node "a".
 type Fixture struct {
-	C        *golinktest.Cluster
-	Sup      golink.PID // a supervisor with children "w1" and "w2"
-	Stuck    golink.PID // "stuck": busy in a handler, 3 messages waiting
-	Talker   golink.PID // "talker": publishes state=ready through WithInspect
-	Echo     golink.PID // "echo" on node "b"
-	Release  func()     // unblocks "stuck"
-	Resolver golink.Resolver
+	C        *grpcproctest.Cluster
+	Sup      grpcproc.PID // a supervisor with children "w1" and "w2"
+	Stuck    grpcproc.PID // "stuck": busy in a handler, 3 messages waiting
+	Talker   grpcproc.PID // "talker": publishes state=ready through WithInspect
+	Echo     grpcproc.PID // "echo" on node "b"
+	Release  func()       // unblocks "stuck"
+	Resolver grpcproc.Resolver
 }
 
-func worker(p *golink.Process[*testpb.Ping]) error {
+func worker(p *grpcproc.Process[*testpb.Ping]) error {
 	for {
 		if _, err := p.Receive(); err != nil {
 			return err
@@ -40,9 +40,9 @@ func worker(p *golink.Process[*testpb.Ping]) error {
 // forward to each other, and links a to b.
 func Start(t *testing.T, more ...string) *Fixture {
 	t.Helper()
-	var c *golinktest.Cluster
+	var c *grpcproctest.Cluster
 	var dialer *inspect.Dialer
-	c = golinktest.NewWith(t, []golinktest.Option{golinktest.WithServices(func(n *golink.Node, s *grpc.Server) {
+	c = grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithServices(func(n *grpcproc.Node, s *grpc.Server) {
 		inspect.New(n, inspect.WithPeers(func(ctx context.Context, node string) (inspectv1.InspectorClient, error) {
 			return dialer.Peer(ctx, node)
 		})).Register(s)
@@ -55,7 +55,7 @@ func Start(t *testing.T, more ...string) *Fixture {
 	var err error
 	f.Sup, err = actor.Supervise(a, actor.Spec{Children: []actor.ChildSpec{
 		actor.ChildFunc("w1", worker), actor.ChildFunc("w2", worker),
-	}}, golink.WithName("sup"))
+	}}, grpcproc.WithName("sup"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,26 +68,26 @@ func Start(t *testing.T, more ...string) *Fixture {
 		}
 	}
 	t.Cleanup(f.Release)
-	stuck, _ := golink.Spawn[*testpb.Ping](a, func(p *golink.Process[*testpb.Ping]) error {
+	stuck, _ := grpcproc.Spawn[*testpb.Ping](a, func(p *grpcproc.Process[*testpb.Ping]) error {
 		if _, err := p.Receive(); err != nil {
 			return err
 		}
 		<-release
 		return worker(p)
-	}, golink.WithName("stuck"), golink.WithLabel("stuck"))
+	}, grpcproc.WithName("stuck"), grpcproc.WithLabel("stuck"))
 	f.Stuck = stuck.PID()
 	for range 4 {
 		_ = a.Send(stuck, &testpb.Ping{})
 	}
-	talker, _ := golink.Spawn[proto.Message](a, func(p *golink.Process[proto.Message]) error {
+	talker, _ := grpcproc.Spawn[proto.Message](a, func(p *grpcproc.Process[proto.Message]) error {
 		for {
 			if _, err := p.Receive(); err != nil {
 				return err
 			}
 		}
-	}, golink.WithName("talker"), golink.WithInspect(func() map[string]string { return map[string]string{"state": "ready"} }))
+	}, grpcproc.WithName("talker"), grpcproc.WithInspect(func() map[string]string { return map[string]string{"state": "ready"} }))
 	f.Talker = talker.PID()
-	echo, _ := golink.Spawn[*testpb.Ping](b, func(p *golink.Process[*testpb.Ping]) error {
+	echo, _ := grpcproc.Spawn[*testpb.Ping](b, func(p *grpcproc.Process[*testpb.Ping]) error {
 		for {
 			m, err := p.Receive()
 			if err != nil {
@@ -97,7 +97,7 @@ func Start(t *testing.T, more ...string) *Fixture {
 				_ = p.Reply(m, &testpb.Pong{}, nil)
 			}
 		}
-	}, golink.WithName("echo"))
+	}, grpcproc.WithName("echo"))
 	f.Echo = echo.PID()
 	if _, err := a.Call[*testpb.Pong](t.Context(), echo, &testpb.Ping{}); err != nil {
 		t.Fatal(err)

@@ -1,16 +1,16 @@
-# golink — design and roadmap
+# grpcproc — design and roadmap
 
-`golink` gives goroutines Erlang-style network transparency on top of the gRPC
+`grpcproc` gives goroutines Erlang-style network transparency on top of the gRPC
 server a service already runs. A process is addressed by a PID or a name; the
 same `Send`, `Call`, `Monitor` and `Exit` work whether the target is in this
 binary or on another node.
 
 It is a library, not a framework, in the same sense that `fsm` and `di` are:
 
-- **The caller owns the infrastructure.** `golink` never opens a listener, reads
+- **The caller owns the infrastructure.** `grpcproc` never opens a listener, reads
   env vars, installs globals or starts a goroutine outside `Start`/`Stop`. The
   application brings its `*grpc.Server`, credentials, discovery, `slog` and
-  lifecycle; `golink` registers one gRPC service on that server.
+  lifecycle; `grpcproc` registers one gRPC service on that server.
 - **Errors at construction, none in the hot path.** Bad config fails in
   `NewNode`; a local `Send` allocates nothing and never panics.
 - **Introspection is a first-class API**, in stable order, so a test can assert
@@ -26,20 +26,20 @@ go-actor, Erlang/OTP).
 ## The shape at a glance
 
 ```go
-node, err := golink.NewNode(golink.Config{
+node, err := grpcproc.NewNode(grpcproc.Config{
     Name:        "orders-1",
     Advertise:   "10.0.0.5:9000",           // where *your* gRPC server listens
-    Resolver:    golinketcd.New(cli, "/golink"), // optional; static map by default
+    Resolver:    grpcprocetcd.New(cli, "/grpcproc"), // optional; static map by default
     DialOptions: []grpc.DialOption{grpc.WithTransportCredentials(creds)},
     Logger:      slog.Default(),
-    Hooks:       otelHooks, // golinkotel.New(): optional, see Observability
+    Hooks:       otelHooks, // grpcprocotel.New(): optional, see Observability
 })
-node.Register(grpcServer) // mounts golink.v1.Mesh (+ golink.v1.Inspector if enabled)
+node.Register(grpcServer) // mounts grpcproc.v1.Mesh (+ grpcproc.v1.Inspector if enabled)
 node.Start(ctx)
 defer node.Stop(ctx)
 
 // A typed process: it receives *orderspb.OrderMsg (a oneof) and nothing else.
-addr, _ := golink.Spawn[*orderspb.OrderMsg](node, func(p *golink.Process[*orderspb.OrderMsg]) error {
+addr, _ := grpcproc.Spawn[*orderspb.OrderMsg](node, func(p *grpcproc.Process[*orderspb.OrderMsg]) error {
     for {
         m, err := p.Receive()
         if err != nil { return err }              // Exit, node stop, …
@@ -48,9 +48,9 @@ addr, _ := golink.Spawn[*orderspb.OrderMsg](node, func(p *golink.Process[*orders
         case *orderspb.OrderMsg_Reserve: p.Reply(m, &orderspb.Reserved{}, nil)
         }
     }
-}, golink.WithName("reservations"), golink.WithLabel("order"))
+}, grpcproc.WithName("reservations"), grpcproc.WithLabel("order"))
 
-ref := p.Monitor(golink.Name{Node: "billing-2", Name: "ledger"})
+ref := p.Monitor(grpcproc.Name{Node: "billing-2", Name: "ledger"})
 p.Send(addr, &orderspb.OrderMsg{Kind: &orderspb.OrderMsg_Reserve{}})     // compile-time typed
 resp, err := node.Call[*orderspb.Reserved](ctx, addr, &orderspb.OrderMsg{}) // reply typed by R
 ```
@@ -58,17 +58,17 @@ resp, err := node.Call[*orderspb.Reserved](ctx, addr, &orderspb.OrderMsg{}) // r
 ## Package layout
 
 ```
-golink/                    core: Node, Process, PID, Send/Call/Monitor/Exit, links, inspection API
-golink/proto/golink/v1       wire protocol (.proto + generated code)
-golink/golinktest            in-memory clusters over bufconn: Cluster, Partition, Kill
-golink/inspect             golink.v1.Inspector gRPC service + Go client (optional to register)
-golink/actor               optional helpers: handler loop, supervisor, timers
-golink/etcd     (nested module)   Resolver + Registrar + Membership on etcd leases
-golink/otel     (nested module)   Hooks implementation: OTel metrics + trace propagation
-golink/tools    (nested module)   golinkctl: CLI, Graphviz and MCP server over the Inspector
+grpcproc/                    core: Node, Process, PID, Send/Call/Monitor/Exit, links, inspection API
+grpcproc/proto/grpcproc/v1       wire protocol (.proto + generated code)
+grpcproc/grpcproctest            in-memory clusters over bufconn: Cluster, Partition, Kill
+grpcproc/inspect             grpcproc.v1.Inspector gRPC service + Go client (optional to register)
+grpcproc/actor               optional helpers: handler loop, supervisor, timers
+grpcproc/etcd     (nested module)   Resolver + Registrar + Membership on etcd leases
+grpcproc/otel     (nested module)   Hooks implementation: OTel metrics + trace propagation
+grpcproc/tools    (nested module)   grpcprocctl: CLI, Graphviz and MCP server over the Inspector
 ```
 
-`golinktest` ships with the first release: the best argument for network
+`grpcproctest` ships with the first release: the best argument for network
 transparency is that a three-node scenario, including a node dying, runs in a
 plain `go test` with no sockets and no etcd.
 
@@ -235,7 +235,7 @@ type Registrar interface {
 type Membership interface { Watch(ctx) (<-chan MemberEvent, error) } // {Member, Up}
 ```
 
-The core ships a static resolver (a map). `golink/etcd` implements all three
+The core ships a static resolver (a map). `grpcproc/etcd` implements all three
 on leases. `Start` watches `Membership` and then registers; `Stop` withdraws
 last, after the node's processes have exited and their `Down{shutdown}`
 notices have been flushed to peers, so peers see "shutdown" and not
@@ -250,10 +250,10 @@ fail with the cause ("left the cluster", "restarted as incarnation N"). It
 catches a crashed peer behind a half-open connection even when keepalive is
 not configured.
 
-### golinktest
+### grpcproctest
 
 ```go
-c := golinktest.New(t, "a", "b", "c")     // three nodes over bufconn
+c := grpcproctest.New(t, "a", "b", "c")     // three nodes over bufconn
 c.Partition("a", "b")                    // links between a and b break, monitors fire
 c.Heal("a", "b")
 c.Kill("b")                              // node gone; incarnation changes on Restart
@@ -265,14 +265,14 @@ c.Restart("b")
 This is the part taken from ergo. Its Observer, REST API and MCP server are
 thin clients of a `system` application every node runs, which answers: what
 processes exist, what is in their mailboxes, what does each process say about
-itself, and what is happening on the wire. `golink` builds that answering surface
+itself, and what is happening on the wire. `grpcproc` builds that answering surface
 into the core and leaves the clients (UI, CLI, MCP) as separate, optional
 programs. The rules:
 
 1. **Counters are always on and cheap.** Atomics on the process and the link,
    read by snapshot. No sampling, no configuration.
 2. **Nothing in the core imports a metrics or tracing library.** A `Hooks`
-   interface is the single tap; `golink/otel` implements it.
+   interface is the single tap; `grpcproc/otel` implements it.
 3. **The Go API is the source of truth.** The gRPC `Inspector` service and any
    tool built on it expose exactly what `node.Info()` and `node.Processes()`
    return, nothing more.
@@ -313,10 +313,10 @@ and out, last error — ergo's network charts are drawn from exactly these.
 
 Ergo's `HandleInspect(from, item...) map[string]string` is the single most
 useful debugging feature it has: a process publishes what it currently
-believes. In `golink`:
+believes. In `grpcproc`:
 
 ```go
-node.Spawn(fn, golink.WithInspect(func() map[string]string {
+node.Spawn(fn, grpcproc.WithInspect(func() map[string]string {
     return map[string]string{"state": rec.state.String(), "pending": strconv.Itoa(rec.pendingUploads)}
 }))
 ```
@@ -365,12 +365,12 @@ Nil by default; a nil check per message when unset. This is the same shape as
 `grpc.StatsHandler`, and it is what every observability feature in other
 frameworks reduces to:
 
-| Feature | ergo | GoAkt | golink |
+| Feature | ergo | GoAkt | grpcproc |
 |---|---|---|---|
-| Metrics | Observer charts | `WithMetrics()` OTel gauges | `golink/otel` on `Hooks` + `Processes()` snapshots, one series per **label** by default (GoAkt's per-actor default is a cardinality trap it later added a switch for) |
+| Metrics | Observer charts | `WithMetrics()` OTel gauges | `grpcproc/otel` on `Hooks` + `Processes()` snapshots, one series per **label** by default (GoAkt's per-actor default is a cardinality trap it later added a switch for) |
 | Dead letters | log | dead-letter actor + event | `OnDeadLetter` + counter in `NodeInfo` |
 | System events | `gen.CoreEvent` | event stream | `OnSpawn/OnExit/OnLinkUp/OnLinkDown`; `Node.Events()` channel is a thin subscriber over the same hooks |
-| Tracing | Sent / Delivered / Processed observations, trace id in the message | eBPF sidecar | `Envelope.metadata` carries W3C trace context. `golink/otel` opens a producer (send) or client (call) span in `OnSend` and a consumer/server span covering the handling in `OnReceive`; a process's sends inherit the handling span, so chains form without threading a context. Sampling stays the tracer's job |
+| Tracing | Sent / Delivered / Processed observations, trace id in the message | eBPF sidecar | `Envelope.metadata` carries W3C trace context. `grpcproc/otel` opens a producer (send) or client (call) span in `OnSend` and a consumer/server span covering the handling in `OnReceive`; a process's sends inherit the handling span, so chains form without threading a context. Sampling stays the tracer's job |
 | Logging | loggers as processes, per-process level | — | `p.Log()` is `slog` with pid/name/label; per-process level via a `slog.Handler` wrapper the node owns, settable at runtime |
 
 ### Events
@@ -383,7 +383,7 @@ atomic load at each point that would publish. The list of subscribers is
 copy-on-write, so publishing takes no lock but the per-subscriber one that
 guards against a concurrent close.
 
-### Inspector service (`golink/inspect`, done)
+### Inspector service (`grpcproc/inspect`, done)
 
 A second gRPC service registered on the same server, optional:
 
@@ -408,16 +408,16 @@ PID routes to the PID's node when the request names none. `GetProcess` with
 answer, with `inspect_error` saying so. Access control is the application's
 (interceptors, mTLS), as for any of its other services.
 
-What sits on top, later and outside the core: `golinkctl ps / top / inspect /
+What sits on top, later and outside the core: `grpcprocctl ps / top / inspect /
 send`, a `Node.DOT()` that draws processes and monitor edges across nodes
 (cheap, and consistent with `fsm.DOT`), and an MCP server exposing the same
 methods for an agent — ergo's MCP experience is convincing, and it is a
 half-day of work once the gRPC service exists.
 
-Goroutine dumps and heap profiles are `net/http/pprof`; `golink` does not
+Goroutine dumps and heap profiles are `net/http/pprof`; `grpcproc` does not
 duplicate them.
 
-## Helpers (`golink/actor`, done)
+## Helpers (`grpcproc/actor`, done)
 
 Optional, built only on the public core API, so users can ignore or replace
 them. Two primitives went into the core because they need process internals:
@@ -433,7 +433,7 @@ them. Two primitives went into the core because they need process internals:
   monitored after spawning would misread a transient child's instant normal
   exit as abnormal and restart it in a loop.
 
-`golink/actor`:
+`grpcproc/actor`:
 
 - `actor.Run(h)` / `actor.Spawn(n, h)`: the handler loop. `Handler[M]` has
   `HandleMessage`; `CallHandler`, `DownHandler`, `Initializer`, `Terminator`
@@ -441,7 +441,7 @@ them. Two primitives went into the core because they need process internals:
   `HandleCall` is the reply and the actor carries on; from `HandleMessage` it
   is the exit reason. `ErrStop` ends normally (replying first, from a call);
   `ErrNoReply` defers the answer. `Terminate` also runs on a panic, which then
-  continues so golink reports it.
+  continues so grpcproc reports it.
 - `actor.Supervise(n, Spec)`: one-for-one, one-for-all, rest-for-one;
   permanent, transient, temporary children; restart intensity (`MaxRestarts`
   within `Within`, default 3 in 5s). Giving up is exit reason
@@ -452,18 +452,18 @@ them. Two primitives went into the core because they need process internals:
   a transient child that finished stays finished. Stopping a child is
   Demonitor, Exit, then waiting on node events (not the mailbox, which is
   closed once the supervisor itself has been told to exit), bounded by
-  `Spec.Shutdown`; golink cannot kill a goroutine that ignores Exit, so such
+  `Spec.Shutdown`; grpcproc cannot kill a goroutine that ignores Exit, so such
   a child is left behind and logged. A restart that cannot start counts
   against the intensity, so it ends rather than loops. The supervisor's state
   is published through `WithInspect`.
 
 ## Later
 
-- A **global name registry** (`golink.Global{"ledger"}` resolving through
-  etcd, with a lease as fencing token), on top of `golink/etcd`.
+- A **global name registry** (`grpcproc.Global{"ledger"}` resolving through
+  etcd, with a lease as fencing token), on top of `grpcproc/etcd`.
 - Cross-node pub/sub with a replay buffer (ergo's events). Useful; not core.
 - Delivery beyond at-most-once, in order per sender. Explicitly out of scope;
-  build it above `golink`, as OTP does.
+  build it above `grpcproc`, as OTP does.
 - Virtual actors / placement, persistence, remote spawn. Out of scope.
 
 ## What was rejected, and why
@@ -480,14 +480,14 @@ them. Two primitives went into the core because they need process internals:
 
 ## Order of work
 
-1. ~~`proto/golink/v1`, core `Node`/`Process`, links, static resolver, `ProcessInfo`
-   counters, `Hooks`, `WithInspect`, `golinktest`~~ (done). Tests: ordering, monitors with
+1. ~~`proto/grpcproc/v1`, core `Node`/`Process`, links, static resolver, `ProcessInfo`
+   counters, `Hooks`, `WithInspect`, `grpcproctest`~~ (done). Tests: ordering, monitors with
    every reason, node down, restart with new incarnation, bad peer identity.
-2. ~~`golink/inspect` service and Go client~~ (done, with `Node.Subscribe`);
-   ~~`golink/actor` helpers~~ (done, with `SendAfter` and `SpawnMonitor`).
-3. ~~`golink/otel` (metrics + trace propagation)~~ (done: see otel/README.md),
-   ~~`golink/etcd`~~ (done: see etcd/README.md).
-4. ~~`golinkctl`, `DOT`, MCP server~~ (done: `golink/tools`, see tools/README.md).
+2. ~~`grpcproc/inspect` service and Go client~~ (done, with `Node.Subscribe`);
+   ~~`grpcproc/actor` helpers~~ (done, with `SendAfter` and `SpawnMonitor`).
+3. ~~`grpcproc/otel` (metrics + trace propagation)~~ (done: see otel/README.md),
+   ~~`grpcproc/etcd`~~ (done: see etcd/README.md).
+4. ~~`grpcprocctl`, `DOT`, MCP server~~ (done: `grpcproc/tools`, see tools/README.md).
 
 Coverage target and style follow `fsm` and `di`: 100 % on the core,
 race-detected, examples compiled in CI, `DESIGN.md` kept current.

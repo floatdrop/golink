@@ -8,19 +8,19 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/golinktest"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/grpcproctest"
 )
 
 // A Down that was already queued when its child was stopped or replaced
 // (two children crashing together under one_for_all) is ignored.
 func TestStaleDownIsIgnored(t *testing.T) {
 	s := &supervisor{kids: []*kid{
-		{spec: ChildSpec{Name: "stopped"}, ref: golink.Ref{ID: 1}},
-		{spec: ChildSpec{Name: "replaced"}, ref: golink.Ref{ID: 3}, running: true},
+		{spec: ChildSpec{Name: "stopped"}, ref: grpcproc.Ref{ID: 1}},
+		{spec: ChildSpec{Name: "replaced"}, ref: grpcproc.Ref{ID: 3}, running: true},
 	}}
-	for _, ref := range []golink.Ref{{ID: 1}, {ID: 2}} {
-		if err := s.exited(golink.Down{Ref: ref, Reason: "crash"}); err != nil {
+	for _, ref := range []grpcproc.Ref{{ID: 1}, {ID: 2}} {
+		if err := s.exited(grpcproc.Down{Ref: ref, Reason: "crash"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -32,29 +32,29 @@ func TestStaleDownIsIgnored(t *testing.T) {
 // A restart whose start fails counts against the intensity, so a child that
 // cannot come back ends the supervisor instead of looping.
 func TestFailedRestartEndsSupervisor(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	starts := 0
-	flaky := ChildSpec{Name: "flaky", start: func(sup *golink.Process[proto.Message]) (golink.PID, golink.Ref, error) {
+	flaky := ChildSpec{Name: "flaky", start: func(sup *grpcproc.Process[proto.Message]) (grpcproc.PID, grpcproc.Ref, error) {
 		starts++
 		if starts > 1 {
-			return golink.PID{}, golink.Ref{}, errors.New("cannot start")
+			return grpcproc.PID{}, grpcproc.Ref{}, errors.New("cannot start")
 		}
-		a, ref, err := sup.SpawnMonitor[proto.Message](func(p *golink.Process[proto.Message]) error {
+		a, ref, err := sup.SpawnMonitor[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
 			_, err := p.Receive()
 			if err != nil {
 				return err
 			}
 			return errors.New("crash")
-		}, golink.WithParent(sup.PID()))
+		}, grpcproc.WithParent(sup.PID()))
 		return a.PID(), ref, err
 	}}
 	sup, err := Supervise(n, Spec{MaxRestarts: 2, Children: []ChildSpec{flaky}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	done := make(chan golink.Down, 1)
-	_, _ = golink.Spawn[proto.Message](n, func(p *golink.Process[proto.Message]) error {
+	done := make(chan grpcproc.Down, 1)
+	_, _ = grpcproc.Spawn[proto.Message](n, func(p *grpcproc.Process[proto.Message]) error {
 		p.Monitor(sup)
 		for {
 			m, err := p.Receive()

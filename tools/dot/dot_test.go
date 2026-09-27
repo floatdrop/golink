@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/floatdrop/golink/tools/client"
-	"github.com/floatdrop/golink/tools/dot"
+	"github.com/floatdrop/grpcproc/tools/client"
+	"github.com/floatdrop/grpcproc/tools/dot"
 )
 
 func TestRender(t *testing.T) {
@@ -24,7 +24,7 @@ func TestRender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `digraph golink {
+	want := `digraph grpcproc {
 	rankdir=LR;
 	node [shape=box, fontname="monospace", fontsize=10];
 	subgraph cluster_0 {

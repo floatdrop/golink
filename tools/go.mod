@@ -1,13 +1,13 @@
-// Separate module, so golink itself carries no CLI or MCP dependencies. It
-// requires a published golink rather than a replace, because a replace is
+// Separate module, so grpcproc itself carries no CLI or MCP dependencies. It
+// requires a published grpcproc rather than a replace, because a replace is
 // ignored by whoever installs from this module. For local work on both at
 // once, use a go.work (ignored by git): go work init . ./tools
-module github.com/floatdrop/golink/tools
+module github.com/floatdrop/grpcproc/tools
 
 go 1.27.1
 
 require (
-	github.com/floatdrop/golink v0.0.1
+	github.com/floatdrop/grpcproc v0.0.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12

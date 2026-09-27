@@ -1,5 +1,5 @@
-// Package client is a typed wrapper over golink's Inspector, shared by
-// golinkctl and its MCP server: flat, readable views of nodes, processes and
+// Package client is a typed wrapper over grpcproc's Inspector, shared by
+// grpcprocctl and its MCP server: flat, readable views of nodes, processes and
 // events, target parsing, and a walk over every node of a cluster.
 package client
 
@@ -16,10 +16,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/inspect"
-	inspectv1 "github.com/floatdrop/golink/proto/golink/inspect/v1"
-	golinkv1 "github.com/floatdrop/golink/proto/golink/v1"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/inspect"
+	inspectv1 "github.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1"
+	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
 // Client talks to one Inspector; requests about other nodes are forwarded
@@ -29,12 +29,12 @@ type Client struct {
 	now func() time.Time
 }
 
-// New wraps a connection to a node serving golink.inspect.v1.Inspector.
+// New wraps a connection to a node serving grpcproc.inspect.v1.Inspector.
 func New(cc grpc.ClientConnInterface) *Client {
 	return &Client{rpc: inspectv1.NewInspectorClient(cc), now: time.Now}
 }
 
-// ParseTarget reads a process reference: a PID as golink prints it,
+// ParseTarget reads a process reference: a PID as grpcproc prints it,
 // "<node.incarnation.id>", or a registered name. A name is looked up on node.
 func ParseTarget(s string) (*inspectv1.Target, error) {
 	if inner, ok := strings.CutPrefix(s, "<"); ok {
@@ -48,7 +48,7 @@ func ParseTarget(s string) (*inspectv1.Target, error) {
 		if !ok1 || !ok2 {
 			return nil, fmt.Errorf("bad pid %q: want <node.incarnation.id>", s)
 		}
-		pid := &golinkv1.PID{Node: node}
+		pid := &grpcprocv1.PID{Node: node}
 		var err1, err2 error
 		pid.Incarnation, err1 = strconv.ParseUint(inc, 10, 64)
 		pid.Id, err2 = strconv.ParseUint(id, 10, 64)
@@ -140,7 +140,7 @@ func (c *Client) Processes(ctx context.Context, node string, f Filter) ([]Proces
 }
 
 func parseState(s string) (inspectv1.ProcessState, error) {
-	for st := golink.StateIdle; st <= golink.StateExiting; st++ {
+	for st := grpcproc.StateIdle; st <= grpcproc.StateExiting; st++ {
 		if st.String() == s {
 			return inspectv1.ProcessState(st + 1), nil
 		}

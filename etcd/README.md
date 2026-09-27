@@ -1,18 +1,18 @@
-# golink/etcd
+# grpcproc/etcd
 
-Cluster membership for [golink](../README.md) on etcd: nodes register under
+Cluster membership for [grpcproc](../README.md) on etcd: nodes register under
 a lease they keep alive, peers resolve their addresses from it, and when a
 lease ends (the node stopped, or stopped answering) every node that watches
-the cluster drops its links to it. A separate module, so golink itself does
+the cluster drops its links to it. A separate module, so grpcproc itself does
 not depend on the etcd client.
 
 ```sh
-go get github.com/floatdrop/golink/etcd
+go get github.com/floatdrop/grpcproc/etcd
 ```
 
 ```go
-cluster := golinketcd.New(etcdClient, "/golink/prod") // WithTTL, WithRetry, WithLogger
-node, err := golink.NewNode(golink.Config{
+cluster := grpcprocetcd.New(etcdClient, "/grpcproc/prod") // WithTTL, WithRetry, WithLogger
+node, err := grpcproc.NewNode(grpcproc.Config{
     Name:       "orders-1",
     Advertise:  "10.0.0.5:9000", // this node's gRPC server, as peers reach it
     Resolver:   cluster,
@@ -27,7 +27,7 @@ dialer too: `inspect.NewDialer(cluster, dialOptions...)`.
 
 ## What it does
 
-| golink role | etcd |
+| grpcproc role | etcd |
 | --- | --- |
 | `Registrar` | one key per node, `<prefix>/nodes/<name>`, holding `{"name","incarnation","addr"}`, attached to a lease kept alive. If the lease is lost (etcd unreachable longer than the TTL), the node registers again every retry interval until it succeeds. `Stop` revokes the lease, which removes the key at once. |
 | `Resolver` | reads the key. |
@@ -40,7 +40,7 @@ one.
 
 ## Why a lease and not just the links
 
-golink notices a lost link by itself, as fast as gRPC keepalive allows. A
+grpcproc notices a lost link by itself, as fast as gRPC keepalive allows. A
 node that dies without closing its connections, behind a half-open TCP
 connection or a network partition, is noticed only when keepalive gives up,
 or never if keepalive is not configured. Its lease ends after the TTL

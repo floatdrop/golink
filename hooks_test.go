@@ -1,4 +1,4 @@
-package golink_test
+package grpcproc_test
 
 import (
 	"errors"
@@ -10,15 +10,15 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/golinktest"
-	"github.com/floatdrop/golink/internal/testpb"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/grpcproctest"
+	"github.com/floatdrop/grpcproc/internal/testpb"
 )
 
 // tracer is a Hooks that behaves like a tracer would: it stamps a span id on
 // what leaves and on what is being handled, and records when each ends.
 type tracer struct {
-	golink.NopHooks
+	grpcproc.NopHooks
 	name string
 
 	mu     sync.Mutex
@@ -45,8 +45,8 @@ func (tr *tracer) Events() []string {
 	return slices.Clone(tr.events)
 }
 
-func stamp(md golink.Metadata, key, val string) golink.Metadata {
-	out := golink.Metadata{key: val}
+func stamp(md grpcproc.Metadata, key, val string) grpcproc.Metadata {
+	out := grpcproc.Metadata{key: val}
 	for k, v := range md {
 		if k != key {
 			out[k] = v
@@ -55,7 +55,7 @@ func stamp(md golink.Metadata, key, val string) golink.Metadata {
 	return out
 }
 
-func (tr *tracer) OnSend(s golink.SendInfo, md golink.Metadata) (golink.Metadata, golink.Done) {
+func (tr *tracer) OnSend(s grpcproc.SendInfo, md grpcproc.Metadata) (grpcproc.Metadata, grpcproc.Done) {
 	id := tr.next()
 	kind := "send"
 	if s.Call {
@@ -71,7 +71,7 @@ func (tr *tracer) OnSend(s golink.SendInfo, md golink.Metadata) (golink.Metadata
 	}
 }
 
-func (tr *tracer) OnReceive(r golink.ReceiveInfo, md golink.Metadata) (golink.Metadata, golink.Done) {
+func (tr *tracer) OnReceive(r grpcproc.ReceiveInfo, md grpcproc.Metadata) (grpcproc.Metadata, grpcproc.Done) {
 	id := tr.next()
 	what := "msg"
 	if r.Down != nil {
@@ -89,13 +89,13 @@ func (tr *tracer) OnReceive(r golink.ReceiveInfo, md golink.Metadata) (golink.Me
 
 func TestMetadataFlowsThroughProcesses(t *testing.T) {
 	tr := &tracer{name: "s"}
-	c := golinktest.NewWith(t, []golinktest.Option{golinktest.WithHooks(tr)}, "a", "b")
+	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithHooks(tr)}, "a", "b")
 	a, b := c.Node("a"), c.Node("b")
 
 	sink, got := collector(t, b)
 	// relay forwards what it receives: its sends inherit the message's
 	// metadata (tenant) and the span OnReceive stamped.
-	relay, _ := golink.Spawn[*testpb.Ping](a, func(p *golink.Process[*testpb.Ping]) error {
+	relay, _ := grpcproc.Spawn[*testpb.Ping](a, func(p *grpcproc.Process[*testpb.Ping]) error {
 		for {
 			m, err := p.Receive()
 			if err != nil {
@@ -105,8 +105,8 @@ func TestMetadataFlowsThroughProcesses(t *testing.T) {
 				return err
 			}
 		}
-	}, golink.WithLabel("relay"))
-	ctx := golink.WithMetadata(t.Context(), golink.Metadata{"tenant": "acme"})
+	}, grpcproc.WithLabel("relay"))
+	ctx := grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"tenant": "acme"})
 	if err := a.SendContext(ctx, relay, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
@@ -141,23 +141,23 @@ func TestMetadataFlowsThroughProcesses(t *testing.T) {
 }
 
 func TestInheritanceEndsWithHandling(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	a := c.Node("a")
 	sink, got := collector(t, a)
 	// After a ReceiveTimeout, nothing is being handled: sends inherit nothing.
-	p, _ := golink.Spawn[*testpb.Ping](a, func(p *golink.Process[*testpb.Ping]) error {
+	p, _ := grpcproc.Spawn[*testpb.Ping](a, func(p *grpcproc.Process[*testpb.Ping]) error {
 		if _, err := p.Receive(); err != nil {
 			return err
 		}
 		_ = p.Send(sink, proto.Message(&testpb.Ping{N: 1})) // inherits
-		ctx := golink.WithMetadata(t.Context(), golink.Metadata{"extra": "1"})
+		ctx := grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"extra": "1"})
 		_ = p.SendContext(ctx, sink, proto.Message(&testpb.Ping{N: 2})) // inherits and adds
 		if _, err := p.ReceiveTimeout(time.Millisecond); err == nil {
 			t.Error("expected timeout")
 		}
 		return p.Send(sink, proto.Message(&testpb.Ping{N: 3})) // inherits nothing
 	})
-	_ = a.SendContext(golink.WithMetadata(t.Context(), golink.Metadata{"tenant": "acme"}), p, &testpb.Ping{})
+	_ = a.SendContext(grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"tenant": "acme"}), p, &testpb.Ping{})
 	if m := recv(t, got); m.Metadata["tenant"] != "acme" {
 		t.Fatalf("1: %v", m.Metadata)
 	}
@@ -171,15 +171,15 @@ func TestInheritanceEndsWithHandling(t *testing.T) {
 
 func TestDoneReportsOutcomes(t *testing.T) {
 	tr := &tracer{name: "d"}
-	c := golinktest.NewWith(t, []golinktest.Option{golinktest.WithHooks(tr)}, "a")
+	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithHooks(tr)}, "a")
 	a := c.Node("a")
-	e, _ := golink.Spawn(a, echo, golink.WithLabel("echo"))
+	e, _ := grpcproc.Spawn(a, echo, grpcproc.WithLabel("echo"))
 	// A call ends with its error.
 	if _, err := a.Call[*testpb.Pong](t.Context(), e, &testpb.Ping{N: -1}); err == nil {
 		t.Fatal("expected error")
 	}
 	// A send that cannot route ends with that error.
-	_ = a.SendTo(golink.Named[*testpb.Ping]("nowhere", "x"), &testpb.Ping{})
+	_ = a.SendTo(grpcproc.Named[*testpb.Ping]("nowhere", "x"), &testpb.Ping{})
 	// A process that exits abnormally ends its handling with the reason.
 	_ = a.Send(e, &testpb.Ping{N: -100})
 	w, ch := watcher(t, a)
@@ -187,7 +187,7 @@ func TestDoneReportsOutcomes(t *testing.T) {
 	recv(t, ch)
 	time.Sleep(20 * time.Millisecond)
 	ev := strings.Join(tr.Events(), "\n")
-	for _, want := range []string{"err=negative: -1", "err=golink: link to nowhere", "err=boom"} {
+	for _, want := range []string{"err=negative: -1", "err=grpcproc: link to nowhere", "err=boom"} {
 		if !strings.Contains(ev, want) {
 			t.Errorf("missing %q in\n%s", want, ev)
 		}
@@ -199,18 +199,18 @@ func TestDoneReportsOutcomes(t *testing.T) {
 }
 
 func TestJoinHooks(t *testing.T) {
-	if golink.JoinHooks() != nil || golink.JoinHooks(nil, nil) != nil {
+	if grpcproc.JoinHooks() != nil || grpcproc.JoinHooks(nil, nil) != nil {
 		t.Fatal("empty join must be nil")
 	}
 	one := &tracer{name: "x"}
-	if golink.JoinHooks(nil, one) != golink.Hooks(one) {
+	if grpcproc.JoinHooks(nil, one) != grpcproc.Hooks(one) {
 		t.Fatal("single hook must be returned as is")
 	}
 	first, second := &tracer{name: "f"}, &tracer{name: "s"}
 	counts := &countingHooks{}
-	h := golink.JoinHooks(first, counts, second)
+	h := grpcproc.JoinHooks(first, counts, second)
 	// Metadata threads through in order; Done runs in reverse.
-	md, done := h.OnSend(golink.SendInfo{}, golink.Metadata{"span": "root"})
+	md, done := h.OnSend(grpcproc.SendInfo{}, grpcproc.Metadata{"span": "root"})
 	if md["span"] != "s1" {
 		t.Fatalf("%v", md)
 	}
@@ -218,23 +218,23 @@ func TestJoinHooks(t *testing.T) {
 		t.Fatal(got)
 	}
 	done(errors.New("x"))
-	md, done = h.OnReceive(golink.ReceiveInfo{}, nil)
+	md, done = h.OnReceive(grpcproc.ReceiveInfo{}, nil)
 	done(nil)
 	if md["span"] != "s2" || first.Events()[len(first.Events())-1] != "handled f2" {
 		t.Fatalf("%v %v", md, first.Events())
 	}
 	// Hooks that start nothing leave no Done.
-	if _, d := golink.JoinHooks(golink.NopHooks{}, counts).OnSend(golink.SendInfo{}, nil); d != nil {
+	if _, d := grpcproc.JoinHooks(grpcproc.NopHooks{}, counts).OnSend(grpcproc.SendInfo{}, nil); d != nil {
 		t.Fatal("no Done expected")
 	}
-	if _, d := golink.JoinHooks(golink.NopHooks{}, first).OnReceive(golink.ReceiveInfo{}, nil); d == nil {
+	if _, d := grpcproc.JoinHooks(grpcproc.NopHooks{}, first).OnReceive(grpcproc.ReceiveInfo{}, nil); d == nil {
 		t.Fatal("single Done expected")
 	}
-	h.OnSpawn(golink.ProcessInfo{})
-	h.OnExit(golink.ProcessInfo{}, "")
-	h.OnDeadLetter(golink.PID{}, golink.PID{}, nil, "")
-	h.OnLinkUp(golink.NodeID{})
-	h.OnLinkDown(golink.NodeID{}, nil)
+	h.OnSpawn(grpcproc.ProcessInfo{})
+	h.OnExit(grpcproc.ProcessInfo{}, "")
+	h.OnDeadLetter(grpcproc.PID{}, grpcproc.PID{}, nil, "")
+	h.OnLinkUp(grpcproc.NodeID{})
+	h.OnLinkDown(grpcproc.NodeID{}, nil)
 	if counts.spawns.Load() != 1 || counts.exits.Load() != 1 || counts.deadLetters.Load() != 1 || counts.linkUps.Load() != 1 || counts.linkDowns.Load() != 1 {
 		t.Fatal("join did not fan out")
 	}

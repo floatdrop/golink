@@ -4,19 +4,19 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/examples/shoppb"
-	"github.com/floatdrop/golink/golinktest"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/examples/shoppb"
+	"github.com/floatdrop/grpcproc/grpcproctest"
 )
 
 func TestReserveAcrossNodes(t *testing.T) {
 	// Two nodes over in-memory gRPC connections, stopped when the test ends.
-	c := golinktest.New(t, "shop", "warehouse")
+	c := grpcproctest.New(t, "shop", "warehouse")
 	shop := c.Node("shop")
-	if _, err := golink.Spawn(c.Node("warehouse"), Stock(map[string]int64{"apple": 3}), golink.WithName("stock")); err != nil {
+	if _, err := grpcproc.Spawn(c.Node("warehouse"), Stock(map[string]int64{"apple": 3}), grpcproc.WithName("stock")); err != nil {
 		t.Fatal(err)
 	}
-	stock := golink.Named[*shoppb.Reserve]("warehouse", "stock")
+	stock := grpcproc.Named[*shoppb.Reserve]("warehouse", "stock")
 	apple := &shoppb.Reserve{Sku: "apple", Qty: 1}
 
 	if r, err := shop.Call[*shoppb.Reserved](t.Context(), stock, apple); err != nil || r.Left != 2 {
@@ -26,7 +26,7 @@ func TestReserveAcrossNodes(t *testing.T) {
 	// A partition fails calls, and fires monitors with Down{noconnection},
 	// until it heals.
 	c.Partition("shop", "warehouse")
-	if _, err := shop.Call[*shoppb.Reserved](t.Context(), stock, apple); !errors.Is(err, golink.ErrNoConnection) {
+	if _, err := shop.Call[*shoppb.Reserved](t.Context(), stock, apple); !errors.Is(err, grpcproc.ErrNoConnection) {
 		t.Fatal(err)
 	}
 	c.Heal("shop", "warehouse")
@@ -38,7 +38,7 @@ func TestReserveAcrossNodes(t *testing.T) {
 	// the processes the old one ran.
 	c.Kill("warehouse")
 	c.Restart("warehouse")
-	if _, err := shop.Call[*shoppb.Reserved](t.Context(), stock, apple); !errors.Is(err, golink.ErrNoProc) {
+	if _, err := shop.Call[*shoppb.Reserved](t.Context(), stock, apple); !errors.Is(err, grpcproc.ErrNoProc) {
 		t.Fatal(err)
 	}
 }

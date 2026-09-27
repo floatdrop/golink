@@ -3,7 +3,7 @@ syntax = "proto3";
 
 package shop.v1;
 
-option go_package = "github.com/floatdrop/golink/examples/shoppb;shoppb";
+option go_package = "github.com/floatdrop/grpcproc/examples/shoppb;shoppb";
 
 // Reserve asks for qty items of sku. The answer is Reserved.
 message Reserve {

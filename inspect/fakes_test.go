@@ -12,11 +12,11 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/golinktest"
-	"github.com/floatdrop/golink/inspect"
-	"github.com/floatdrop/golink/internal/testpb"
-	inspectv1 "github.com/floatdrop/golink/proto/golink/inspect/v1"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/grpcproctest"
+	"github.com/floatdrop/grpcproc/inspect"
+	"github.com/floatdrop/grpcproc/internal/testpb"
+	inspectv1 "github.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1"
 )
 
 // fakeWatch is a server stream whose Send fails.
@@ -58,7 +58,7 @@ func (o *oneEvent) Recv() (*inspectv1.WatchResponse, error) {
 }
 
 func TestWatchSendFailures(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	n := c.Node("a")
 	stream := &fakeWatch{ctx: t.Context()}
 
@@ -67,7 +67,7 @@ func TestWatchSendFailures(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- srv.Watch(&inspectv1.WatchRequest{}, stream) }()
 	for {
-		_, _ = golink.Spawn(n, func(p *golink.Process[*testpb.Ping]) error { return nil })
+		_, _ = grpcproc.Spawn(n, func(p *grpcproc.Process[*testpb.Ping]) error { return nil })
 		select {
 		case err := <-done:
 			if err == nil || err.Error() != "client gone" {
@@ -103,7 +103,7 @@ forwarded:
 }
 
 func TestWatchEndsWhenClientCancels(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	// A cancelled client is a clean end, not an error.
@@ -113,7 +113,7 @@ func TestWatchEndsWhenClientCancels(t *testing.T) {
 }
 
 func TestDialerErrors(t *testing.T) {
-	d := inspect.NewDialer(golink.StaticResolver{"bad": "\x7f://not a target"})
+	d := inspect.NewDialer(grpcproc.StaticResolver{"bad": "\x7f://not a target"})
 	defer func() { _ = d.Close() }()
 	if _, err := d.Peer(t.Context(), "unknown"); err == nil {
 		t.Fatal("resolver error expected")
@@ -125,7 +125,7 @@ func TestDialerErrors(t *testing.T) {
 
 func TestListProcessesForwarded(t *testing.T) {
 	c := cluster(t, nil, "a", "b")
-	_, _ = golink.Spawn(c.Node("b"), func(p *golink.Process[*testpb.Ping]) error { _, err := p.Receive(); return err }, golink.WithLabel("remote"))
+	_, _ = grpcproc.Spawn(c.Node("b"), func(p *grpcproc.Process[*testpb.Ping]) error { _, err := p.Receive(); return err }, grpcproc.WithLabel("remote"))
 	resp, err := client(c, "a").ListProcesses(t.Context(), &inspectv1.ListProcessesRequest{Node: "b", Label: "remote"})
 	if err != nil || len(resp.GetProcesses()) != 1 || resp.GetProcesses()[0].GetPid().GetNode() != "b" {
 		t.Fatalf("%v %v", resp, err)
@@ -140,7 +140,7 @@ func (*okWatch) Send(*inspectv1.WatchResponse) error { return nil }
 func TestWatchEndsWithUnavailableWhenNodeStops(t *testing.T) {
 	// A node on its own, not behind a gRPC server that would cancel the
 	// stream first: only the node stopping can end this Watch.
-	n, err := golink.NewNode(golink.Config{Name: "solo", Resolver: golink.StaticResolver{}})
+	n, err := grpcproc.NewNode(grpcproc.Config{Name: "solo", Resolver: grpcproc.StaticResolver{}})
 	if err != nil {
 		t.Fatal(err)
 	}

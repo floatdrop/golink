@@ -1,7 +1,7 @@
-// Package golinktest runs a golink cluster inside one test binary. Nodes talk
+// Package grpcproctest runs a grpcproc cluster inside one test binary. Nodes talk
 // over in-memory gRPC connections (bufconn), so a multi-node scenario,
 // including a partition or a node dying, needs no sockets and no registry.
-package golinktest
+package grpcproctest
 
 import (
 	"context"
@@ -19,14 +19,14 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/floatdrop/golink"
+	"github.com/floatdrop/grpcproc"
 )
 
 // Option configures a Cluster.
 type Option func(*Cluster)
 
 // WithHooks installs h on every node.
-func WithHooks(h golink.Hooks) Option { return func(c *Cluster) { c.hooks = h } }
+func WithHooks(h grpcproc.Hooks) Option { return func(c *Cluster) { c.hooks = h } }
 
 // WithLogger sets the logger every node uses. Default: discards.
 func WithLogger(l *slog.Logger) Option { return func(c *Cluster) { c.logger = l } }
@@ -34,23 +34,23 @@ func WithLogger(l *slog.Logger) Option { return func(c *Cluster) { c.logger = l 
 // WithConfig adjusts each node's Config before the node is created, each
 // time it starts (including after Restart): a Registrar, a Membership, hooks
 // for one node only.
-func WithConfig(fn func(name string, cfg *golink.Config)) Option {
+func WithConfig(fn func(name string, cfg *grpcproc.Config)) Option {
 	return func(c *Cluster) { c.configure = append(c.configure, fn) }
 }
 
 // WithServices registers extra gRPC services on every node's server, such as
 // an Inspector, each time the node starts (including after Restart).
-func WithServices(fn func(n *golink.Node, s *grpc.Server)) Option {
+func WithServices(fn func(n *grpcproc.Node, s *grpc.Server)) Option {
 	return func(c *Cluster) { c.services = append(c.services, fn) }
 }
 
 // Cluster is a set of nodes and the (simulated) network between them.
 type Cluster struct {
 	t         testing.TB
-	hooks     golink.Hooks
+	hooks     grpcproc.Hooks
 	logger    *slog.Logger
-	services  []func(*golink.Node, *grpc.Server)
-	configure []func(string, *golink.Config)
+	services  []func(*grpcproc.Node, *grpc.Server)
+	configure []func(string, *grpcproc.Config)
 
 	mu    sync.Mutex
 	nodes map[string]*member
@@ -63,7 +63,7 @@ type member struct {
 	name string
 	ln   *bufconn.Listener
 	srv  *grpc.Server
-	node *golink.Node
+	node *grpcproc.Node
 	dead bool
 }
 
@@ -107,8 +107,8 @@ func NewWith(t testing.TB, opts []Option, names ...string) *Cluster {
 
 // Resolver resolves node names of this cluster, for components that dial
 // nodes themselves (an Inspector's peer dialer). Use it with DialOptions.
-func (*Cluster) Resolver() golink.Resolver {
-	return golink.ResolverFunc(func(_ context.Context, node string) (string, error) { return "passthrough:///" + node, nil })
+func (*Cluster) Resolver() grpcproc.Resolver {
+	return grpcproc.ResolverFunc(func(_ context.Context, node string) (string, error) { return "passthrough:///" + node, nil })
 }
 
 // DialOptions reach the cluster's in-memory servers from outside any node:
@@ -139,13 +139,13 @@ func (c *Cluster) Conn(name string) *grpc.ClientConn {
 }
 
 // Node returns the running node called name.
-func (c *Cluster) Node(name string) *golink.Node {
+func (c *Cluster) Node(name string) *grpcproc.Node {
 	c.t.Helper()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	m := c.nodes[name]
 	if m == nil || m.dead {
-		c.t.Fatalf("golinktest: no running node %q", name)
+		c.t.Fatalf("grpcproctest: no running node %q", name)
 	}
 	return m.node
 }
@@ -185,10 +185,10 @@ func (c *Cluster) Kill(name string) {
 	m := c.nodes[name]
 	if m == nil || m.dead {
 		c.mu.Unlock()
-		c.t.Fatalf("golinktest: no running node %q", name)
+		c.t.Fatalf("grpcproctest: no running node %q", name)
 	}
 	m.dead = true
-	var peers []*golink.Node
+	var peers []*grpcproc.Node
 	for _, other := range c.nodes {
 		if !other.dead {
 			peers = append(peers, other.node)
@@ -200,7 +200,7 @@ func (c *Cluster) Kill(name string) {
 	// links down, whoever notices first: its own side, or Disconnect below.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	var linked []<-chan golink.Event
+	var linked []<-chan grpcproc.Event
 	for _, peer := range peers {
 		events := peer.Subscribe(ctx, 1024)
 		if slices.Contains(peer.Peers(), name) {
@@ -217,7 +217,7 @@ func (c *Cluster) Kill(name string) {
 	}
 	for _, events := range linked {
 		for e := range events {
-			if e.Kind == golink.EventLinkDown && e.Peer.Name == name {
+			if e.Kind == grpcproc.EventLinkDown && e.Peer.Name == name {
 				break
 			}
 		}
@@ -231,7 +231,7 @@ func (c *Cluster) Stop(name string) {
 	m := c.nodes[name]
 	if m == nil || m.dead {
 		c.mu.Unlock()
-		c.t.Fatalf("golinktest: no running node %q", name)
+		c.t.Fatalf("grpcproctest: no running node %q", name)
 	}
 	m.dead = true
 	c.mu.Unlock()
@@ -239,23 +239,23 @@ func (c *Cluster) Stop(name string) {
 }
 
 // Restart starts a stopped or killed node again, with a new incarnation.
-func (c *Cluster) Restart(name string) *golink.Node {
+func (c *Cluster) Restart(name string) *grpcproc.Node {
 	c.t.Helper()
 	c.mu.Lock()
 	m := c.nodes[name]
 	if m != nil && !m.dead {
 		c.mu.Unlock()
-		c.t.Fatalf("golinktest: node %q is running", name)
+		c.t.Fatalf("grpcproctest: node %q is running", name)
 	}
 	c.mu.Unlock()
 	return c.start(name)
 }
 
-func (c *Cluster) start(name string) *golink.Node {
+func (c *Cluster) start(name string) *grpcproc.Node {
 	c.t.Helper()
 	ln := bufconn.Listen(1 << 20)
 	srv := grpc.NewServer()
-	cfg := golink.Config{
+	cfg := grpcproc.Config{
 		Name:        name,
 		Advertise:   name,
 		Incarnation: c.incs.Add(1),
@@ -271,7 +271,7 @@ func (c *Cluster) start(name string) *golink.Node {
 	for _, fn := range c.configure {
 		fn(name, &cfg)
 	}
-	node, err := golink.NewNode(cfg)
+	node, err := grpcproc.NewNode(cfg)
 	if err != nil {
 		c.t.Fatal(err)
 	}
@@ -306,9 +306,9 @@ func (c *Cluster) dialer(from string) func(context.Context, string) (net.Conn, e
 		c.mu.Unlock()
 		switch {
 		case cut:
-			return nil, fmt.Errorf("golinktest: %s -> %s is partitioned", from, to)
+			return nil, fmt.Errorf("grpcproctest: %s -> %s is partitioned", from, to)
 		case m == nil || m.dead:
-			return nil, errors.New("golinktest: connection refused")
+			return nil, errors.New("grpcproctest: connection refused")
 		}
 		return m.ln.DialContext(ctx)
 	}

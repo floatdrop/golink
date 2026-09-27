@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/internal/testpb"
-	"github.com/floatdrop/golink/tools/client"
-	"github.com/floatdrop/golink/tools/internal/testcluster"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/internal/testpb"
+	"github.com/floatdrop/grpcproc/tools/client"
+	"github.com/floatdrop/grpcproc/tools/internal/testcluster"
 )
 
 func TestParseTarget(t *testing.T) {
@@ -125,7 +125,7 @@ func TestAgainstACluster(t *testing.T) {
 	var exited client.EventView
 	deadline := time.After(5 * time.Second)
 	for exited.Kind == "" {
-		_, _ = golink.Spawn(f.C.Node("a"), func(*golink.Process[*testpb.Ping]) error { return errors.New("bye") }, golink.WithLabel("short"))
+		_, _ = grpcproc.Spawn(f.C.Node("a"), func(*grpcproc.Process[*testpb.Ping]) error { return errors.New("bye") }, grpcproc.WithLabel("short"))
 		select {
 		case e := <-events:
 			if e.Kind == "exit" {

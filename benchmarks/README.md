@@ -1,9 +1,9 @@
 # benchmarks
 
-Separate module, so golink itself does not depend on what it is compared
+Separate module, so grpcproc itself does not depend on what it is compared
 with. It measures the working tree (`replace ../`).
 
-golink against [GoAkt](https://github.com/tochemey/goakt) v4.5.6,
+grpcproc against [GoAkt](https://github.com/tochemey/goakt) v4.5.6,
 [Hollywood](https://github.com/anthdm/hollywood) v1.0.5 and
 [Proto.Actor](https://github.com/asynkron/protoactor-go) (its development
 branch; it has no Go-style release tags), each used the way it is meant to
@@ -16,7 +16,7 @@ be:
 - **request** is one caller waiting for each reply; **parallel** is
   `RunParallel` callers against one echo;
 - **remote** is two engines, systems or nodes over real TCP on loopback, the
-  connection warmed up before timing. golink's own benchmarks in the root
+  connection warmed up before timing. grpcproc's own benchmarks in the root
   module use in-memory connections, which would flatter it here. GoAkt's
   remote actors are found with the public `PID.RemoteLookup` and reached
   through its remoting client, as an application would.
@@ -28,7 +28,7 @@ gRPC's logger) out of another's numbers.
 
 Apple M3 Max, `-count=6`, medians by `benchstat`:
 
-| | golink | GoAkt | Hollywood | Proto.Actor |
+| | grpcproc | GoAkt | Hollywood | Proto.Actor |
 | --- | --- | --- | --- | --- |
 | Local send | 99 ns, 0 allocs | 96 ns, 0 allocs | **58 ns**, 0 allocs | 191 ns, 0 allocs |
 | Local request | 738 ns, 3 allocs | **565 ns**, 2 allocs | 2265 ns, 12 allocs | 2354 ns, 10 allocs |
@@ -45,19 +45,19 @@ How to read it:
 
 - **The transport decides sequential remote latency.** GoAkt (its own TCP
   protocol) and Hollywood (dRPC) answer a remote request in 35–36 µs; the
-  two that speak gRPC take longer, golink 44 µs and Proto.Actor 59 µs.
+  two that speak gRPC take longer, grpcproc 44 µs and Proto.Actor 59 µs.
   gRPC-go's writer adds a goroutine hand-off in each direction. On a real
-  network the round trip dwarfs the difference; for golink it is the cost
+  network the round trip dwarfs the difference; for grpcproc it is the cost
   of living on the application's gRPC server.
-- **Against the other gRPC library**, golink answers a remote request 24%
+- **Against the other gRPC library**, grpcproc answers a remote request 24%
   sooner than Proto.Actor and trails it by about 50 ns on remote send, where
   Proto.Actor's writer batches up to a thousand envelopes.
-- **Locally**, a golink call waits on one channel where Hollywood and
+- **Locally**, a grpcproc call waits on one channel where Hollywood and
   Proto.Actor create a temporary process per request, which puts it three
-  times ahead of them. GoAkt is quicker still: golink allocates a pending
+  times ahead of them. GoAkt is quicker still: grpcproc allocates a pending
   call and its channel per call, which a pool could remove.
 - **Hollywood's sends are fastest** everywhere, with a lighter transport and
-  vtprotobuf-generated envelopes. golink also pays, on every message, for
+  vtprotobuf-generated envelopes. grpcproc also pays, on every message, for
   what its Inspector reports: per-process counters, mailbox ages, and a type
   check on delivery.
 
@@ -69,7 +69,7 @@ benchstat -table goos,goarch,cpu -col pkg -row .name new.txt
 
 ## History
 
-The same benchmarks, golink v0.0.0 against the commits after it:
+The same benchmarks, v0.0.0 (published as golink) against the commits after it:
 
 | | v0.0.0 | now |
 | --- | --- | --- |

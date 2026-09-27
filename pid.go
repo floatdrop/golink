@@ -1,8 +1,8 @@
-// Package golink gives goroutines Erlang-style network transparency on top of
+// Package grpcproc gives goroutines Erlang-style network transparency on top of
 // the gRPC server a service already runs. A process is addressed by a PID or
 // a name; Send, Call, Monitor and Exit work the same whether the target lives
 // in this binary or on another node.
-package golink
+package grpcproc
 
 import (
 	"context"
@@ -62,11 +62,11 @@ type Down struct {
 	Reason string
 }
 
-// Metadata is propagated with every message, unchanged by golink: trace
+// Metadata is propagated with every message, unchanged by grpcproc: trace
 // context, tenant, anything the application's interceptors would carry.
 type Metadata map[string]string
 
-// Exit reasons used by golink itself. Applications use any string.
+// Exit reasons used by grpcproc itself. Applications use any string.
 const (
 	ReasonNormal       = "normal"
 	ReasonNoProc       = "noproc"
@@ -77,13 +77,13 @@ const (
 )
 
 var (
-	ErrNoProc       = errors.New("golink: no such process")
-	ErrNoConnection = errors.New("golink: no connection to node")
-	ErrNameTaken    = errors.New("golink: name already registered")
-	ErrNotLocal     = errors.New("golink: pid does not belong to this node")
-	ErrNodeStopped  = errors.New("golink: node stopped")
-	ErrNotCall      = errors.New("golink: message is not a call")
-	ErrType         = errors.New("golink: process does not accept this message type")
+	ErrNoProc       = errors.New("grpcproc: no such process")
+	ErrNoConnection = errors.New("grpcproc: no connection to node")
+	ErrNameTaken    = errors.New("grpcproc: name already registered")
+	ErrNotLocal     = errors.New("grpcproc: pid does not belong to this node")
+	ErrNodeStopped  = errors.New("grpcproc: node stopped")
+	ErrNotCall      = errors.New("grpcproc: message is not a call")
+	ErrType         = errors.New("grpcproc: process does not accept this message type")
 )
 
 // RemoteError is the error a Call handler returned, carried back to the caller.
@@ -94,7 +94,7 @@ func (e *RemoteError) Error() string { return e.Msg }
 // ExitError is the cause of a process's context when it was asked to exit.
 type ExitError struct{ Reason string }
 
-func (e *ExitError) Error() string { return "golink: exit: " + e.Reason }
+func (e *ExitError) Error() string { return "grpcproc: exit: " + e.Reason }
 
 func exitReasonOf(ctx context.Context) (string, bool) {
 	if ee, ok := errors.AsType[*ExitError](context.Cause(ctx)); ok {
@@ -109,7 +109,7 @@ type LinkError struct {
 	Err  error
 }
 
-func (e *LinkError) Error() string { return fmt.Sprintf("golink: link to %s: %v", e.Peer, e.Err) }
+func (e *LinkError) Error() string { return fmt.Sprintf("grpcproc: link to %s: %v", e.Peer, e.Err) }
 func (e *LinkError) Unwrap() error { return e.Err }
 
 // Is reports true for ErrNoConnection: every link failure is one.

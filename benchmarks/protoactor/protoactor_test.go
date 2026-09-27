@@ -10,7 +10,7 @@ import (
 	pactor "github.com/asynkron/protoactor-go/actor"
 	premote "github.com/asynkron/protoactor-go/remote"
 
-	"github.com/floatdrop/golink/benchmarks/internal/shared"
+	"github.com/floatdrop/grpcproc/benchmarks/internal/shared"
 )
 
 type paSink struct {

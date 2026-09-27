@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	inspectv1 "github.com/floatdrop/golink/proto/golink/inspect/v1"
+	inspectv1 "github.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1"
 )
 
 // fake answers GetNode for "a" (linked to "b", which fails) and fails

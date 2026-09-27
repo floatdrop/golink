@@ -14,18 +14,18 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/examples/shoppb"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/examples/shoppb"
 )
 
 func main() {
 	ctx := context.Background()
 
 	// Where each node's gRPC server listens: a static address book here,
-	// golink/etcd in a real cluster.
+	// grpcproc/etcd in a real cluster.
 	warehouseLis := listen()
 	shopLis := listen()
-	peers := golink.StaticResolver{
+	peers := grpcproc.StaticResolver{
 		"warehouse": warehouseLis.Addr().String(),
 		"shop":      shopLis.Addr().String(),
 	}
@@ -37,7 +37,7 @@ func main() {
 
 	// A process on warehouse. Its mailbox holds *shoppb.Reserve and
 	// nothing else; it answers each call with *shoppb.Reserved.
-	_, err := golink.Spawn(warehouse, func(p *golink.Process[*shoppb.Reserve]) error {
+	_, err := grpcproc.Spawn(warehouse, func(p *grpcproc.Process[*shoppb.Reserve]) error {
 		left := map[string]int64{"apple": 3}
 		for {
 			m, err := p.Receive()
@@ -51,18 +51,18 @@ func main() {
 			left[m.Body.Sku] -= m.Body.Qty
 			_ = p.Reply(m, &shoppb.Reserved{Sku: m.Body.Sku, Left: left[m.Body.Sku]}, nil)
 		}
-	}, golink.WithName("stock"))
+	}, grpcproc.WithName("stock"))
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// From shop, the process is a node name and a process name. The address
 	// carries the mailbox type, so the compiler checks what is sent to it.
-	stock := golink.Named[*shoppb.Reserve]("warehouse", "stock")
+	stock := grpcproc.Named[*shoppb.Reserve]("warehouse", "stock")
 	for range 2 {
 		r, err := shop.Call[*shoppb.Reserved](ctx, stock, &shoppb.Reserve{Sku: "apple", Qty: 2})
 		if err != nil {
-			fmt.Println("reserve failed:", err) // the handler's error, as a *golink.RemoteError
+			fmt.Println("reserve failed:", err) // the handler's error, as a *grpcproc.RemoteError
 			continue
 		}
 		fmt.Println("reserved, left:", r.Left)
@@ -71,8 +71,8 @@ func main() {
 	// A process on shop monitors stock, then asks it to exit. The Down
 	// arrives with the reason, as it would for a crash or a lost node. It
 	// expects no messages, so its mailbox is untyped: proto.Message.
-	done := make(chan golink.Down)
-	_, err = golink.Spawn(shop, func(p *golink.Process[proto.Message]) error {
+	done := make(chan grpcproc.Down)
+	_, err = grpcproc.Spawn(shop, func(p *grpcproc.Process[proto.Message]) error {
 		p.Monitor(stock)
 		if err := p.Exit(stock, "closing"); err != nil {
 			return err
@@ -94,7 +94,7 @@ func main() {
 	fmt.Println("stock exited:", (<-done).Reason)
 
 	_, err = shop.Call[*shoppb.Reserved](ctx, stock, &shoppb.Reserve{Sku: "apple", Qty: 1})
-	fmt.Println("no such process:", errors.Is(err, golink.ErrNoProc))
+	fmt.Println("no such process:", errors.Is(err, grpcproc.ErrNoProc))
 }
 
 func listen() net.Listener {
@@ -107,8 +107,8 @@ func listen() net.Listener {
 
 // serve runs a node on its own gRPC server, the one the service already has
 // for its other APIs.
-func serve(ctx context.Context, name string, lis net.Listener, peers golink.Resolver) (*golink.Node, func()) {
-	node, err := golink.NewNode(golink.Config{
+func serve(ctx context.Context, name string, lis net.Listener, peers grpcproc.Resolver) (*grpcproc.Node, func()) {
+	node, err := grpcproc.NewNode(grpcproc.Config{
 		Name:        name,
 		Resolver:    peers,
 		DialOptions: []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
@@ -117,7 +117,7 @@ func serve(ctx context.Context, name string, lis net.Listener, peers golink.Reso
 		log.Fatal(err)
 	}
 	srv := grpc.NewServer()
-	node.Register(srv) // golink.v1.Node, next to the service's own
+	node.Register(srv) // grpcproc.v1.Node, next to the service's own
 	go func() { _ = srv.Serve(lis) }()
 	if err := node.Start(ctx); err != nil {
 		log.Fatal(err)

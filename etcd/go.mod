@@ -1,14 +1,14 @@
-// Separate module, so golink itself depends on grpc and protobuf only: the
+// Separate module, so grpcproc itself depends on grpc and protobuf only: the
 // etcd client (and, for tests, an embedded etcd server) are dependencies of
-// this adapter alone. It requires a published golink rather than a replace,
+// this adapter alone. It requires a published grpcproc rather than a replace,
 // because a replace is ignored by whoever imports this module. For local
 // work on both at once, use a go.work (ignored by git): go work init . ./etcd
-module github.com/floatdrop/golink/etcd
+module github.com/floatdrop/grpcproc/etcd
 
 go 1.27.1
 
 require (
-	github.com/floatdrop/golink v0.0.1
+	github.com/floatdrop/grpcproc v0.0.1
 	go.etcd.io/etcd/client/v3 v3.7.2
 	go.etcd.io/etcd/server/v3 v3.7.2
 	google.golang.org/grpc v1.84.0

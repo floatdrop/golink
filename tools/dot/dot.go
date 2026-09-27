@@ -1,8 +1,8 @@
-// Package dot draws golink processes as a Graphviz digraph: one cluster per
+// Package dot draws grpcproc processes as a Graphviz digraph: one cluster per
 // node, and an edge from each process to those it started, which for
 // supervised processes is the supervision tree.
 //
-//	golinkctl dot --cluster | dot -Tsvg -o processes.svg
+//	grpcprocctl dot --cluster | dot -Tsvg -o processes.svg
 package dot
 
 import (
@@ -10,7 +10,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/floatdrop/golink/tools/client"
+	"github.com/floatdrop/grpcproc/tools/client"
 )
 
 // Node is one node's processes, in the order to draw them.
@@ -23,7 +23,7 @@ type Node struct {
 // stable and can be diffed.
 func Render(w io.Writer, nodes []Node) error {
 	var b strings.Builder
-	b.WriteString("digraph golink {\n\trankdir=LR;\n\tnode [shape=box, fontname=\"monospace\", fontsize=10];\n")
+	b.WriteString("digraph grpcproc {\n\trankdir=LR;\n\tnode [shape=box, fontname=\"monospace\", fontsize=10];\n")
 	known := map[string]bool{}
 	for _, n := range nodes {
 		for _, p := range n.Processes {

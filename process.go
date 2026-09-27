@@ -1,4 +1,4 @@
-package golink
+package grpcproc
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	golinkv1 "github.com/floatdrop/golink/proto/golink/v1"
+	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
 // item is what sits in a mailbox: a message, a call, or a Down.
@@ -388,9 +388,9 @@ func (p *Process[M]) Reply(m Msg[M], resp proto.Message, err error) error {
 	delete(p.open, openCall{m.From, m.ref})
 	p.mu.Unlock()
 	if err != nil {
-		return p.n.reply(p.pid, m.From, m.ref, resp, golinkv1.Status_STATUS_ERROR, err.Error())
+		return p.n.reply(p.pid, m.From, m.ref, resp, grpcprocv1.Status_STATUS_ERROR, err.Error())
 	}
-	return p.n.reply(p.pid, m.From, m.ref, resp, golinkv1.Status_STATUS_OK, "")
+	return p.n.reply(p.pid, m.From, m.ref, resp, grpcprocv1.Status_STATUS_OK, "")
 }
 
 // Exit asks another process, anywhere, to terminate with reason.
@@ -532,7 +532,7 @@ func (p *proc) inspectNow(ctx context.Context) (map[string]string, error) {
 	select {
 	case p.sys <- r:
 	case <-ctx.Done():
-		return nil, fmt.Errorf("golink: inspect %s: busy for %s: %w", p.pid, p.busyFor().Round(time.Millisecond), ctx.Err())
+		return nil, fmt.Errorf("grpcproc: inspect %s: busy for %s: %w", p.pid, p.busyFor().Round(time.Millisecond), ctx.Err())
 	case <-p.ctx.Done():
 		return nil, ErrNoProc
 	}
@@ -725,13 +725,13 @@ func (p *proc) terminate(reason string) {
 	// Whatever is still queued goes nowhere, and a call taken but never
 	// answered never will be: fail them now rather than let callers time out.
 	for c := range open {
-		_ = n.reply(p.pid, c.from, c.ref, nil, golinkv1.Status_STATUS_NOPROC, "")
+		_ = n.reply(p.pid, c.from, c.ref, nil, grpcprocv1.Status_STATUS_NOPROC, "")
 	}
 	// terminate runs on the process's goroutine, the mailbox's consumer, so
 	// it may collect what Receive had swapped in but not yet taken.
 	for _, it := range append(p.mbox.taken(), p.mbox.close()...) {
 		if it.ref != 0 {
-			_ = n.reply(p.pid, it.from, it.ref, nil, golinkv1.Status_STATUS_NOPROC, "")
+			_ = n.reply(p.pid, it.from, it.ref, nil, grpcprocv1.Status_STATUS_NOPROC, "")
 		}
 		if it.body != nil {
 			n.deadLetter(it.from, p.pid, it.body, ReasonNoProc)

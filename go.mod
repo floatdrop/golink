@@ -1,4 +1,4 @@
-module github.com/floatdrop/golink
+module github.com/floatdrop/grpcproc
 
 go 1.27.1
 

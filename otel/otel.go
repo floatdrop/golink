@@ -1,16 +1,16 @@
-// Package golinkotel records golink activity with OpenTelemetry: a span for
+// Package grpcprocotel records grpcproc activity with OpenTelemetry: a span for
 // every send, call and handled message, chained across processes and nodes
-// through golink.Metadata, and metrics keyed by process label.
+// through grpcproc.Metadata, and metrics keyed by process label.
 //
-//	h, err := golinkotel.New()                 // global providers and propagator
-//	node, err := golink.NewNode(golink.Config{…, Hooks: h})
+//	h, err := grpcprocotel.New()                 // global providers and propagator
+//	node, err := grpcproc.NewNode(grpcproc.Config{…, Hooks: h})
 //	reg, err := h.Observe(node)                // gauges from snapshots
 //	defer reg.Unregister()
 //
 // Inside a handler, h.Extract(ctx, m.Metadata) is a context whose span is the
 // one handling m, for the handler's own spans (a database call, an HTTP
 // request).
-package golinkotel
+package grpcprocotel
 
 import (
 	"context"
@@ -27,23 +27,23 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/floatdrop/golink"
+	"github.com/floatdrop/grpcproc"
 )
 
 // ScopeName is the instrumentation scope of the meter and tracer.
-const ScopeName = "github.com/floatdrop/golink/otel"
+const ScopeName = "github.com/floatdrop/grpcproc/otel"
 
 // Attribute keys. Metrics never carry a PID: the label is the unit of
 // aggregation, and everything else is bounded.
 const (
-	AttrLabel       = attribute.Key("golink.label")
-	AttrCall        = attribute.Key("golink.call")
-	AttrRemote      = attribute.Key("golink.remote")
-	AttrReason      = attribute.Key("golink.reason")
-	AttrMessageType = attribute.Key("golink.message.type")
-	AttrPeer        = attribute.Key("golink.peer")
-	AttrDirection   = attribute.Key("golink.direction")
-	AttrPID         = attribute.Key("golink.pid") // spans only
+	AttrLabel       = attribute.Key("grpcproc.label")
+	AttrCall        = attribute.Key("grpcproc.call")
+	AttrRemote      = attribute.Key("grpcproc.remote")
+	AttrReason      = attribute.Key("grpcproc.reason")
+	AttrMessageType = attribute.Key("grpcproc.message.type")
+	AttrPeer        = attribute.Key("grpcproc.peer")
+	AttrDirection   = attribute.Key("grpcproc.direction")
+	AttrPID         = attribute.Key("grpcproc.pid") // spans only
 	AttrErrorType   = attribute.Key("error.type")
 )
 
@@ -65,10 +65,10 @@ func WithTracerProvider(tp trace.TracerProvider) Option { return func(c *config)
 // WithPropagator carries trace context with p instead of the global propagator.
 func WithPropagator(p propagation.TextMapPropagator) Option { return func(c *config) { c.prop = p } }
 
-// Hooks implements golink.Hooks with OpenTelemetry. Combine it with other
-// hooks through golink.JoinHooks.
+// Hooks implements grpcproc.Hooks with OpenTelemetry. Combine it with other
+// hooks through grpcproc.JoinHooks.
 type Hooks struct {
-	golink.NopHooks
+	grpcproc.NopHooks
 	meter  metric.Meter
 	tracer trace.Tracer
 	prop   propagation.TextMapPropagator
@@ -77,7 +77,7 @@ type Hooks struct {
 	mailboxWait, handling, callDuration                              metric.Float64Histogram
 }
 
-var _ golink.Hooks = (*Hooks)(nil)
+var _ grpcproc.Hooks = (*Hooks)(nil)
 
 // New creates the instruments. With no options it uses the global meter and
 // tracer providers and the global propagator, read once, now.
@@ -103,16 +103,16 @@ func New(opts ...Option) (*Hooks, error) {
 		errs = append(errs, err)
 		return m
 	}
-	h.sent = counter("golink.messages.sent", "Messages and calls sent, by the sender's label.", "{message}")
-	h.received = counter("golink.messages.received", "Messages taken from mailboxes, by the receiver's label.", "{message}")
-	h.spawned = counter("golink.processes.spawned", "Processes started, by label.", "{process}")
-	h.exited = counter("golink.processes.exited", "Processes ended, by label and reason class.", "{process}")
-	h.deadLetters = counter("golink.dead_letters", "Messages that could not be delivered, by reason and message type.", "{message}")
-	h.linksUp = counter("golink.links.up", "Links established, by peer.", "{link}")
-	h.linksDown = counter("golink.links.down", "Links lost, by peer.", "{link}")
-	h.mailboxWait = seconds("golink.mailbox.wait", "How long a message waited in the mailbox.")
-	h.handling = seconds("golink.process.duration", "How long a process spent on one message, until its next Receive.")
-	h.callDuration = seconds("golink.call.duration", "Call latency seen by the caller, with error.type on failure.")
+	h.sent = counter("grpcproc.messages.sent", "Messages and calls sent, by the sender's label.", "{message}")
+	h.received = counter("grpcproc.messages.received", "Messages taken from mailboxes, by the receiver's label.", "{message}")
+	h.spawned = counter("grpcproc.processes.spawned", "Processes started, by label.", "{process}")
+	h.exited = counter("grpcproc.processes.exited", "Processes ended, by label and reason class.", "{process}")
+	h.deadLetters = counter("grpcproc.dead_letters", "Messages that could not be delivered, by reason and message type.", "{message}")
+	h.linksUp = counter("grpcproc.links.up", "Links established, by peer.", "{link}")
+	h.linksDown = counter("grpcproc.links.down", "Links lost, by peer.", "{link}")
+	h.mailboxWait = seconds("grpcproc.mailbox.wait", "How long a message waited in the mailbox.")
+	h.handling = seconds("grpcproc.process.duration", "How long a process spent on one message, until its next Receive.")
+	h.callDuration = seconds("grpcproc.call.duration", "Call latency seen by the caller, with error.type on failure.")
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
 	}
@@ -121,13 +121,13 @@ func New(opts ...Option) (*Hooks, error) {
 
 // Extract returns ctx carrying the trace context in md. With a Msg's
 // Metadata it is the span handling that message.
-func (h *Hooks) Extract(ctx context.Context, md golink.Metadata) context.Context {
+func (h *Hooks) Extract(ctx context.Context, md grpcproc.Metadata) context.Context {
 	return h.prop.Extract(ctx, Carrier(md))
 }
 
 // inject returns a copy of md with the span context of ctx added.
-func (h *Hooks) inject(ctx context.Context, md golink.Metadata) golink.Metadata {
-	out := make(golink.Metadata, len(md)+2)
+func (h *Hooks) inject(ctx context.Context, md grpcproc.Metadata) grpcproc.Metadata {
+	out := make(grpcproc.Metadata, len(md)+2)
 	maps.Copy(out, md)
 	h.prop.Inject(ctx, Carrier(out))
 	return out
@@ -140,16 +140,16 @@ func typeOf(m proto.Message) string {
 	return string(m.ProtoReflect().Descriptor().FullName())
 }
 
-func destination(s golink.SendInfo) string {
+func destination(s grpcproc.SendInfo) string {
 	if s.ToName != "" {
-		return golink.Name{Node: s.To.Node, Name: s.ToName}.String()
+		return grpcproc.Name{Node: s.To.Node, Name: s.ToName}.String()
 	}
 	return s.To.String()
 }
 
 // OnSend starts a producer span for a send, a client span for a call, and
 // injects it into what leaves.
-func (h *Hooks) OnSend(s golink.SendInfo, md golink.Metadata) (golink.Metadata, golink.Done) {
+func (h *Hooks) OnSend(s grpcproc.SendInfo, md grpcproc.Metadata) (grpcproc.Metadata, grpcproc.Done) {
 	start := time.Now()
 	label := AttrLabel.String(s.FromLabel)
 	h.sent.Add(context.Background(), 1, metric.WithAttributes(label, AttrCall.Bool(s.Call), AttrRemote.Bool(s.Remote)))
@@ -162,7 +162,7 @@ func (h *Hooks) OnSend(s golink.SendInfo, md golink.Metadata) (golink.Metadata, 
 	ctx, span := h.tracer.Start(h.Extract(context.Background(), md), op+" "+typ,
 		trace.WithSpanKind(kind),
 		trace.WithAttributes(
-			attribute.String("messaging.system", "golink"),
+			attribute.String("messaging.system", "grpcproc"),
 			attribute.String("messaging.operation.type", op),
 			attribute.String("messaging.destination.name", destination(s)),
 			AttrMessageType.String(typ), label, AttrRemote.Bool(s.Remote),
@@ -188,7 +188,7 @@ func (h *Hooks) OnSend(s golink.SendInfo, md golink.Metadata) (golink.Metadata, 
 // OnReceive starts the span that covers handling the message, a consumer
 // span (a server span for a call) whose parent is the sender's span, and
 // makes it what the process's own sends inherit.
-func (h *Hooks) OnReceive(r golink.ReceiveInfo, md golink.Metadata) (golink.Metadata, golink.Done) {
+func (h *Hooks) OnReceive(r grpcproc.ReceiveInfo, md grpcproc.Metadata) (grpcproc.Metadata, grpcproc.Done) {
 	start := time.Now()
 	label := metric.WithAttributes(AttrLabel.String(r.Label))
 	h.received.Add(context.Background(), 1, label)
@@ -196,7 +196,7 @@ func (h *Hooks) OnReceive(r golink.ReceiveInfo, md golink.Metadata) (golink.Meta
 
 	typ, kind := typeOf(r.Body), trace.SpanKindConsumer
 	if r.Down != nil {
-		typ = "golink.Down"
+		typ = "grpcproc.Down"
 	}
 	if r.Call {
 		kind = trace.SpanKindServer
@@ -204,14 +204,14 @@ func (h *Hooks) OnReceive(r golink.ReceiveInfo, md golink.Metadata) (golink.Meta
 	ctx, span := h.tracer.Start(h.Extract(context.Background(), md), "process "+typ,
 		trace.WithSpanKind(kind),
 		trace.WithAttributes(
-			attribute.String("messaging.system", "golink"),
+			attribute.String("messaging.system", "grpcproc"),
 			attribute.String("messaging.operation.type", "process"),
 			AttrMessageType.String(typ), AttrLabel.String(r.Label),
 			AttrPID.String(r.PID.String()),
-			attribute.Float64("golink.mailbox.wait", r.Waited.Seconds()),
+			attribute.Float64("grpcproc.mailbox.wait", r.Waited.Seconds()),
 		))
 	if r.Down != nil {
-		span.SetAttributes(AttrReason.String(r.Down.Reason), attribute.String("golink.down.pid", r.Down.PID.String()))
+		span.SetAttributes(AttrReason.String(r.Down.Reason), attribute.String("grpcproc.down.pid", r.Down.PID.String()))
 	}
 	return h.inject(ctx, md), func(err error) {
 		if err != nil {
@@ -222,23 +222,23 @@ func (h *Hooks) OnReceive(r golink.ReceiveInfo, md golink.Metadata) (golink.Meta
 	}
 }
 
-func (h *Hooks) OnSpawn(p golink.ProcessInfo) {
+func (h *Hooks) OnSpawn(p grpcproc.ProcessInfo) {
 	h.spawned.Add(context.Background(), 1, metric.WithAttributes(AttrLabel.String(p.Label)))
 }
 
-func (h *Hooks) OnExit(p golink.ProcessInfo, reason string) {
+func (h *Hooks) OnExit(p grpcproc.ProcessInfo, reason string) {
 	h.exited.Add(context.Background(), 1, metric.WithAttributes(AttrLabel.String(p.Label), AttrReason.String(ReasonClass(reason))))
 }
 
-func (h *Hooks) OnDeadLetter(_, _ golink.PID, body proto.Message, reason string) {
+func (h *Hooks) OnDeadLetter(_, _ grpcproc.PID, body proto.Message, reason string) {
 	h.deadLetters.Add(context.Background(), 1, metric.WithAttributes(AttrReason.String(reason), AttrMessageType.String(typeOf(body))))
 }
 
-func (h *Hooks) OnLinkUp(peer golink.NodeID) {
+func (h *Hooks) OnLinkUp(peer grpcproc.NodeID) {
 	h.linksUp.Add(context.Background(), 1, metric.WithAttributes(AttrPeer.String(peer.Name)))
 }
 
-func (h *Hooks) OnLinkDown(peer golink.NodeID, _ error) {
+func (h *Hooks) OnLinkDown(peer grpcproc.NodeID, _ error) {
 	h.linksDown.Add(context.Background(), 1, metric.WithAttributes(AttrPeer.String(peer.Name)))
 }
 
@@ -246,7 +246,7 @@ func (h *Hooks) OnLinkDown(peer golink.NodeID, _ error) {
 // well-known reasons, "panic", or "error" for anything a process returned.
 func ReasonClass(reason string) string {
 	switch reason {
-	case golink.ReasonNormal, golink.ReasonShutdown, golink.ReasonKilled, golink.ReasonNoProc, golink.ReasonNoConnection, golink.ReasonType:
+	case grpcproc.ReasonNormal, grpcproc.ReasonShutdown, grpcproc.ReasonKilled, grpcproc.ReasonNoProc, grpcproc.ReasonNoConnection, grpcproc.ReasonType:
 		return reason
 	}
 	if strings.HasPrefix(reason, "panic:") {
@@ -258,18 +258,18 @@ func ReasonClass(reason string) string {
 // ErrorType maps a send or call error to a bounded set, for error.type.
 func ErrorType(err error) string {
 	switch {
-	case errors.Is(err, golink.ErrNoProc):
+	case errors.Is(err, grpcproc.ErrNoProc):
 		return "noproc"
-	case errors.Is(err, golink.ErrType):
+	case errors.Is(err, grpcproc.ErrType):
 		return "type"
-	case errors.Is(err, golink.ErrNoConnection):
+	case errors.Is(err, grpcproc.ErrNoConnection):
 		return "noconnection"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "timeout"
 	case errors.Is(err, context.Canceled):
 		return "canceled"
 	}
-	if _, ok := errors.AsType[*golink.RemoteError](err); ok {
+	if _, ok := errors.AsType[*grpcproc.RemoteError](err); ok {
 		return "remote"
 	}
 	return "other"

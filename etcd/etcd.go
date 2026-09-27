@@ -1,11 +1,11 @@
-// Package golinketcd keeps a golink cluster's membership in etcd. A node
+// Package grpcprocetcd keeps a grpcproc cluster's membership in etcd. A node
 // registers under a lease it keeps alive; peers resolve its address from
 // there; and when the lease ends, because the node stopped or because it
 // stopped answering, every node that watches the cluster drops its links to
 // it, firing Down{noconnection} for monitors across them.
 //
-//	cluster := golinketcd.New(etcdClient, "/golink/prod")
-//	node, err := golink.NewNode(golink.Config{
+//	cluster := grpcprocetcd.New(etcdClient, "/grpcproc/prod")
+//	node, err := grpcproc.NewNode(grpcproc.Config{
 //		Name:      "orders-1",
 //		Advertise: "10.0.0.5:9000",
 //		Resolver:  cluster, Registrar: cluster, Membership: cluster,
@@ -15,7 +15,7 @@
 // incarnation and address as JSON. A node that registers a name already
 // present replaces it: a restarted node supersedes its previous
 // incarnation, whose lease has not yet expired.
-package golinketcd
+package grpcprocetcd
 
 import (
 	"cmp"
@@ -32,11 +32,11 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/floatdrop/golink"
+	"github.com/floatdrop/grpcproc"
 )
 
 // ErrNotRegistered is returned by Resolve for a node absent from etcd.
-var ErrNotRegistered = errors.New("golinketcd: node is not registered")
+var ErrNotRegistered = errors.New("grpcprocetcd: node is not registered")
 
 // Option configures New.
 type Option func(*Cluster)
@@ -54,7 +54,7 @@ func WithRetry(d time.Duration) Option { return func(c *Cluster) { c.retry = d }
 // WithLogger sets the logger. Default slog.Default().
 func WithLogger(l *slog.Logger) Option { return func(c *Cluster) { c.log = l } }
 
-// Cluster implements golink.Resolver, golink.Registrar and golink.Membership
+// Cluster implements grpcproc.Resolver, grpcproc.Registrar and grpcproc.Membership
 // on etcd. One value serves every node of a process.
 type Cluster struct {
 	kv      clientv3.KV
@@ -67,9 +67,9 @@ type Cluster struct {
 }
 
 var (
-	_ golink.Resolver   = (*Cluster)(nil)
-	_ golink.Registrar  = (*Cluster)(nil)
-	_ golink.Membership = (*Cluster)(nil)
+	_ grpcproc.Resolver   = (*Cluster)(nil)
+	_ grpcproc.Registrar  = (*Cluster)(nil)
+	_ grpcproc.Membership = (*Cluster)(nil)
 )
 
 // New returns a Cluster keeping its keys under prefix.
@@ -99,19 +99,19 @@ type record struct {
 
 func (c *Cluster) key(name string) string { return c.prefix + name }
 
-func decode(value []byte) (golink.Member, error) {
+func decode(value []byte) (grpcproc.Member, error) {
 	var r record
 	if err := json.Unmarshal(value, &r); err != nil {
-		return golink.Member{}, fmt.Errorf("golinketcd: bad record: %w", err)
+		return grpcproc.Member{}, fmt.Errorf("grpcprocetcd: bad record: %w", err)
 	}
-	return golink.Member{Name: r.Name, Incarnation: r.Incarnation, Addr: r.Addr}, nil
+	return grpcproc.Member{Name: r.Name, Incarnation: r.Incarnation, Addr: r.Addr}, nil
 }
 
 // Resolve returns the address a node registered.
 func (c *Cluster) Resolve(ctx context.Context, node string) (string, error) {
 	resp, err := c.kv.Get(ctx, c.key(node))
 	if err != nil {
-		return "", fmt.Errorf("golinketcd: resolve %s: %w", node, err)
+		return "", fmt.Errorf("grpcprocetcd: resolve %s: %w", node, err)
 	}
 	if len(resp.Kvs) == 0 {
 		return "", fmt.Errorf("%w: %s", ErrNotRegistered, node)
@@ -121,31 +121,31 @@ func (c *Cluster) Resolve(ctx context.Context, node string) (string, error) {
 		return "", err
 	}
 	if m.Addr == "" {
-		return "", fmt.Errorf("golinketcd: %s registered without an address", node)
+		return "", fmt.Errorf("grpcprocetcd: %s registered without an address", node)
 	}
 	return m.Addr, nil
 }
 
 // Members lists the registered nodes, ordered by name. Records that cannot
 // be decoded are skipped.
-func (c *Cluster) Members(ctx context.Context) ([]golink.Member, error) {
+func (c *Cluster) Members(ctx context.Context) ([]grpcproc.Member, error) {
 	known, _, err := c.list(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]golink.Member, 0, len(known))
+	out := make([]grpcproc.Member, 0, len(known))
 	for _, name := range slices.Sorted(maps.Keys(known)) {
 		out = append(out, known[name])
 	}
 	return out, nil
 }
 
-func (c *Cluster) list(ctx context.Context) (map[string]golink.Member, int64, error) {
+func (c *Cluster) list(ctx context.Context) (map[string]grpcproc.Member, int64, error) {
 	resp, err := c.kv.Get(ctx, c.prefix, clientv3.WithPrefix())
 	if err != nil {
-		return nil, 0, fmt.Errorf("golinketcd: list: %w", err)
+		return nil, 0, fmt.Errorf("grpcprocetcd: list: %w", err)
 	}
-	known := make(map[string]golink.Member, len(resp.Kvs))
+	known := make(map[string]grpcproc.Member, len(resp.Kvs))
 	for _, kv := range resp.Kvs {
 		m, err := decode(kv.Value)
 		if err != nil {
@@ -161,7 +161,7 @@ func (c *Cluster) list(ctx context.Context) (map[string]golink.Member, int64, er
 // lost (etcd was unreachable for longer than the TTL), it registers again,
 // every retry interval, until it succeeds or withdraw is called. withdraw
 // revokes the lease, which removes the key at once.
-func (c *Cluster) Register(ctx context.Context, self golink.Member) (func(context.Context) error, error) {
+func (c *Cluster) Register(ctx context.Context, self grpcproc.Member) (func(context.Context) error, error) {
 	// Cannot fail: a struct of strings and an integer.
 	value, _ := json.Marshal(record{Name: self.Name, Incarnation: self.Incarnation, Addr: self.Addr})
 	id, err := c.publish(ctx, self.Name, value)
@@ -177,7 +177,7 @@ func (c *Cluster) Register(ctx context.Context, self golink.Member) (func(contex
 		stop()
 		<-done
 		if _, err := c.lease.Revoke(ctx, clientv3.LeaseID(lease.Load())); err != nil {
-			return fmt.Errorf("golinketcd: withdraw %s: %w", self.Name, err)
+			return fmt.Errorf("grpcprocetcd: withdraw %s: %w", self.Name, err)
 		}
 		return nil
 	}, nil
@@ -186,11 +186,11 @@ func (c *Cluster) Register(ctx context.Context, self golink.Member) (func(contex
 func (c *Cluster) publish(ctx context.Context, name string, value []byte) (clientv3.LeaseID, error) {
 	grant, err := c.lease.Grant(ctx, c.ttl)
 	if err != nil {
-		return 0, fmt.Errorf("golinketcd: register %s: %w", name, err)
+		return 0, fmt.Errorf("grpcprocetcd: register %s: %w", name, err)
 	}
 	if _, err := c.kv.Put(ctx, c.key(name), string(value), clientv3.WithLease(grant.ID)); err != nil {
 		_, _ = c.lease.Revoke(context.WithoutCancel(ctx), grant.ID)
-		return 0, fmt.Errorf("golinketcd: register %s: %w", name, err)
+		return 0, fmt.Errorf("grpcprocetcd: register %s: %w", name, err)
 	}
 	return grant.ID, nil
 }
@@ -228,21 +228,21 @@ func (c *Cluster) keep(ctx context.Context, name string, value []byte, lease *at
 // expired lease) a member down. If the watch breaks (etcd restarted, its
 // history compacted), it lists the members again, every retry interval
 // until that works, and reports what changed in between.
-func (c *Cluster) Watch(ctx context.Context) (<-chan golink.MemberEvent, error) {
+func (c *Cluster) Watch(ctx context.Context) (<-chan grpcproc.MemberEvent, error) {
 	known, rev, err := c.list(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make(chan golink.MemberEvent)
+	out := make(chan grpcproc.MemberEvent)
 	go c.follow(ctx, known, rev, out)
 	return out, nil
 }
 
-func (c *Cluster) follow(ctx context.Context, known map[string]golink.Member, rev int64, out chan<- golink.MemberEvent) {
+func (c *Cluster) follow(ctx context.Context, known map[string]grpcproc.Member, rev int64, out chan<- grpcproc.MemberEvent) {
 	defer close(out)
-	emit := func(m golink.Member, up bool) bool {
+	emit := func(m grpcproc.Member, up bool) bool {
 		select {
-		case out <- golink.MemberEvent{Member: m, Up: up}:
+		case out <- grpcproc.MemberEvent{Member: m, Up: up}:
 			return true
 		case <-ctx.Done():
 			return false
@@ -273,7 +273,7 @@ func (c *Cluster) follow(ctx context.Context, known map[string]golink.Member, re
 					}
 					continue
 				}
-				gone := golink.Member{Name: name} // incarnation 0: whichever it was
+				gone := grpcproc.Member{Name: name} // incarnation 0: whichever it was
 				if ev.PrevKv != nil {
 					if m, err := decode(ev.PrevKv.Value); err == nil {
 						gone = m

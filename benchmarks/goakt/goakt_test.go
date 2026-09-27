@@ -10,7 +10,7 @@ import (
 	"github.com/tochemey/goakt/v4/log"
 	goremote "github.com/tochemey/goakt/v4/remote"
 
-	"github.com/floatdrop/golink/benchmarks/internal/shared"
+	"github.com/floatdrop/grpcproc/benchmarks/internal/shared"
 )
 
 type sink struct {

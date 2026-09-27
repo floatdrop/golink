@@ -1,4 +1,4 @@
-package golink_test
+package grpcproc_test
 
 import (
 	"context"

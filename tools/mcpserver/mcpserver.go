@@ -1,4 +1,4 @@
-// Package mcpserver offers golink's Inspector to AI agents as MCP tools, so
+// Package mcpserver offers grpcproc's Inspector to AI agents as MCP tools, so
 // an agent can investigate a symptom ("orders are slow") by looking at the
 // cluster itself: which processes have backlogs, what they say about
 // themselves, what is exiting and why.
@@ -13,7 +13,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/floatdrop/golink/tools/client"
+	"github.com/floatdrop/grpcproc/tools/client"
 )
 
 // Options configures New.
@@ -26,7 +26,7 @@ type Options struct {
 	Timeout time.Duration
 }
 
-const instructions = `These tools inspect a golink cluster: Go processes (goroutines with a mailbox) that message each other across nodes over gRPC, Erlang style.
+const instructions = `These tools inspect a grpcproc cluster: Go processes (goroutines with a mailbox) that message each other across nodes over gRPC, Erlang style.
 
 - A process has a PID, written <node.incarnation.id>, and may have registered names. Its label (the message type by default) groups processes of one kind.
 - Its mailbox holds messages waiting to be handled. A deep mailbox, or a large oldest_wait, is a backlog: the process cannot keep up, or is stuck in a handler (state running for a long time), or waits on a call (state waiting-reply).
@@ -39,7 +39,7 @@ Start with cluster_nodes, then list_processes sorted by mailbox to find backlogs
 // New returns an MCP server over c.
 func New(c *client.Client, o Options) *mcp.Server {
 	o.Timeout = cmp.Or(o.Timeout, 5*time.Second)
-	s := mcp.NewServer(&mcp.Implementation{Name: "golink", Version: cmp.Or(o.Version, "dev")}, &mcp.ServerOptions{Instructions: instructions})
+	s := mcp.NewServer(&mcp.Implementation{Name: "grpcproc", Version: cmp.Or(o.Version, "dev")}, &mcp.ServerOptions{Instructions: instructions})
 	t := tools{c: c, timeout: o.Timeout}
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	mcp.AddTool(s, &mcp.Tool{Name: "cluster_nodes", Description: "Every node reachable from the one serving the Inspector: counters, links, and which could not be reached.", Annotations: readOnly}, t.clusterNodes)

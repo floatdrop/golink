@@ -26,11 +26,11 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/inspect"
-	"github.com/floatdrop/golink/tools/cli"
-	"github.com/floatdrop/golink/tools/client"
-	"github.com/floatdrop/golink/tools/internal/testcluster"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/inspect"
+	"github.com/floatdrop/grpcproc/tools/cli"
+	"github.com/floatdrop/grpcproc/tools/client"
+	"github.com/floatdrop/grpcproc/tools/internal/testcluster"
 )
 
 type result struct {
@@ -38,7 +38,7 @@ type result struct {
 	stdout, stderr string
 }
 
-// run runs golinkctl against the fixture's node a.
+// run runs grpcprocctl against the fixture's node a.
 func run(t *testing.T, f *testcluster.Fixture, args ...string) result {
 	t.Helper()
 	var out, errOut bytes.Buffer
@@ -87,7 +87,7 @@ func TestReadCommands(t *testing.T) {
 	has(t, ok(t, run(t, f, "inspect", "talker")), "names:", "talker", "state:          ready")
 	has(t, ok(t, run(t, f, "inspect", "--wait", "10ms", "stuck")), "inspect:", "busy", "mailbox:", "(peak")
 	has(t, ok(t, run(t, f, "inspect", f.Echo.String())), "echo")
-	has(t, ok(t, run(t, f, "dot")), "digraph golink", `label="a"`, "rounded,bold", "->")
+	has(t, ok(t, run(t, f, "dot")), "digraph grpcproc", `label="a"`, "rounded,bold", "->")
 	has(t, ok(t, run(t, f, "dot", "--cluster")), `label="a"`, `label="b"`, "echo")
 }
 
@@ -119,7 +119,7 @@ func TestWatch(t *testing.T) {
 	var got []result
 	deadline := time.After(5 * time.Second)
 	for len(got) < 2 {
-		_, _ = golink.Spawn(f.C.Node("a"), func(*golink.Process[proto.Message]) error { return nil }, golink.WithName("brief"))
+		_, _ = grpcproc.Spawn(f.C.Node("a"), func(*grpcproc.Process[proto.Message]) error { return nil }, grpcproc.WithName("brief"))
 		select {
 		case r := <-done:
 			got = append(got, r)
@@ -190,21 +190,21 @@ func TestDialFailure(t *testing.T) {
 	}
 }
 
-// A real node over TCP, reached with golinkctl's own dialing and $GOLINK_ADDR.
+// A real node over TCP, reached with grpcprocctl's own dialing and $GRPCPROC_ADDR.
 func TestRealDial(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	srv := grpc.NewServer()
-	n, _ := golink.NewNode(golink.Config{Name: "solo", Resolver: golink.StaticResolver{}})
+	n, _ := grpcproc.NewNode(grpcproc.Config{Name: "solo", Resolver: grpcproc.StaticResolver{}})
 	n.Register(srv)
 	inspect.New(n).Register(srv)
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(func() { _ = n.Stop(context.Background()); srv.Stop() })
 	var out bytes.Buffer
 	code := cli.Main(t.Context(), []string{"--plaintext", "node"}, cli.Env{Stdout: &out, Getenv: func(k string) string {
-		if k == "GOLINK_ADDR" {
+		if k == "GRPCPROC_ADDR" {
 			return ln.Addr().String()
 		}
 		return ""
@@ -235,7 +235,7 @@ func TestTLSCredentials(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 		code := cli.Main(ctx, append(append([]string{"--addr", "127.0.0.1:1", "--timeout", "100ms"}, tc.args...), "node"), cli.Env{Stderr: &errOut, Getenv: func(string) string { return "" }})
 		cancel()
-		if code != 1 || (tc.fail != "" && !strings.Contains(errOut.String(), tc.fail)) || (tc.fail == "" && strings.Contains(errOut.String(), "golinkctl: ")) {
+		if code != 1 || (tc.fail != "" && !strings.Contains(errOut.String(), tc.fail)) || (tc.fail == "" && strings.Contains(errOut.String(), "grpcprocctl: ")) {
 			t.Errorf("%v: %d %s", tc.args, code, errOut.String())
 		}
 	}
@@ -355,7 +355,7 @@ func TestDialErrors(t *testing.T) {
 		{"--cert", junk, "--key", junk, "node"},         // not a key pair
 	} {
 		var errOut bytes.Buffer
-		if code := cli.Main(t.Context(), args, cli.Env{Stderr: &errOut}); code != 1 || !strings.HasPrefix(errOut.String(), "golinkctl: ") {
+		if code := cli.Main(t.Context(), args, cli.Env{Stderr: &errOut}); code != 1 || !strings.HasPrefix(errOut.String(), "grpcprocctl: ") {
 			t.Errorf("%q: %d %s", args, code, errOut.String())
 		}
 	}
@@ -364,7 +364,7 @@ func TestDialErrors(t *testing.T) {
 // stamped is build info as `go install …@version` leaves it.
 func stamped(v string) func() (*debug.BuildInfo, bool) {
 	return func() (*debug.BuildInfo, bool) {
-		return &debug.BuildInfo{Main: debug.Module{Path: "github.com/floatdrop/golink/tools", Version: v}}, true
+		return &debug.BuildInfo{Main: debug.Module{Path: "github.com/floatdrop/grpcproc/tools", Version: v}}, true
 	}
 }
 
@@ -382,26 +382,26 @@ func TestVersion(t *testing.T) {
 		}
 		return strings.TrimSpace(out.String())
 	}
-	if got := versionOf(stamped("v0.0.2")); got != "golinkctl v0.0.2" {
+	if got := versionOf(stamped("v0.0.2")); got != "grpcprocctl v0.0.2" {
 		t.Fatal(got)
 	}
 	// Built from a checkout, or without build info: dev.
-	if got := versionOf(stamped("(devel)")); got != "golinkctl dev" {
+	if got := versionOf(stamped("(devel)")); got != "grpcprocctl dev" {
 		t.Fatal(got)
 	}
-	if got := versionOf(func() (*debug.BuildInfo, bool) { return nil, false }); got != "golinkctl dev" {
+	if got := versionOf(func() (*debug.BuildInfo, bool) { return nil, false }); got != "grpcprocctl dev" {
 		t.Fatal(got)
 	}
 	// -ldflags -X overrides the build info.
 	cli.Version = "v1.2.3-custom"
 	defer func() { cli.Version = "" }()
-	if got := versionOf(stamped("v0.0.2")); got != "golinkctl v1.2.3-custom" {
+	if got := versionOf(stamped("v0.0.2")); got != "grpcprocctl v1.2.3-custom" {
 		t.Fatal(got)
 	}
 	// This binary's own build info, read the default way.
 	cli.Version = ""
 	var out bytes.Buffer
-	if code := cli.Main(t.Context(), []string{"--version"}, cli.Env{Stdout: &out}); code != 0 || !strings.HasPrefix(out.String(), "golinkctl ") {
+	if code := cli.Main(t.Context(), []string{"--version"}, cli.Env{Stdout: &out}); code != 0 || !strings.HasPrefix(out.String(), "grpcprocctl ") {
 		t.Fatalf("%d %q", code, out.String())
 	}
 }

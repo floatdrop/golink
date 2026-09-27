@@ -1,4 +1,4 @@
-package golink
+package grpcproc
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	golinkv1 "github.com/floatdrop/golink/proto/golink/v1"
+	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
 // Protocol version carried in the handshake. Bumped on incompatible change.
@@ -26,9 +26,9 @@ const protoVersion = 1
 const maxFrame = 1 << 20
 
 const (
-	mdNode        = "golink-node"
-	mdIncarnation = "golink-incarnation"
-	mdVersion     = "golink-version"
+	mdNode        = "grpcproc-node"
+	mdIncarnation = "grpcproc-incarnation"
+	mdVersion     = "grpcproc-version"
 )
 
 // Topology: a node opens one Link stream to each peer it sends to and only
@@ -67,9 +67,9 @@ func (s *linkStats) fill(li *LinkInfo) {
 type outLink struct {
 	peer     NodeID
 	cc       *grpc.ClientConn
-	stream   grpc.BidiStreamingClient[golinkv1.Frame, golinkv1.Frame]
+	stream   grpc.BidiStreamingClient[grpcprocv1.Frame, grpcprocv1.Frame]
 	cancel   context.CancelFunc
-	q        *queue[*golinkv1.Envelope]
+	q        *queue[*grpcprocv1.Envelope]
 	done     chan struct{}
 	once     sync.Once
 	closing  atomic.Bool
@@ -78,7 +78,7 @@ type outLink struct {
 	linkStats
 }
 
-func (l *outLink) send(env *golinkv1.Envelope) error {
+func (l *outLink) send(env *grpcprocv1.Envelope) error {
 	if !l.q.push(env) {
 		return &LinkError{Peer: l.peer.Name, Err: ErrNoConnection}
 	}
@@ -115,7 +115,7 @@ func (l *outLink) writeLoop(n *Node) {
 		// load, many envelopes share one gRPC message.
 		for batch := l.q.drain(); len(batch) > 0; {
 			k, body := frameOf(batch)
-			if err := l.stream.Send(&golinkv1.Frame{Envelopes: batch[:k]}); err != nil {
+			if err := l.stream.Send(&grpcprocv1.Frame{Envelopes: batch[:k]}); err != nil {
 				n.connLost(l.peer.Name, l, nil, err, false)
 				return
 			}
@@ -233,7 +233,7 @@ func (n *Node) dial(peer string) (*outLink, error) {
 		mdIncarnation, strconv.FormatUint(n.id.Incarnation, 10),
 		mdVersion, strconv.Itoa(protoVersion),
 	)
-	stream, err := golinkv1.NewNodeClient(cc).Link(sctx)
+	stream, err := grpcprocv1.NewNodeClient(cc).Link(sctx)
 	var inc uint64
 	if err == nil {
 		inc, err = handshake(ctx, peer, stream)
@@ -249,7 +249,7 @@ func (n *Node) dial(peer string) (*outLink, error) {
 		cc:          cc,
 		stream:      stream,
 		cancel:      scancel,
-		q:           newQueue[*golinkv1.Envelope](false),
+		q:           newQueue[*grpcprocv1.Envelope](false),
 		done:        make(chan struct{}),
 		drained:     make(chan struct{}),
 		recvDone:    make(chan struct{}),
@@ -264,9 +264,9 @@ func (n *Node) dial(peer string) (*outLink, error) {
 
 // handshake waits for the server's Hello within ctx and checks it names the
 // peer we meant to reach.
-func handshake(ctx context.Context, peer string, stream grpc.BidiStreamingClient[golinkv1.Frame, golinkv1.Frame]) (uint64, error) {
+func handshake(ctx context.Context, peer string, stream grpc.BidiStreamingClient[grpcprocv1.Frame, grpcprocv1.Frame]) (uint64, error) {
 	type res struct {
-		f   *golinkv1.Frame
+		f   *grpcprocv1.Frame
 		err error
 	}
 	ch := make(chan res, 1)
@@ -279,22 +279,22 @@ func handshake(ctx context.Context, peer string, stream grpc.BidiStreamingClient
 		if r.err != nil {
 			return 0, r.err
 		}
-		var h *golinkv1.Hello
-		if envs := r.f.GetEnvelopes(); len(envs) == 1 && envs[0].GetKind() == golinkv1.Kind_KIND_HELLO {
+		var h *grpcprocv1.Hello
+		if envs := r.f.GetEnvelopes(); len(envs) == 1 && envs[0].GetKind() == grpcprocv1.Kind_KIND_HELLO {
 			h = envs[0].GetHello()
 		}
 		if h == nil {
-			return 0, errors.New("golink: handshake: expected Hello")
+			return 0, errors.New("grpcproc: handshake: expected Hello")
 		}
 		if h.GetVersion() != protoVersion {
-			return 0, fmt.Errorf("golink: handshake: peer speaks protocol %d, this node %d", h.GetVersion(), protoVersion)
+			return 0, fmt.Errorf("grpcproc: handshake: peer speaks protocol %d, this node %d", h.GetVersion(), protoVersion)
 		}
 		if h.GetNode() != peer {
-			return 0, fmt.Errorf("golink: handshake: dialed %q but reached %q", peer, h.GetNode())
+			return 0, fmt.Errorf("grpcproc: handshake: dialed %q but reached %q", peer, h.GetNode())
 		}
 		return h.GetIncarnation(), nil
 	case <-ctx.Done():
-		return 0, fmt.Errorf("golink: handshake: %w", ctx.Err())
+		return 0, fmt.Errorf("grpcproc: handshake: %w", ctx.Err())
 	}
 }
 
@@ -329,7 +329,7 @@ func (l *inLink) close() {
 
 // deliver dispatches a frame's envelopes in order, unless the link has
 // closed; it reports whether it did.
-func (l *inLink) deliver(n *Node, f *golinkv1.Frame) bool {
+func (l *inLink) deliver(n *Node, f *grpcprocv1.Frame) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.stopped {
@@ -346,7 +346,7 @@ func (l *inLink) deliver(n *Node, f *golinkv1.Frame) bool {
 
 // frameOf says how many leading envelopes of batch fit in one frame (at
 // least one) and how many message-body bytes they carry.
-func frameOf(batch []*golinkv1.Envelope) (n, body int) {
+func frameOf(batch []*grpcprocv1.Envelope) (n, body int) {
 	size := 0
 	for i, env := range batch {
 		b := bodySize(env)
@@ -363,10 +363,10 @@ func frameOf(batch []*golinkv1.Envelope) (n, body int) {
 	return len(batch), body
 }
 
-func bodySize(env *golinkv1.Envelope) int { return len(env.GetBody()) }
+func bodySize(env *grpcprocv1.Envelope) int { return len(env.GetBody()) }
 
-// Link implements golink.v1.Node.
-func (n *Node) Link(stream grpc.BidiStreamingServer[golinkv1.Frame, golinkv1.Frame]) error {
+// Link implements grpcproc.v1.Node.
+func (n *Node) Link(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcprocv1.Frame]) error {
 	ctx := stream.Context()
 	md, _ := metadata.FromIncomingContext(ctx)
 	peer := NodeID{Name: first(md, mdNode)}
@@ -374,17 +374,17 @@ func (n *Node) Link(stream grpc.BidiStreamingServer[golinkv1.Frame, golinkv1.Fra
 	version, _ := strconv.Atoi(first(md, mdVersion))
 	switch {
 	case version != protoVersion:
-		return status.Errorf(codes.FailedPrecondition, "golink: protocol version %d, this node speaks %d", version, protoVersion)
+		return status.Errorf(codes.FailedPrecondition, "grpcproc: protocol version %d, this node speaks %d", version, protoVersion)
 	case peer.Name == "" || peer.Name == n.id.Name:
-		return status.Errorf(codes.InvalidArgument, "golink: bad node name %q", peer.Name)
+		return status.Errorf(codes.InvalidArgument, "grpcproc: bad node name %q", peer.Name)
 	}
 	if n.cfg.Authorize != nil {
 		if err := n.cfg.Authorize(ctx, peer); err != nil {
 			n.log.Warn("rejected peer", "peer", peer, "err", err)
-			return status.Errorf(codes.PermissionDenied, "golink: %v", err)
+			return status.Errorf(codes.PermissionDenied, "grpcproc: %v", err)
 		}
 	}
-	if err := stream.Send(&golinkv1.Frame{Envelopes: []*golinkv1.Envelope{{Kind: golinkv1.Kind_KIND_HELLO, Hello: &golinkv1.Hello{
+	if err := stream.Send(&grpcprocv1.Frame{Envelopes: []*grpcprocv1.Envelope{{Kind: grpcprocv1.Kind_KIND_HELLO, Hello: &grpcprocv1.Hello{
 		Node: n.id.Name, Incarnation: n.id.Incarnation, Version: protoVersion,
 	}}}}); err != nil {
 		return err

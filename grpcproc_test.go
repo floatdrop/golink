@@ -1,4 +1,4 @@
-package golink_test
+package grpcproc_test
 
 import (
 	"context"
@@ -11,14 +11,14 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/golinktest"
-	"github.com/floatdrop/golink/internal/testpb"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/grpcproctest"
+	"github.com/floatdrop/grpcproc/internal/testpb"
 )
 
 // echo replies Pong{N+1} to Ping messages and calls, errors on N < 0, stops
 // on N == 0 with "normal", and crashes with "boom" on N == -100.
-func echo(p *golink.Process[*testpb.Ping]) error {
+func echo(p *grpcproc.Process[*testpb.Ping]) error {
 	for {
 		m, err := p.Receive()
 		if err != nil {
@@ -45,10 +45,10 @@ func echo(p *golink.Process[*testpb.Ping]) error {
 }
 
 // collector is an untyped process that forwards everything it receives to a channel.
-func collector(t testing.TB, n *golink.Node) (golink.Addr[proto.Message], <-chan golink.Msg[proto.Message]) {
+func collector(t testing.TB, n *grpcproc.Node) (grpcproc.Addr[proto.Message], <-chan grpcproc.Msg[proto.Message]) {
 	t.Helper()
-	ch := make(chan golink.Msg[proto.Message], 4096)
-	addr, err := golink.Spawn[proto.Message](n, func(p *golink.Process[proto.Message]) error {
+	ch := make(chan grpcproc.Msg[proto.Message], 4096)
+	addr, err := grpcproc.Spawn[proto.Message](n, func(p *grpcproc.Process[proto.Message]) error {
 		for {
 			m, err := p.Receive()
 			if err != nil {
@@ -56,7 +56,7 @@ func collector(t testing.TB, n *golink.Node) (golink.Addr[proto.Message], <-chan
 			}
 			ch <- m
 		}
-	}, golink.WithLabel("collector"))
+	}, grpcproc.WithLabel("collector"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,11 +64,11 @@ func collector(t testing.TB, n *golink.Node) (golink.Addr[proto.Message], <-chan
 }
 
 // watcher is a process that monitors whatever PIDs it is sent and forwards Downs.
-func watcher(t testing.TB, n *golink.Node) (*golink.Process[proto.Message], <-chan golink.Msg[proto.Message]) {
+func watcher(t testing.TB, n *grpcproc.Node) (*grpcproc.Process[proto.Message], <-chan grpcproc.Msg[proto.Message]) {
 	t.Helper()
-	ch := make(chan golink.Msg[proto.Message], 64)
-	ready := make(chan *golink.Process[proto.Message], 1)
-	_, err := golink.Spawn[proto.Message](n, func(p *golink.Process[proto.Message]) error {
+	ch := make(chan grpcproc.Msg[proto.Message], 64)
+	ready := make(chan *grpcproc.Process[proto.Message], 1)
+	_, err := grpcproc.Spawn[proto.Message](n, func(p *grpcproc.Process[proto.Message]) error {
 		ready <- p
 		for {
 			m, err := p.Receive()
@@ -84,14 +84,14 @@ func watcher(t testing.TB, n *golink.Node) (*golink.Process[proto.Message], <-ch
 	return <-ready, ch
 }
 
-func recv[M proto.Message](t testing.TB, ch <-chan golink.Msg[M]) golink.Msg[M] {
+func recv[M proto.Message](t testing.TB, ch <-chan grpcproc.Msg[M]) grpcproc.Msg[M] {
 	t.Helper()
 	select {
 	case m := <-ch:
 		return m
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for message")
-		return golink.Msg[M]{}
+		return grpcproc.Msg[M]{}
 	}
 }
 
@@ -102,40 +102,40 @@ func ctx(t testing.TB) context.Context {
 }
 
 type countingHooks struct {
-	golink.NopHooks
+	grpcproc.NopHooks
 	spawns, exits, sends, receives, deadLetters, linkUps, linkDowns atomic.Int64
 	lastDead                                                        atomic.Pointer[string]
 }
 
-func (h *countingHooks) OnSpawn(golink.ProcessInfo)        { h.spawns.Add(1) }
-func (h *countingHooks) OnExit(golink.ProcessInfo, string) { h.exits.Add(1) }
-func (h *countingHooks) OnSend(_ golink.SendInfo, md golink.Metadata) (golink.Metadata, golink.Done) {
+func (h *countingHooks) OnSpawn(grpcproc.ProcessInfo)        { h.spawns.Add(1) }
+func (h *countingHooks) OnExit(grpcproc.ProcessInfo, string) { h.exits.Add(1) }
+func (h *countingHooks) OnSend(_ grpcproc.SendInfo, md grpcproc.Metadata) (grpcproc.Metadata, grpcproc.Done) {
 	h.sends.Add(1)
 	return md, nil
 }
-func (h *countingHooks) OnReceive(_ golink.ReceiveInfo, md golink.Metadata) (golink.Metadata, golink.Done) {
+func (h *countingHooks) OnReceive(_ grpcproc.ReceiveInfo, md grpcproc.Metadata) (grpcproc.Metadata, grpcproc.Done) {
 	h.receives.Add(1)
 	return md, nil
 }
-func (h *countingHooks) OnDeadLetter(_, _ golink.PID, _ proto.Message, reason string) {
+func (h *countingHooks) OnDeadLetter(_, _ grpcproc.PID, _ proto.Message, reason string) {
 	h.deadLetters.Add(1)
 	h.lastDead.Store(&reason)
 }
-func (h *countingHooks) OnLinkUp(golink.NodeID)          { h.linkUps.Add(1) }
-func (h *countingHooks) OnLinkDown(golink.NodeID, error) { h.linkDowns.Add(1) }
+func (h *countingHooks) OnLinkUp(grpcproc.NodeID)          { h.linkUps.Add(1) }
+func (h *countingHooks) OnLinkDown(grpcproc.NodeID, error) { h.linkDowns.Add(1) }
 
 func TestLocalTypedSendAndCall(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	a := c.Node("a")
-	e, _ := golink.Spawn(a, echo)
+	e, _ := grpcproc.Spawn(a, echo)
 	// Sending from outside any process: the Pong reply has nowhere to go, so
 	// it is a dead letter, not an error.
 	if err := a.Send(e, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	// From inside a process the reply comes back to it.
-	gotc := make(chan golink.Msg[proto.Message], 1)
-	_, err := golink.Spawn[proto.Message](a, func(p *golink.Process[proto.Message]) error {
+	gotc := make(chan grpcproc.Msg[proto.Message], 1)
+	_, err := grpcproc.Spawn[proto.Message](a, func(p *grpcproc.Process[proto.Message]) error {
 		if err := p.Send(e, &testpb.Ping{N: 41}); err != nil {
 			return err
 		}
@@ -157,15 +157,15 @@ func TestLocalTypedSendAndCall(t *testing.T) {
 	if pong, ok := got.Body.(*testpb.Pong); !ok || pong.N != 42 || got.From != e.PID() {
 		t.Fatalf("got %+v", got)
 	}
-	if _, err := a.Call[*testpb.Ping](ctx(t), e, &testpb.Ping{N: 1}); !errors.Is(err, golink.ErrType) {
+	if _, err := a.Call[*testpb.Ping](ctx(t), e, &testpb.Ping{N: 1}); !errors.Is(err, grpcproc.ErrType) {
 		t.Fatalf("reply typed wrongly should be ErrType, got %v", err)
 	}
 }
 
 func TestRemoteByPIDAndName(t *testing.T) {
-	c := golinktest.New(t, "a", "b")
+	c := grpcproctest.New(t, "a", "b")
 	a, b := c.Node("a"), c.Node("b")
-	e, err := golink.Spawn(b, echo, golink.WithName("echo"))
+	e, err := grpcproc.Spawn(b, echo, grpcproc.WithName("echo"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,12 +178,12 @@ func TestRemoteByPIDAndName(t *testing.T) {
 	}
 	_ = col
 	_ = ch
-	r, err := a.CallTo[*testpb.Pong](ctx(t), golink.Named[*testpb.Ping]("b", "echo"), &testpb.Ping{N: 9})
+	r, err := a.CallTo[*testpb.Pong](ctx(t), grpcproc.Named[*testpb.Ping]("b", "echo"), &testpb.Ping{N: 9})
 	if err != nil || r.N != 10 {
 		t.Fatalf("call by name: %v %v", r, err)
 	}
 	// A typed call from inside a process, reply type explicit, request inferred.
-	_, err = golink.Spawn[proto.Message](a, func(p *golink.Process[proto.Message]) error {
+	_, err = grpcproc.Spawn[proto.Message](a, func(p *grpcproc.Process[proto.Message]) error {
 		r, err := p.Call[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 99})
 		if err != nil || r.N != 100 {
 			t.Errorf("process call: %v %v", r, err)
@@ -195,14 +195,14 @@ func TestRemoteByPIDAndName(t *testing.T) {
 	}
 	// Errors from handlers cross the wire.
 	_, err = a.CallTo[*testpb.Pong](ctx(t), e, &testpb.Ping{N: -1})
-	if re, ok := errors.AsType[*golink.RemoteError](err); !ok || re.Msg != "negative: -1" {
+	if re, ok := errors.AsType[*grpcproc.RemoteError](err); !ok || re.Msg != "negative: -1" {
 		t.Fatalf("want remote error, got %v", err)
 	}
 	// Unknown process, by PID and by name.
-	if _, err = a.CallTo[*testpb.Pong](ctx(t), golink.PID{Node: "b", Incarnation: e.PID().Incarnation, ID: 9999}, &testpb.Ping{}); !errors.Is(err, golink.ErrNoProc) {
+	if _, err = a.CallTo[*testpb.Pong](ctx(t), grpcproc.PID{Node: "b", Incarnation: e.PID().Incarnation, ID: 9999}, &testpb.Ping{}); !errors.Is(err, grpcproc.ErrNoProc) {
 		t.Fatalf("want ErrNoProc, got %v", err)
 	}
-	if _, err = a.CallTo[*testpb.Pong](ctx(t), golink.Named[*testpb.Ping]("b", "nope"), &testpb.Ping{}); !errors.Is(err, golink.ErrNoProc) {
+	if _, err = a.CallTo[*testpb.Pong](ctx(t), grpcproc.Named[*testpb.Ping]("b", "nope"), &testpb.Ping{}); !errors.Is(err, grpcproc.ErrNoProc) {
 		t.Fatalf("want ErrNoProc by name, got %v", err)
 	}
 	if peers := a.Peers(); len(peers) != 1 || peers[0] != "b" {
@@ -212,16 +212,16 @@ func TestRemoteByPIDAndName(t *testing.T) {
 
 func TestTypeMismatchIsDeadLetter(t *testing.T) {
 	h := &countingHooks{}
-	c := golinktest.NewWith(t, []golinktest.Option{golinktest.WithHooks(h)}, "a", "b")
+	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithHooks(h)}, "a", "b")
 	a, b := c.Node("a"), c.Node("b")
-	e, _ := golink.Spawn(b, echo, golink.WithName("echo"))
+	e, _ := grpcproc.Spawn(b, echo, grpcproc.WithName("echo"))
 
 	// A remote sender addresses the process with the wrong type.
-	wrong := golink.Named[*testpb.Pong]("b", "echo")
+	wrong := grpcproc.Named[*testpb.Pong]("b", "echo")
 	if err := a.SendTo(wrong, &testpb.Pong{N: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.CallTo[*testpb.Pong](ctx(t), wrong, &testpb.Pong{}); !errors.Is(err, golink.ErrType) {
+	if _, err := a.CallTo[*testpb.Pong](ctx(t), wrong, &testpb.Pong{}); !errors.Is(err, grpcproc.ErrType) {
 		t.Fatalf("want ErrType, got %v", err)
 	}
 	// Locally too, through an untyped address.
@@ -235,7 +235,7 @@ func TestTypeMismatchIsDeadLetter(t *testing.T) {
 	if got := h.deadLetters.Load(); got != 3 {
 		t.Fatalf("dead letters = %d, want 3", got)
 	}
-	if r := h.lastDead.Load(); r == nil || *r != golink.ReasonType {
+	if r := h.lastDead.Load(); r == nil || *r != grpcproc.ReasonType {
 		t.Fatalf("reason %v", r)
 	}
 	if b.Info().DeadLetters != 3 {
@@ -248,11 +248,11 @@ func TestTypeMismatchIsDeadLetter(t *testing.T) {
 }
 
 func TestRemoteOrdering(t *testing.T) {
-	c := golinktest.New(t, "a", "b")
+	c := grpcproctest.New(t, "a", "b")
 	a, b := c.Node("a"), c.Node("b")
 	col, ch := collector(t, b)
 	const N = 20000
-	_, _ = golink.Spawn[proto.Message](a, func(p *golink.Process[proto.Message]) error {
+	_, _ = grpcproc.Spawn[proto.Message](a, func(p *grpcproc.Process[proto.Message]) error {
 		for i := range N {
 			if err := p.Send(col, proto.Message(&testpb.Ping{N: int64(i)})); err != nil {
 				return err
@@ -268,23 +268,23 @@ func TestRemoteOrdering(t *testing.T) {
 }
 
 func TestMonitorReasons(t *testing.T) {
-	c := golinktest.New(t, "a", "b")
+	c := grpcproctest.New(t, "a", "b")
 	a, b := c.Node("a"), c.Node("b")
 	w, ch := watcher(t, a)
 
 	cases := []struct {
 		name   string
-		kill   func(e golink.Addr[*testpb.Ping])
+		kill   func(e grpcproc.Addr[*testpb.Ping])
 		reason string
 	}{
-		{"normal", func(e golink.Addr[*testpb.Ping]) { _ = w.Send(e, &testpb.Ping{N: 0}) }, golink.ReasonNormal},
-		{"error", func(e golink.Addr[*testpb.Ping]) { _ = w.Send(e, &testpb.Ping{N: -100}) }, "boom"},
-		{"panic", func(e golink.Addr[*testpb.Ping]) { _ = w.Send(e, &testpb.Ping{N: -200}) }, "panic: kaboom"},
-		{"exit", func(e golink.Addr[*testpb.Ping]) { _ = w.Exit(e, golink.ReasonKilled) }, golink.ReasonKilled},
+		{"normal", func(e grpcproc.Addr[*testpb.Ping]) { _ = w.Send(e, &testpb.Ping{N: 0}) }, grpcproc.ReasonNormal},
+		{"error", func(e grpcproc.Addr[*testpb.Ping]) { _ = w.Send(e, &testpb.Ping{N: -100}) }, "boom"},
+		{"panic", func(e grpcproc.Addr[*testpb.Ping]) { _ = w.Send(e, &testpb.Ping{N: -200}) }, "panic: kaboom"},
+		{"exit", func(e grpcproc.Addr[*testpb.Ping]) { _ = w.Exit(e, grpcproc.ReasonKilled) }, grpcproc.ReasonKilled},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			e, _ := golink.Spawn(b, echo)
+			e, _ := grpcproc.Spawn(b, echo)
 			ref := w.Monitor(e)
 			// A call round-trips on the same link, so the monitor is installed first.
 			if _, err := w.Call[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); err != nil {
@@ -298,24 +298,24 @@ func TestMonitorReasons(t *testing.T) {
 		})
 	}
 	t.Run("noproc", func(t *testing.T) {
-		ref := w.Monitor(golink.PID{Node: "b", Incarnation: b.ID().Incarnation, ID: 424242})
+		ref := w.Monitor(grpcproc.PID{Node: "b", Incarnation: b.ID().Incarnation, ID: 424242})
 		m := recv(t, ch)
-		if m.Down == nil || m.Down.Ref != ref || m.Down.Reason != golink.ReasonNoProc {
+		if m.Down == nil || m.Down.Ref != ref || m.Down.Reason != grpcproc.ReasonNoProc {
 			t.Fatalf("got %+v", m.Down)
 		}
 	})
 	t.Run("stale incarnation", func(t *testing.T) {
-		e, _ := golink.Spawn(b, echo)
+		e, _ := grpcproc.Spawn(b, echo)
 		old := e.PID()
 		old.Incarnation--
 		w.Monitor(old)
-		if m := recv(t, ch); m.Down == nil || m.Down.Reason != golink.ReasonNoProc {
+		if m := recv(t, ch); m.Down == nil || m.Down.Reason != grpcproc.ReasonNoProc {
 			t.Fatalf("got %+v", m.Down)
 		}
 	})
 	t.Run("by name", func(t *testing.T) {
-		e, _ := golink.Spawn(b, echo, golink.WithName("named"))
-		ref := w.Monitor(golink.Name{Node: "b", Name: "named"})
+		e, _ := grpcproc.Spawn(b, echo, grpcproc.WithName("named"))
+		ref := w.Monitor(grpcproc.Name{Node: "b", Name: "named"})
 		if _, err := w.Call[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); err != nil {
 			t.Fatal(err)
 		}
@@ -325,24 +325,24 @@ func TestMonitorReasons(t *testing.T) {
 		}
 	})
 	t.Run("by name, node lost", func(t *testing.T) {
-		e, _ := golink.Spawn(b, echo, golink.WithName("lost"))
-		ref := w.Monitor(golink.Name{Node: "b", Name: "lost"})
+		e, _ := grpcproc.Spawn(b, echo, grpcproc.WithName("lost"))
+		ref := w.Monitor(grpcproc.Name{Node: "b", Name: "lost"})
 		if _, err := w.Call[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); err != nil {
 			t.Fatal(err)
 		}
 		a.Disconnect("b")
 		// Which process held the name is unknown here: only the name is.
-		if m := recv(t, ch); m.Down == nil || m.Down.Ref != ref || m.Down.Name != "lost" || m.Down.PID != (golink.PID{Node: "b"}) || m.Down.Reason != golink.ReasonNoConnection {
+		if m := recv(t, ch); m.Down == nil || m.Down.Ref != ref || m.Down.Name != "lost" || m.Down.PID != (grpcproc.PID{Node: "b"}) || m.Down.Reason != grpcproc.ReasonNoConnection {
 			t.Fatalf("got %+v", m.Down)
 		}
 	})
 }
 
 func TestDemonitor(t *testing.T) {
-	c := golinktest.New(t, "a", "b")
+	c := grpcproctest.New(t, "a", "b")
 	a, b := c.Node("a"), c.Node("b")
 	w, ch := watcher(t, a)
-	e, _ := golink.Spawn(b, echo)
+	e, _ := grpcproc.Spawn(b, echo)
 	ref := w.Monitor(e)
 	w.Demonitor(ref)
 	_ = w.Send(e, &testpb.Ping{N: 0})
@@ -355,17 +355,17 @@ func TestDemonitor(t *testing.T) {
 
 func TestKillAndRestart(t *testing.T) {
 	h := &countingHooks{}
-	c := golinktest.NewWith(t, []golinktest.Option{golinktest.WithHooks(h)}, "a", "b")
+	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithHooks(h)}, "a", "b")
 	a, b := c.Node("a"), c.Node("b")
 	w, ch := watcher(t, a)
 
-	silent, _ := golink.Spawn[proto.Message](b, func(p *golink.Process[proto.Message]) error {
+	silent, _ := grpcproc.Spawn[proto.Message](b, func(p *grpcproc.Process[proto.Message]) error {
 		for {
 			if _, err := p.Receive(); err != nil {
 				return err
 			}
 		}
-	}, golink.WithName("silent"))
+	}, grpcproc.WithName("silent"))
 	w.Monitor(silent)
 	callErr := make(chan error, 1)
 	go func() {
@@ -378,16 +378,16 @@ func TestKillAndRestart(t *testing.T) {
 
 	select {
 	case err := <-callErr:
-		if !errors.Is(err, golink.ErrNoConnection) {
+		if !errors.Is(err, grpcproc.ErrNoConnection) {
 			t.Fatalf("want ErrNoConnection, got %v", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("pending call not failed on node down")
 	}
-	if m := recv(t, ch); m.Down == nil || m.Down.PID != silent.PID() || m.Down.Reason != golink.ReasonNoConnection {
+	if m := recv(t, ch); m.Down == nil || m.Down.PID != silent.PID() || m.Down.Reason != grpcproc.ReasonNoConnection {
 		t.Fatalf("got %+v", m.Down)
 	}
-	if err := a.SendTo(silent, &testpb.Ping{}); !errors.Is(err, golink.ErrNoConnection) {
+	if err := a.SendTo(silent, &testpb.Ping{}); !errors.Is(err, grpcproc.ErrNoConnection) {
 		t.Fatalf("send to dead node: %v", err)
 	}
 
@@ -395,14 +395,14 @@ func TestKillAndRestart(t *testing.T) {
 	if b2.ID().Incarnation == b.ID().Incarnation {
 		t.Fatal("incarnation did not change")
 	}
-	e, _ := golink.Spawn(b2, echo, golink.WithName("echo"))
-	if r, err := a.CallTo[*testpb.Pong](ctx(t), golink.Named[*testpb.Ping]("b", "echo"), &testpb.Ping{N: 5}); err != nil || r.N != 6 {
+	e, _ := grpcproc.Spawn(b2, echo, grpcproc.WithName("echo"))
+	if r, err := a.CallTo[*testpb.Pong](ctx(t), grpcproc.Named[*testpb.Ping]("b", "echo"), &testpb.Ping{N: 5}); err != nil || r.N != 6 {
 		t.Fatalf("after restart: %v %v", r, err)
 	}
 	// The old PID names a process of the old incarnation: noproc, never a
 	// delivery to whatever now has that id.
 	w.Monitor(silent)
-	if m := recv(t, ch); m.Down == nil || m.Down.Reason != golink.ReasonNoProc {
+	if m := recv(t, ch); m.Down == nil || m.Down.Reason != grpcproc.ReasonNoProc {
 		t.Fatalf("stale pid: %+v", m.Down)
 	}
 	_ = e
@@ -412,19 +412,19 @@ func TestKillAndRestart(t *testing.T) {
 }
 
 func TestPartitionAndHeal(t *testing.T) {
-	c := golinktest.New(t, "a", "b")
+	c := grpcproctest.New(t, "a", "b")
 	a, b := c.Node("a"), c.Node("b")
 	w, ch := watcher(t, a)
-	e, _ := golink.Spawn(b, echo, golink.WithName("echo"))
+	e, _ := grpcproc.Spawn(b, echo, grpcproc.WithName("echo"))
 	w.Monitor(e)
 	if _, err := w.Call[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	c.Partition("a", "b")
-	if m := recv(t, ch); m.Down == nil || m.Down.Reason != golink.ReasonNoConnection {
+	if m := recv(t, ch); m.Down == nil || m.Down.Reason != grpcproc.ReasonNoConnection {
 		t.Fatalf("got %+v", m.Down)
 	}
-	if _, err := a.CallTo[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); !errors.Is(err, golink.ErrNoConnection) {
+	if _, err := a.CallTo[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); !errors.Is(err, grpcproc.ErrNoConnection) {
 		t.Fatalf("partitioned call: %v", err)
 	}
 	c.Heal("a", "b")
@@ -442,32 +442,32 @@ func TestPartitionAndHeal(t *testing.T) {
 }
 
 func TestGracefulStopSendsShutdown(t *testing.T) {
-	c := golinktest.New(t, "a", "b")
+	c := grpcproctest.New(t, "a", "b")
 	a, b := c.Node("a"), c.Node("b")
 	w, ch := watcher(t, a)
-	e, _ := golink.Spawn(b, echo)
+	e, _ := grpcproc.Spawn(b, echo)
 	w.Monitor(e)
 	if _, err := w.Call[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	c.Stop("b")
-	if m := recv(t, ch); m.Down == nil || m.Down.Reason != golink.ReasonShutdown {
+	if m := recv(t, ch); m.Down == nil || m.Down.Reason != grpcproc.ReasonShutdown {
 		t.Fatalf("got %+v", m.Down)
 	}
 }
 
 func TestLeftoverCallsFailFast(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	a := c.Node("a")
 	block := make(chan struct{})
-	e, _ := golink.Spawn[*testpb.Ping](a, func(p *golink.Process[*testpb.Ping]) error { <-block; return nil })
+	e, _ := grpcproc.Spawn[*testpb.Ping](a, func(p *grpcproc.Process[*testpb.Ping]) error { <-block; return nil })
 	errc := make(chan error, 1)
 	go func() { _, err := a.CallTo[*testpb.Pong](t.Context(), e, &testpb.Ping{}); errc <- err }()
 	time.Sleep(50 * time.Millisecond)
 	close(block)
 	select {
 	case err := <-errc:
-		if !errors.Is(err, golink.ErrNoProc) {
+		if !errors.Is(err, grpcproc.ErrNoProc) {
 			t.Fatalf("got %v", err)
 		}
 	case <-time.After(2 * time.Second):
@@ -476,10 +476,10 @@ func TestLeftoverCallsFailFast(t *testing.T) {
 }
 
 func TestRegistry(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	a := c.Node("a")
-	e, _ := golink.Spawn(a, echo, golink.WithName("svc"))
-	if _, err := golink.Spawn(a, echo, golink.WithName("svc")); !errors.Is(err, golink.ErrNameTaken) {
+	e, _ := grpcproc.Spawn(a, echo, grpcproc.WithName("svc"))
+	if _, err := grpcproc.Spawn(a, echo, grpcproc.WithName("svc")); !errors.Is(err, grpcproc.ErrNameTaken) {
 		t.Fatalf("got %v", err)
 	}
 	if got, ok := a.Whereis("svc"); !ok || got != e.PID() {
@@ -487,7 +487,7 @@ func TestRegistry(t *testing.T) {
 	}
 	w, ch := watcher(t, a)
 	w.Monitor(e)
-	_ = a.SendTo(golink.Name{Node: "a", Name: "svc"}, &testpb.Ping{N: 0})
+	_ = a.SendTo(grpcproc.Name{Node: "a", Name: "svc"}, &testpb.Ping{N: 0})
 	recv(t, ch)
 	if _, ok := a.Whereis("svc"); ok {
 		t.Fatal("name not released on exit")
@@ -495,12 +495,12 @@ func TestRegistry(t *testing.T) {
 }
 
 func TestInspectAndInfo(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	a := c.Node("a")
 	type state struct{ handled int }
 	s := &state{}
 	release := make(chan struct{})
-	e, _ := golink.Spawn[*testpb.Ping](a, func(p *golink.Process[*testpb.Ping]) error {
+	e, _ := grpcproc.Spawn[*testpb.Ping](a, func(p *grpcproc.Process[*testpb.Ping]) error {
 		for {
 			m, err := p.Receive()
 			if err != nil {
@@ -511,7 +511,7 @@ func TestInspectAndInfo(t *testing.T) {
 				<-release // simulate a long handler
 			}
 		}
-	}, golink.WithName("insp"), golink.WithLabel("order"), golink.WithInspect(func() map[string]string {
+	}, grpcproc.WithName("insp"), grpcproc.WithLabel("order"), grpcproc.WithInspect(func() map[string]string {
 		return map[string]string{"handled": strconv.Itoa(s.handled)}
 	}))
 	for range 3 {
@@ -523,8 +523,8 @@ func TestInspectAndInfo(t *testing.T) {
 		t.Fatalf("inspect: %v %v", got, err)
 	}
 	info, _ := a.Process(e.PID())
-	if info.Label != "order" || info.Names[0] != "insp" || info.Received != 3 || info.State != golink.StateIdle ||
-		info.LastMessage != "golink.test.v1.Ping" || info.Type != "*testpb.Ping" {
+	if info.Label != "order" || info.Names[0] != "insp" || info.Received != 3 || info.State != grpcproc.StateIdle ||
+		info.LastMessage != "grpcproc.test.v1.Ping" || info.Type != "*testpb.Ping" {
 		t.Fatalf("info %+v", info)
 	}
 	// Busy process: inspect times out with a reason, and the mailbox shows the backlog.
@@ -537,7 +537,7 @@ func TestInspectAndInfo(t *testing.T) {
 		t.Fatalf("want busy error, got %v", err)
 	}
 	info, _ = a.Process(e.PID())
-	if info.State != golink.StateRunning || info.Mailbox.Depth != 1 || info.Mailbox.OldestAge <= 0 {
+	if info.State != grpcproc.StateRunning || info.Mailbox.Depth != 1 || info.Mailbox.OldestAge <= 0 {
 		t.Fatalf("busy info %+v", info)
 	}
 	close(release)
@@ -551,10 +551,10 @@ func TestInspectAndInfo(t *testing.T) {
 }
 
 func TestMetadataPropagates(t *testing.T) {
-	c := golinktest.New(t, "a", "b")
+	c := grpcproctest.New(t, "a", "b")
 	a, b := c.Node("a"), c.Node("b")
 	col, ch := collector(t, b)
-	if err := a.SendContext(golink.WithMetadata(t.Context(), golink.Metadata{"trace": "abc"}), col, proto.Message(&testpb.Ping{})); err != nil {
+	if err := a.SendContext(grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"trace": "abc"}), col, proto.Message(&testpb.Ping{})); err != nil {
 		t.Fatal(err)
 	}
 	if m := recv(t, ch); m.Metadata["trace"] != "abc" {
@@ -565,9 +565,9 @@ func TestMetadataPropagates(t *testing.T) {
 // ---------- benchmarks ----------
 
 func BenchmarkLocalCall(b *testing.B) {
-	c := golinktest.New(b, "a")
+	c := grpcproctest.New(b, "a")
 	a := c.Node("a")
-	e, _ := golink.Spawn(a, echo)
+	e, _ := grpcproc.Spawn(a, echo)
 	for b.Loop() {
 		if _, err := a.Call[*testpb.Pong](b.Context(), e, &testpb.Ping{N: 1}); err != nil {
 			b.Fatal(err)
@@ -576,9 +576,9 @@ func BenchmarkLocalCall(b *testing.B) {
 }
 
 func BenchmarkRemoteCall(b *testing.B) {
-	c := golinktest.New(b, "a", "b")
+	c := grpcproctest.New(b, "a", "b")
 	a := c.Node("a")
-	e, _ := golink.Spawn(c.Node("b"), echo)
+	e, _ := grpcproc.Spawn(c.Node("b"), echo)
 	_, _ = a.Call[*testpb.Pong](b.Context(), e, &testpb.Ping{N: 1}) // establish the link
 	for b.Loop() {
 		if _, err := a.Call[*testpb.Pong](b.Context(), e, &testpb.Ping{N: 1}); err != nil {
@@ -588,9 +588,9 @@ func BenchmarkRemoteCall(b *testing.B) {
 }
 
 func BenchmarkRemoteCallParallel(b *testing.B) {
-	c := golinktest.New(b, "a", "b")
+	c := grpcproctest.New(b, "a", "b")
 	a := c.Node("a")
-	e, _ := golink.Spawn(c.Node("b"), echo)
+	e, _ := grpcproc.Spawn(c.Node("b"), echo)
 	_, _ = a.Call[*testpb.Pong](b.Context(), e, &testpb.Ping{N: 1})
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -605,10 +605,10 @@ func BenchmarkRemoteCallParallel(b *testing.B) {
 // end-to-end throughput, not the cost of enqueueing. It uses b.N rather than
 // b.Loop on purpose: b.Loop stops the timer when the loop ends, before the
 // wait for the receiver, which would time only the enqueue.
-func benchSend(b *testing.B, from, to *golink.Node) {
+func benchSend(b *testing.B, from, to *grpcproc.Node) {
 	done := make(chan struct{})
 	total := b.N
-	addr, err := golink.Spawn[*testpb.Ping](to, func(p *golink.Process[*testpb.Ping]) error {
+	addr, err := grpcproc.Spawn[*testpb.Ping](to, func(p *grpcproc.Process[*testpb.Ping]) error {
 		for range total + 1 {
 			if _, err := p.Receive(); err != nil {
 				return err
@@ -633,21 +633,21 @@ func benchSend(b *testing.B, from, to *golink.Node) {
 }
 
 func BenchmarkLocalSend(b *testing.B) {
-	c := golinktest.New(b, "a")
+	c := grpcproctest.New(b, "a")
 	benchSend(b, c.Node("a"), c.Node("a"))
 }
 
 func BenchmarkRemoteSend(b *testing.B) {
-	c := golinktest.New(b, "a", "b")
+	c := grpcproctest.New(b, "a", "b")
 	benchSend(b, c.Node("a"), c.Node("b"))
 }
 
 func TestBusyMeasuresTheCurrentMessage(t *testing.T) {
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	a := c.Node("a")
 	release := make(chan struct{})
 	defer close(release)
-	p, _ := golink.Spawn[*testpb.Ping](a, func(p *golink.Process[*testpb.Ping]) error {
+	p, _ := grpcproc.Spawn[*testpb.Ping](a, func(p *grpcproc.Process[*testpb.Ping]) error {
 		for {
 			m, err := p.Receive()
 			if err != nil {
@@ -668,7 +668,7 @@ func TestBusyMeasuresTheCurrentMessage(t *testing.T) {
 		t.Fatalf("busy must count from the message, not the start: %v", err)
 	}
 	// A process that never took a message counts from its start.
-	stuck, _ := golink.Spawn[*testpb.Ping](a, func(*golink.Process[*testpb.Ping]) error { <-release; return nil })
+	stuck, _ := grpcproc.Spawn[*testpb.Ping](a, func(*grpcproc.Process[*testpb.Ping]) error { <-release; return nil })
 	time.Sleep(50 * time.Millisecond)
 	short2, cancel2 := context.WithTimeout(t.Context(), 10*time.Millisecond)
 	defer cancel2()
@@ -677,7 +677,7 @@ func TestBusyMeasuresTheCurrentMessage(t *testing.T) {
 		t.Fatalf("busy since start: %v", err)
 	}
 	// Untyped processes are named proto.Message, not by the alias's target.
-	u, _ := golink.Spawn[proto.Message](a, func(p *golink.Process[proto.Message]) error { _, err := p.Receive(); return err })
+	u, _ := grpcproc.Spawn[proto.Message](a, func(p *grpcproc.Process[proto.Message]) error { _, err := p.Receive(); return err })
 	if info, _ := a.Process(u.PID()); info.Type != "proto.Message" || info.Label != "proto.Message" {
 		t.Fatalf("%+v", info)
 	}

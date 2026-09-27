@@ -1,4 +1,4 @@
-package golink
+package grpcproc
 
 import (
 	"cmp"
@@ -17,7 +17,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
-	golinkv1 "github.com/floatdrop/golink/proto/golink/v1"
+	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
 // Resolver turns a node name into an address grpc can dial.
@@ -71,7 +71,7 @@ func (s StaticResolver) Resolve(_ context.Context, node string) (string, error) 
 	if addr, ok := s[node]; ok {
 		return addr, nil
 	}
-	return "", fmt.Errorf("golink: unknown node %q", node)
+	return "", fmt.Errorf("grpcproc: unknown node %q", node)
 }
 
 // Config configures a Node. Name and Resolver are required.
@@ -143,7 +143,7 @@ type Node struct {
 	spawned, exited, deadLetters atomic.Uint64
 	subs                         subscribers
 
-	golinkv1.UnimplementedNodeServer
+	grpcprocv1.UnimplementedNodeServer
 }
 
 type pendingCall struct {
@@ -159,10 +159,10 @@ type callResult struct {
 // NewNode validates cfg and returns a node that is not yet started.
 func NewNode(cfg Config) (*Node, error) {
 	if cfg.Name == "" {
-		return nil, errors.New("golink: Config.Name is required")
+		return nil, errors.New("grpcproc: Config.Name is required")
 	}
 	if cfg.Resolver == nil {
-		return nil, errors.New("golink: Config.Resolver is required")
+		return nil, errors.New("grpcproc: Config.Resolver is required")
 	}
 	cfg.Incarnation = cmp.Or(cfg.Incarnation, uint64(time.Now().UnixNano()))
 	cfg.Logger = cmp.Or(cfg.Logger, slog.Default())
@@ -186,9 +186,9 @@ func NewNode(cfg Config) (*Node, error) {
 	return n, nil
 }
 
-// Register mounts the golink.v1.Node service on s. Call it before the server
+// Register mounts the grpcproc.v1.Node service on s. Call it before the server
 // starts serving.
-func (n *Node) Register(s grpc.ServiceRegistrar) { golinkv1.RegisterNodeServer(s, n) }
+func (n *Node) Register(s grpc.ServiceRegistrar) { grpcprocv1.RegisterNodeServer(s, n) }
 
 // Name is the node's logical name.
 func (n *Node) Name() string { return n.id.Name }
@@ -210,14 +210,14 @@ func (n *Node) Start(ctx context.Context) error {
 	if m := n.cfg.Membership; m != nil {
 		events, err := m.Watch(n.ctx)
 		if err != nil {
-			return fmt.Errorf("golink: membership: %w", err)
+			return fmt.Errorf("grpcproc: membership: %w", err)
 		}
 		go n.watchMembers(events)
 	}
 	if r := n.cfg.Registrar; r != nil {
 		withdraw, err := r.Register(ctx, Member{Name: n.id.Name, Incarnation: n.id.Incarnation, Addr: n.cfg.Advertise})
 		if err != nil {
-			return fmt.Errorf("golink: register: %w", err)
+			return fmt.Errorf("grpcproc: register: %w", err)
 		}
 		n.mu.Lock()
 		n.withdraw = withdraw
@@ -275,7 +275,7 @@ func (n *Node) Stop(ctx context.Context) error {
 	select {
 	case <-done:
 	case <-ctx.Done():
-		err = fmt.Errorf("golink: stop: %w", ctx.Err())
+		err = fmt.Errorf("grpcproc: stop: %w", ctx.Err())
 	}
 
 	n.mu.Lock()
@@ -295,7 +295,7 @@ func (n *Node) Stop(ctx context.Context) error {
 	n.mu.Unlock()
 	if withdraw != nil {
 		if werr := withdraw(ctx); werr != nil {
-			err = errors.Join(err, fmt.Errorf("golink: withdraw: %w", werr))
+			err = errors.Join(err, fmt.Errorf("grpcproc: withdraw: %w", werr))
 		}
 	}
 	return err
@@ -519,7 +519,7 @@ func (n *Node) send(from PID, sender *proc, to dest, body proto.Message, md Meta
 		n.deliver(from, pid, name, body, md, 0)
 		return nil
 	}
-	env := wire(golinkv1.Kind_KIND_SEND, from, pid, name)
+	env := wire(grpcprocv1.Kind_KIND_SEND, from, pid, name)
 	env.Metadata = md
 	if err := encodeBody(env, body); err != nil {
 		return err
@@ -556,7 +556,7 @@ func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to dest, req 
 		}
 		n.deliver(from, pid, name, req, md, ref)
 	} else {
-		env := wire(golinkv1.Kind_KIND_CALL, from, pid, name)
+		env := wire(grpcprocv1.Kind_KIND_CALL, from, pid, name)
 		env.Ref, env.Metadata = ref, md
 		if err := encodeBody(env, req); err != nil {
 			return nil, err
@@ -573,12 +573,12 @@ func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to dest, req 
 	}
 }
 
-func (n *Node) reply(from, to PID, ref uint64, body proto.Message, status golinkv1.Status, errText string) error {
+func (n *Node) reply(from, to PID, ref uint64, body proto.Message, status grpcprocv1.Status, errText string) error {
 	if to.Node == n.id.Name {
 		n.deliverReply(ref, body, status, errText)
 		return nil
 	}
-	env := wire(golinkv1.Kind_KIND_REPLY, from, to, "")
+	env := wire(grpcprocv1.Kind_KIND_REPLY, from, to, "")
 	env.Ref, env.Status, env.Reason = ref, status, errText
 	if body != nil {
 		if err := encodeBody(env, body); err != nil {
@@ -594,7 +594,7 @@ func (n *Node) monitor(from PID, to Target, ref uint64) error {
 		n.deliverMonitor(from, pid, name, ref)
 		return nil
 	}
-	env := wire(golinkv1.Kind_KIND_MONITOR, from, pid, name)
+	env := wire(grpcprocv1.Kind_KIND_MONITOR, from, pid, name)
 	env.Ref = ref
 	return n.route(pid.Node, env)
 }
@@ -605,7 +605,7 @@ func (n *Node) demonitor(from PID, to Target, ref uint64) error {
 		n.deliverDemonitor(from, pid, name, ref)
 		return nil
 	}
-	env := wire(golinkv1.Kind_KIND_DEMONITOR, from, pid, name)
+	env := wire(grpcprocv1.Kind_KIND_DEMONITOR, from, pid, name)
 	env.Ref = ref
 	return n.route(pid.Node, env)
 }
@@ -615,7 +615,7 @@ func (n *Node) down(from, to PID, ref uint64, reason string) error {
 		n.deliverDown(from, to, ref, reason)
 		return nil
 	}
-	env := wire(golinkv1.Kind_KIND_DOWN, from, to, "")
+	env := wire(grpcprocv1.Kind_KIND_DOWN, from, to, "")
 	env.Ref, env.Reason = ref, reason
 	return n.route(to.Node, env)
 }
@@ -626,15 +626,15 @@ func (n *Node) exit(from PID, to Target, reason string) error {
 		n.deliverExit(pid, name, reason)
 		return nil
 	}
-	env := wire(golinkv1.Kind_KIND_EXIT, from, pid, name)
+	env := wire(grpcprocv1.Kind_KIND_EXIT, from, pid, name)
 	env.Reason = reason
 	return n.route(pid.Node, env)
 }
 
 // route queues env on the link to node, dialing it if needed.
-func (n *Node) route(node string, env *golinkv1.Envelope) error {
+func (n *Node) route(node string, env *grpcprocv1.Envelope) error {
 	if node == "" {
-		return errors.New("golink: empty destination node")
+		return errors.New("grpcproc: empty destination node")
 	}
 	l, err := n.getOut(node)
 	if err != nil {
@@ -650,14 +650,14 @@ func (n *Node) deliver(from, to PID, name string, body proto.Message, md Metadat
 	if p == nil {
 		n.deadLetter(from, to, body, ReasonNoProc)
 		if ref != 0 {
-			_ = n.reply(to, from, ref, nil, golinkv1.Status_STATUS_NOPROC, "")
+			_ = n.reply(to, from, ref, nil, grpcprocv1.Status_STATUS_NOPROC, "")
 		}
 		return
 	}
 	if !p.accept(body) {
 		n.deadLetter(from, p.pid, body, ReasonType)
 		if ref != 0 {
-			_ = n.reply(p.pid, from, ref, nil, golinkv1.Status_STATUS_TYPE, "")
+			_ = n.reply(p.pid, from, ref, nil, grpcprocv1.Status_STATUS_TYPE, "")
 		}
 		return
 	}
@@ -668,12 +668,12 @@ func (n *Node) deliver(from, to PID, name string, body proto.Message, md Metadat
 	if !p.push(it) {
 		n.deadLetter(from, p.pid, body, ReasonNoProc)
 		if ref != 0 {
-			_ = n.reply(p.pid, from, ref, nil, golinkv1.Status_STATUS_NOPROC, "")
+			_ = n.reply(p.pid, from, ref, nil, grpcprocv1.Status_STATUS_NOPROC, "")
 		}
 	}
 }
 
-func (n *Node) deliverReply(ref uint64, body proto.Message, status golinkv1.Status, errText string) {
+func (n *Node) deliverReply(ref uint64, body proto.Message, status grpcprocv1.Status, errText string) {
 	n.mu.Lock()
 	pc := n.pending[ref]
 	delete(n.pending, ref)
@@ -682,11 +682,11 @@ func (n *Node) deliverReply(ref uint64, body proto.Message, status golinkv1.Stat
 		return // the caller gave up
 	}
 	switch status {
-	case golinkv1.Status_STATUS_OK:
+	case grpcprocv1.Status_STATUS_OK:
 		pc.ch <- callResult{body: body}
-	case golinkv1.Status_STATUS_NOPROC:
+	case grpcprocv1.Status_STATUS_NOPROC:
 		pc.ch <- callResult{err: ErrNoProc}
-	case golinkv1.Status_STATUS_TYPE:
+	case grpcprocv1.Status_STATUS_TYPE:
 		pc.ch <- callResult{err: ErrType}
 	default:
 		pc.ch <- callResult{body: body, err: &RemoteError{Msg: errText}}
@@ -737,12 +737,12 @@ func (n *Node) deadLetter(from, to PID, body proto.Message, reason string) {
 
 // dispatch handles an envelope that arrived on the inbound link from peer:
 // its sender is a process of peer, its target one of this node.
-func (n *Node) dispatch(peer string, env *golinkv1.Envelope) {
+func (n *Node) dispatch(peer string, env *grpcprocv1.Envelope) {
 	from := PID{Node: peer, Incarnation: env.GetFromIncarnation(), ID: env.GetFromId()}
 	to := PID{Node: n.id.Name, Incarnation: env.GetToIncarnation(), ID: env.GetToId()}
 	name, ref := env.GetToName(), env.GetRef()
 	switch env.GetKind() {
-	case golinkv1.Kind_KIND_SEND:
+	case grpcprocv1.Kind_KIND_SEND:
 		body, err := decodeBody(env)
 		if err != nil {
 			n.log.Warn("undecodable message", "err", err)
@@ -750,31 +750,31 @@ func (n *Node) dispatch(peer string, env *golinkv1.Envelope) {
 			return
 		}
 		n.deliver(from, to, name, body, env.GetMetadata(), 0)
-	case golinkv1.Kind_KIND_CALL:
+	case grpcprocv1.Kind_KIND_CALL:
 		body, err := decodeBody(env)
 		if err != nil {
 			n.log.Warn("undecodable call", "err", err)
-			_ = n.reply(to, from, ref, nil, golinkv1.Status_STATUS_TYPE, "")
+			_ = n.reply(to, from, ref, nil, grpcprocv1.Status_STATUS_TYPE, "")
 			return
 		}
 		n.deliver(from, to, name, body, env.GetMetadata(), ref)
-	case golinkv1.Kind_KIND_REPLY:
+	case grpcprocv1.Kind_KIND_REPLY:
 		var body proto.Message
 		if env.GetBodyType() != "" {
 			var err error
 			if body, err = decodeBody(env); err != nil {
-				n.deliverReply(ref, nil, golinkv1.Status_STATUS_TYPE, "")
+				n.deliverReply(ref, nil, grpcprocv1.Status_STATUS_TYPE, "")
 				return
 			}
 		}
 		n.deliverReply(ref, body, env.GetStatus(), env.GetReason())
-	case golinkv1.Kind_KIND_MONITOR:
+	case grpcprocv1.Kind_KIND_MONITOR:
 		n.deliverMonitor(from, to, name, ref)
-	case golinkv1.Kind_KIND_DEMONITOR:
+	case grpcprocv1.Kind_KIND_DEMONITOR:
 		n.deliverDemonitor(from, to, name, ref)
-	case golinkv1.Kind_KIND_DOWN:
+	case grpcprocv1.Kind_KIND_DOWN:
 		n.deliverDown(from, to, ref, env.GetReason())
-	case golinkv1.Kind_KIND_EXIT:
+	case grpcprocv1.Kind_KIND_EXIT:
 		n.deliverExit(to, name, env.GetReason())
 	}
 }
@@ -817,26 +817,26 @@ func (n *Node) nodeDown(peer string, err error) {
 
 // wire starts an envelope from a process of this node to one of the node it
 // is sent to; the node names are the link's, not the envelope's.
-func wire(kind golinkv1.Kind, from, to PID, name string) *golinkv1.Envelope {
-	return &golinkv1.Envelope{
+func wire(kind grpcprocv1.Kind, from, to PID, name string) *grpcprocv1.Envelope {
+	return &grpcprocv1.Envelope{
 		Kind:            kind,
 		FromIncarnation: from.Incarnation, FromId: from.ID,
 		ToIncarnation: to.Incarnation, ToId: to.ID, ToName: name,
 	}
 }
 
-func encodeBody(env *golinkv1.Envelope, m proto.Message) error {
+func encodeBody(env *grpcprocv1.Envelope, m proto.Message) error {
 	b, err := proto.Marshal(m)
 	if err != nil {
-		return fmt.Errorf("golink: encode: %w", err)
+		return fmt.Errorf("grpcproc: encode: %w", err)
 	}
 	env.BodyType, env.Body = typeName(m), b
 	return nil
 }
 
-func decodeBody(env *golinkv1.Envelope) (proto.Message, error) {
+func decodeBody(env *grpcprocv1.Envelope) (proto.Message, error) {
 	if env.GetBodyType() == "" {
-		return nil, errors.New("golink: empty body")
+		return nil, errors.New("grpcproc: empty body")
 	}
 	mt, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(env.GetBodyType()))
 	if err != nil {

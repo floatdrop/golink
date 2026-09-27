@@ -1,4 +1,4 @@
-package golinkotel_test
+package grpcprocotel_test
 
 import (
 	"context"
@@ -19,14 +19,14 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/golinktest"
-	"github.com/floatdrop/golink/internal/testpb"
-	golinkotel "github.com/floatdrop/golink/otel"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/grpcproctest"
+	"github.com/floatdrop/grpcproc/internal/testpb"
+	grpcprocotel "github.com/floatdrop/grpcproc/otel"
 )
 
 type env struct {
-	hooks  *golinkotel.Hooks
+	hooks  *grpcprocotel.Hooks
 	spans  *tracetest.SpanRecorder
 	reader *sdkmetric.ManualReader
 }
@@ -35,10 +35,10 @@ func setup(t *testing.T) env {
 	t.Helper()
 	spans := tracetest.NewSpanRecorder()
 	reader := sdkmetric.NewManualReader()
-	h, err := golinkotel.New(
-		golinkotel.WithTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans))),
-		golinkotel.WithMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))),
-		golinkotel.WithPropagator(propagation.TraceContext{}),
+	h, err := grpcprocotel.New(
+		grpcprocotel.WithTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans))),
+		grpcprocotel.WithMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))),
+		grpcprocotel.WithPropagator(propagation.TraceContext{}),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +48,7 @@ func setup(t *testing.T) env {
 
 // echo replies Pong{N+1} to calls, errors on N < 0, returns "boom" on
 // N == -100 and panics on N == -200.
-func echo(p *golink.Process[*testpb.Ping]) error {
+func echo(p *grpcproc.Process[*testpb.Ping]) error {
 	for {
 		m, err := p.Receive()
 		if err != nil {
@@ -74,7 +74,7 @@ func span(t *testing.T, spans []sdktrace.ReadOnlySpan, name, label string) sdktr
 			continue
 		}
 		for _, a := range s.Attributes() {
-			if a.Key == golinkotel.AttrLabel && a.Value.AsString() == label {
+			if a.Key == grpcprocotel.AttrLabel && a.Value.AsString() == label {
 				return s
 			}
 		}
@@ -89,11 +89,11 @@ func span(t *testing.T, spans []sdktrace.ReadOnlySpan, name, label string) sdktr
 
 func TestTraceChainsAcrossProcessesAndNodes(t *testing.T) {
 	e := setup(t)
-	c := golinktest.NewWith(t, []golinktest.Option{golinktest.WithHooks(e.hooks)}, "a", "b")
+	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithHooks(e.hooks)}, "a", "b")
 	a, b := c.Node("a"), c.Node("b")
 
 	handlerSpan := make(chan trace.SpanContext, 1)
-	sink, _ := golink.Spawn[*testpb.Ping](b, func(p *golink.Process[*testpb.Ping]) error {
+	sink, _ := grpcproc.Spawn[*testpb.Ping](b, func(p *grpcproc.Process[*testpb.Ping]) error {
 		m, err := p.Receive()
 		if err != nil {
 			return err
@@ -101,14 +101,14 @@ func TestTraceChainsAcrossProcessesAndNodes(t *testing.T) {
 		// A handler's own work nests under the span handling the message.
 		handlerSpan <- trace.SpanContextFromContext(e.hooks.Extract(t.Context(), m.Metadata))
 		return nil
-	}, golink.WithLabel("sink"))
-	relay, _ := golink.Spawn[*testpb.Ping](a, func(p *golink.Process[*testpb.Ping]) error {
+	}, grpcproc.WithLabel("sink"))
+	relay, _ := grpcproc.Spawn[*testpb.Ping](a, func(p *grpcproc.Process[*testpb.Ping]) error {
 		m, err := p.Receive()
 		if err != nil {
 			return err
 		}
 		return p.Send(sink, m.Body)
-	}, golink.WithLabel("relay"))
+	}, grpcproc.WithLabel("relay"))
 
 	if err := a.Send(relay, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
@@ -123,10 +123,10 @@ func TestTraceChainsAcrossProcessesAndNodes(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	ended := e.spans.Ended()
 
-	send1 := span(t, ended, "send golink.test.v1.Ping", "")
-	proc1 := span(t, ended, "process golink.test.v1.Ping", "relay")
-	send2 := span(t, ended, "send golink.test.v1.Ping", "relay")
-	proc2 := span(t, ended, "process golink.test.v1.Ping", "sink")
+	send1 := span(t, ended, "send grpcproc.test.v1.Ping", "")
+	proc1 := span(t, ended, "process grpcproc.test.v1.Ping", "relay")
+	send2 := span(t, ended, "send grpcproc.test.v1.Ping", "relay")
+	proc2 := span(t, ended, "process grpcproc.test.v1.Ping", "sink")
 
 	traceID := send1.SpanContext().TraceID()
 	for _, s := range []sdktrace.ReadOnlySpan{proc1, send2, proc2} {
@@ -146,7 +146,7 @@ func TestTraceChainsAcrossProcessesAndNodes(t *testing.T) {
 	if fromHandler.SpanID() != proc2.SpanContext().SpanID() {
 		t.Fatalf("Extract gave %v, want the handling span %v", fromHandler.SpanID(), proc2.SpanContext().SpanID())
 	}
-	if attr(send2, "messaging.destination.name") != sink.String() || attr(send2, "golink.remote") != "true" {
+	if attr(send2, "messaging.destination.name") != sink.String() || attr(send2, "grpcproc.remote") != "true" {
 		t.Fatalf("attrs %v", send2.Attributes())
 	}
 }
@@ -162,10 +162,10 @@ func attr(s sdktrace.ReadOnlySpan, key string) string {
 
 func TestCallSpansAndDuration(t *testing.T) {
 	e := setup(t)
-	c := golinktest.NewWith(t, []golinktest.Option{golinktest.WithHooks(e.hooks)}, "a")
+	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithHooks(e.hooks)}, "a")
 	a := c.Node("a")
-	ep, _ := golink.Spawn(a, echo, golink.WithLabel("echo"))
-	caller, _ := golink.Spawn[proto.Message](a, func(p *golink.Process[proto.Message]) error {
+	ep, _ := grpcproc.Spawn(a, echo, grpcproc.WithLabel("echo"))
+	caller, _ := grpcproc.Spawn[proto.Message](a, func(p *grpcproc.Process[proto.Message]) error {
 		if _, err := p.Call[*testpb.Pong](t.Context(), ep, &testpb.Ping{N: 1}); err != nil {
 			return err
 		}
@@ -174,14 +174,14 @@ func TestCallSpansAndDuration(t *testing.T) {
 			return errors.New("expected an error")
 		}
 		return nil
-	}, golink.WithLabel("caller"))
+	}, grpcproc.WithLabel("caller"))
 	_ = caller
 	time.Sleep(100 * time.Millisecond)
 	c.Stop("a") // ends the echo's last handling span
 
 	var ok, failed sdktrace.ReadOnlySpan
 	for _, s := range e.spans.Ended() {
-		if s.Name() == "call golink.test.v1.Ping" {
+		if s.Name() == "call grpcproc.test.v1.Ping" {
 			if s.Status().Code == codes.Error {
 				failed = s
 			} else {
@@ -195,23 +195,23 @@ func TestCallSpansAndDuration(t *testing.T) {
 	if ok.SpanKind() != trace.SpanKindClient || attr(failed, "error.type") != "remote" || len(failed.Events()) == 0 {
 		t.Fatalf("ok=%v failed=%v %v", ok.SpanKind(), failed.Attributes(), failed.Events())
 	}
-	server := span(t, e.spans.Ended(), "process golink.test.v1.Ping", "echo")
+	server := span(t, e.spans.Ended(), "process grpcproc.test.v1.Ping", "echo")
 	if server.SpanKind() != trace.SpanKindServer {
 		t.Fatalf("callee kind %v", server.SpanKind())
 	}
 
 	rm := collect(t, e.reader)
-	if n := histCount(rm, "golink.call.duration", golinkotel.AttrLabel.String("caller"), golinkotel.AttrErrorType.String("remote")); n != 1 {
+	if n := histCount(rm, "grpcproc.call.duration", grpcprocotel.AttrLabel.String("caller"), grpcprocotel.AttrErrorType.String("remote")); n != 1 {
 		t.Fatalf("failed call durations: %d", n)
 	}
-	if n := histCount(rm, "golink.call.duration", golinkotel.AttrLabel.String("caller")); n != 2 {
+	if n := histCount(rm, "grpcproc.call.duration", grpcprocotel.AttrLabel.String("caller")); n != 2 {
 		t.Fatalf("all call durations: %d", n)
 	}
 }
 
 func TestMetrics(t *testing.T) {
 	e := setup(t)
-	c := golinktest.NewWith(t, []golinktest.Option{golinktest.WithHooks(e.hooks)}, "a", "b")
+	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithHooks(e.hooks)}, "a", "b")
 	a := c.Node("a")
 	reg, err := e.hooks.Observe(a)
 	if err != nil {
@@ -221,32 +221,32 @@ func TestMetrics(t *testing.T) {
 
 	// Exits: normal, error and panic.
 	for _, n := range []int64{0, -100, -200} {
-		ep, _ := golink.Spawn(a, echo, golink.WithLabel("echo"))
+		ep, _ := grpcproc.Spawn(a, echo, grpcproc.WithLabel("echo"))
 		if n == 0 {
-			_ = a.Exit(ep, golink.ReasonNormal)
+			_ = a.Exit(ep, grpcproc.ReasonNormal)
 			continue
 		}
 		_ = a.Send(ep, &testpb.Ping{N: n})
 	}
 	// A dead letter of the wrong type.
-	ep, _ := golink.Spawn(a, echo, golink.WithLabel("echo"))
+	ep, _ := grpcproc.Spawn(a, echo, grpcproc.WithLabel("echo"))
 	_ = a.SendTo(ep.PID(), &testpb.Pong{})
 	// A backlog: a blocked process with two waiting messages.
 	release := make(chan struct{})
 	defer close(release)
-	busy, _ := golink.Spawn[*testpb.Ping](a, func(p *golink.Process[*testpb.Ping]) error {
+	busy, _ := grpcproc.Spawn[*testpb.Ping](a, func(p *grpcproc.Process[*testpb.Ping]) error {
 		for {
 			if _, err := p.Receive(); err != nil {
 				return err
 			}
 			<-release
 		}
-	}, golink.WithLabel("busy"))
+	}, grpcproc.WithLabel("busy"))
 	for range 3 {
 		_ = a.Send(busy, &testpb.Ping{})
 	}
 	// A link to b, then its loss.
-	remote, _ := golink.Spawn(c.Node("b"), echo, golink.WithLabel("echo"))
+	remote, _ := grpcproc.Spawn(c.Node("b"), echo, grpcproc.WithLabel("echo"))
 	if _, err := a.Call[*testpb.Pong](t.Context(), remote, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
@@ -259,50 +259,50 @@ func TestMetrics(t *testing.T) {
 		want  int64
 	}{
 		// Both nodes share these hooks: four echoes on a, one on b.
-		{"golink.processes.spawned", []attribute.KeyValue{golinkotel.AttrLabel.String("echo")}, 5},
-		{"golink.processes.exited", []attribute.KeyValue{golinkotel.AttrReason.String("normal")}, 1},
-		{"golink.processes.exited", []attribute.KeyValue{golinkotel.AttrReason.String("error")}, 1},
-		{"golink.processes.exited", []attribute.KeyValue{golinkotel.AttrReason.String("panic")}, 1},
-		{"golink.dead_letters", []attribute.KeyValue{golinkotel.AttrReason.String("type"), golinkotel.AttrMessageType.String("golink.test.v1.Pong")}, 1},
-		{"golink.messages.sent", []attribute.KeyValue{golinkotel.AttrLabel.String(""), golinkotel.AttrCall.Bool(true), golinkotel.AttrRemote.Bool(true)}, 1},
-		{"golink.messages.received", []attribute.KeyValue{golinkotel.AttrLabel.String("busy")}, 1},
+		{"grpcproc.processes.spawned", []attribute.KeyValue{grpcprocotel.AttrLabel.String("echo")}, 5},
+		{"grpcproc.processes.exited", []attribute.KeyValue{grpcprocotel.AttrReason.String("normal")}, 1},
+		{"grpcproc.processes.exited", []attribute.KeyValue{grpcprocotel.AttrReason.String("error")}, 1},
+		{"grpcproc.processes.exited", []attribute.KeyValue{grpcprocotel.AttrReason.String("panic")}, 1},
+		{"grpcproc.dead_letters", []attribute.KeyValue{grpcprocotel.AttrReason.String("type"), grpcprocotel.AttrMessageType.String("grpcproc.test.v1.Pong")}, 1},
+		{"grpcproc.messages.sent", []attribute.KeyValue{grpcprocotel.AttrLabel.String(""), grpcprocotel.AttrCall.Bool(true), grpcprocotel.AttrRemote.Bool(true)}, 1},
+		{"grpcproc.messages.received", []attribute.KeyValue{grpcprocotel.AttrLabel.String("busy")}, 1},
 		// a's stream to b, and b's reply stream arriving at a.
-		{"golink.links.up", []attribute.KeyValue{golinkotel.AttrPeer.String("b")}, 2},
-		{"golink.processes", []attribute.KeyValue{golinkotel.AttrLabel.String("busy")}, 1},
-		{"golink.mailbox.depth", []attribute.KeyValue{golinkotel.AttrLabel.String("busy")}, 2},
+		{"grpcproc.links.up", []attribute.KeyValue{grpcprocotel.AttrPeer.String("b")}, 2},
+		{"grpcproc.processes", []attribute.KeyValue{grpcprocotel.AttrLabel.String("busy")}, 1},
+		{"grpcproc.mailbox.depth", []attribute.KeyValue{grpcprocotel.AttrLabel.String("busy")}, 2},
 	}
 	for _, ch := range checks {
 		if got := intValue(rm, ch.name, ch.attrs...); got != ch.want {
 			t.Errorf("%s%v = %d, want %d", ch.name, ch.attrs, got, ch.want)
 		}
 	}
-	if got := floatValue(rm, "golink.mailbox.oldest", golinkotel.AttrLabel.String("busy")); got <= 0 {
+	if got := floatValue(rm, "grpcproc.mailbox.oldest", grpcprocotel.AttrLabel.String("busy")); got <= 0 {
 		t.Errorf("oldest = %v", got)
 	}
-	if got := intValue(rm, "golink.link.messages", golinkotel.AttrPeer.String("b"), golinkotel.AttrDirection.String("out")); got == 0 {
+	if got := intValue(rm, "grpcproc.link.messages", grpcprocotel.AttrPeer.String("b"), grpcprocotel.AttrDirection.String("out")); got == 0 {
 		t.Error("no outbound link messages")
 	}
-	if got := intValue(rm, "golink.link.bytes", golinkotel.AttrPeer.String("b"), golinkotel.AttrDirection.String("in")); got == 0 {
+	if got := intValue(rm, "grpcproc.link.bytes", grpcprocotel.AttrPeer.String("b"), grpcprocotel.AttrDirection.String("in")); got == 0 {
 		t.Error("no inbound link bytes")
 	}
-	if histCount(rm, "golink.mailbox.wait", golinkotel.AttrLabel.String("busy")) != 1 {
+	if histCount(rm, "grpcproc.mailbox.wait", grpcprocotel.AttrLabel.String("busy")) != 1 {
 		t.Error("no mailbox wait recorded")
 	}
 
 	c.Kill("b")
 	time.Sleep(20 * time.Millisecond)
-	if got := intValue(collect(t, e.reader), "golink.links.down", golinkotel.AttrPeer.String("b")); got < 1 {
+	if got := intValue(collect(t, e.reader), "grpcproc.links.down", grpcprocotel.AttrPeer.String("b")); got < 1 {
 		t.Errorf("links down = %d", got)
 	}
 }
 
 func TestDownIsTraced(t *testing.T) {
 	e := setup(t)
-	c := golinktest.NewWith(t, []golinktest.Option{golinktest.WithHooks(e.hooks)}, "a")
+	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithHooks(e.hooks)}, "a")
 	a := c.Node("a")
-	ep, _ := golink.Spawn(a, echo)
+	ep, _ := grpcproc.Spawn(a, echo)
 	got := make(chan struct{})
-	_, _ = golink.Spawn[proto.Message](a, func(p *golink.Process[proto.Message]) error {
+	_, _ = grpcproc.Spawn[proto.Message](a, func(p *grpcproc.Process[proto.Message]) error {
 		p.Monitor(ep)
 		_ = p.Exit(ep, "stop")
 		if _, err := p.Receive(); err != nil {
@@ -310,42 +310,42 @@ func TestDownIsTraced(t *testing.T) {
 		}
 		close(got)
 		return errors.New("done") // abnormal exit ends the handling span with an error
-	}, golink.WithLabel("watcher"))
+	}, grpcproc.WithLabel("watcher"))
 	<-got
 	time.Sleep(20 * time.Millisecond)
-	s := span(t, e.spans.Ended(), "process golink.Down", "watcher")
-	if attr(s, "golink.reason") != "stop" || s.Status().Code != codes.Error {
+	s := span(t, e.spans.Ended(), "process grpcproc.Down", "watcher")
+	if attr(s, "grpcproc.reason") != "stop" || s.Status().Code != codes.Error {
 		t.Fatalf("%v %v", s.Attributes(), s.Status())
 	}
 }
 
 func TestClassification(t *testing.T) {
 	reasons := map[string]string{
-		golink.ReasonNormal: "normal", golink.ReasonKilled: "killed", golink.ReasonShutdown: "shutdown",
-		golink.ReasonNoProc: "noproc", golink.ReasonNoConnection: "noconnection", golink.ReasonType: "type",
+		grpcproc.ReasonNormal: "normal", grpcproc.ReasonKilled: "killed", grpcproc.ReasonShutdown: "shutdown",
+		grpcproc.ReasonNoProc: "noproc", grpcproc.ReasonNoConnection: "noconnection", grpcproc.ReasonType: "type",
 		"panic: x": "panic", "db timeout for user 42": "error",
 	}
 	for in, want := range reasons {
-		if got := golinkotel.ReasonClass(in); got != want {
+		if got := grpcprocotel.ReasonClass(in); got != want {
 			t.Errorf("ReasonClass(%q) = %q", in, got)
 		}
 	}
 	errs := map[error]string{
-		golink.ErrNoProc: "noproc", golink.ErrType: "type",
-		&golink.LinkError{Peer: "b", Err: errors.New("x")}: "noconnection",
-		context.DeadlineExceeded:                           "timeout", context.Canceled: "canceled",
-		fmt.Errorf("wrapped: %w", &golink.RemoteError{Msg: "m"}): "remote",
+		grpcproc.ErrNoProc: "noproc", grpcproc.ErrType: "type",
+		&grpcproc.LinkError{Peer: "b", Err: errors.New("x")}: "noconnection",
+		context.DeadlineExceeded:                             "timeout", context.Canceled: "canceled",
+		fmt.Errorf("wrapped: %w", &grpcproc.RemoteError{Msg: "m"}): "remote",
 		errors.New("encode"): "other",
 	}
 	for in, want := range errs {
-		if got := golinkotel.ErrorType(in); got != want {
+		if got := grpcprocotel.ErrorType(in); got != want {
 			t.Errorf("ErrorType(%v) = %q, want %q", in, got, want)
 		}
 	}
 }
 
 func TestCarrier(t *testing.T) {
-	c := golinkotel.Carrier{}
+	c := grpcprocotel.Carrier{}
 	c.Set("b", "2")
 	c.Set("a", "1")
 	if c.Get("a") != "1" || c.Get("zz") != "" || fmt.Sprint(c.Keys()) != "[a b]" {
@@ -354,7 +354,7 @@ func TestCarrier(t *testing.T) {
 }
 
 func TestDefaultsUseGlobals(t *testing.T) {
-	if _, err := golinkotel.New(); err != nil {
+	if _, err := grpcprocotel.New(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -377,15 +377,15 @@ func (failingMeter) Int64ObservableGauge(string, ...metric.Int64ObservableGaugeO
 }
 
 func TestInstrumentErrors(t *testing.T) {
-	if _, err := golinkotel.New(golinkotel.WithMeterProvider(failingProvider{})); !errors.Is(err, errNoInstruments) {
+	if _, err := grpcprocotel.New(grpcprocotel.WithMeterProvider(failingProvider{})); !errors.Is(err, errNoInstruments) {
 		t.Fatalf("New: %v", err)
 	}
 	// Observe fails on its own instruments even when New's succeeded.
-	h, err := golinkotel.New(golinkotel.WithMeterProvider(observeFailing{}))
+	h, err := grpcprocotel.New(grpcprocotel.WithMeterProvider(observeFailing{}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := golinktest.New(t, "a")
+	c := grpcproctest.New(t, "a")
 	if _, err := h.Observe(c.Node("a")); !errors.Is(err, errNoInstruments) {
 		t.Fatalf("Observe: %v", err)
 	}
@@ -478,14 +478,14 @@ func histCount(rm metricdata.ResourceMetrics, name string, attrs ...attribute.Ke
 
 func TestDestinationByName(t *testing.T) {
 	e := setup(t)
-	c := golinktest.NewWith(t, []golinktest.Option{golinktest.WithHooks(e.hooks)}, "a")
+	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithHooks(e.hooks)}, "a")
 	a := c.Node("a")
-	_, _ = golink.Spawn(a, echo, golink.WithName("svc"))
-	if _, err := a.Call[*testpb.Pong](t.Context(), golink.Named[*testpb.Ping]("a", "svc"), &testpb.Ping{N: 1}); err != nil {
+	_, _ = grpcproc.Spawn(a, echo, grpcproc.WithName("svc"))
+	if _, err := a.Call[*testpb.Pong](t.Context(), grpcproc.Named[*testpb.Ping]("a", "svc"), &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	for _, s := range e.spans.Ended() {
-		if s.Name() == "call golink.test.v1.Ping" {
+		if s.Name() == "call grpcproc.test.v1.Ping" {
 			if got := attr(s, "messaging.destination.name"); got != "{svc@a}" {
 				t.Fatalf("destination %q", got)
 			}

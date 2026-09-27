@@ -1,4 +1,4 @@
-package golinkotel
+package grpcprocotel
 
 import (
 	"maps"
@@ -6,12 +6,12 @@ import (
 
 	"go.opentelemetry.io/otel/propagation"
 
-	"github.com/floatdrop/golink"
+	"github.com/floatdrop/grpcproc"
 )
 
-// Carrier adapts golink.Metadata to OpenTelemetry propagation, the way
+// Carrier adapts grpcproc.Metadata to OpenTelemetry propagation, the way
 // propagation.HeaderCarrier adapts HTTP headers.
-type Carrier golink.Metadata
+type Carrier grpcproc.Metadata
 
 var _ propagation.TextMapCarrier = Carrier(nil)
 

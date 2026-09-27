@@ -10,9 +10,9 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/floatdrop/golink"
-	"github.com/floatdrop/golink/actor"
-	"github.com/floatdrop/golink/examples/shoppb"
+	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/actor"
+	"github.com/floatdrop/grpcproc/examples/shoppb"
 )
 
 // Ledger records reservations. It stands for whatever the actor depends on:
@@ -27,18 +27,18 @@ func (Ledger) Record(r *shoppb.Reserve) { fmt.Println("ledger:", r.Qty, r.Sku) }
 type Inventory struct {
 	ledger  *Ledger
 	left    map[string]int64
-	waiting []golink.Msg[*shoppb.Stock] // reservations parked until a restock
+	waiting []grpcproc.Msg[*shoppb.Stock] // reservations parked until a restock
 }
 
 // Init runs on the actor's goroutine before the first message.
-func (i *Inventory) Init(*golink.Process[*shoppb.Stock]) error {
+func (i *Inventory) Init(*grpcproc.Process[*shoppb.Stock]) error {
 	i.left = map[string]int64{}
 	return nil
 }
 
 // HandleCall gets what was sent with Call. The returned message, or error,
 // is the reply, and the actor carries on either way.
-func (i *Inventory) HandleCall(_ *golink.Process[*shoppb.Stock], m golink.Msg[*shoppb.Stock]) (proto.Message, error) {
+func (i *Inventory) HandleCall(_ *grpcproc.Process[*shoppb.Stock], m grpcproc.Msg[*shoppb.Stock]) (proto.Message, error) {
 	r := m.Body.GetReserve()
 	switch {
 	case r == nil:
@@ -57,7 +57,7 @@ func (i *Inventory) HandleCall(_ *golink.Process[*shoppb.Stock], m golink.Msg[*s
 // HandleMessage gets what was sent with Send; nobody waits for an answer.
 // An error ends the actor, with the error as its exit reason, and
 // actor.ErrStop ends it normally.
-func (i *Inventory) HandleMessage(p *golink.Process[*shoppb.Stock], m golink.Msg[*shoppb.Stock]) error {
+func (i *Inventory) HandleMessage(p *grpcproc.Process[*shoppb.Stock], m grpcproc.Msg[*shoppb.Stock]) error {
 	r := m.Body.GetRestock()
 	if r == nil {
 		return errors.New("a reservation must be a call")
@@ -76,8 +76,8 @@ func (i *Inventory) HandleMessage(p *golink.Process[*shoppb.Stock], m golink.Msg
 }
 
 // Terminate runs however the actor ends. Calls it never answered fail with
-// golink.ErrNoProc on their own.
-func (*Inventory) Terminate(_ *golink.Process[*shoppb.Stock], err error) {
+// grpcproc.ErrNoProc on their own.
+func (*Inventory) Terminate(_ *grpcproc.Process[*shoppb.Stock], err error) {
 	fmt.Println("inventory stopped:", err)
 }
 
@@ -89,13 +89,13 @@ func (i *Inventory) reserve(r *shoppb.Reserve) *shoppb.Reserved {
 
 func main() {
 	ctx := context.Background()
-	node, err := golink.NewNode(golink.Config{Name: "shop", Resolver: golink.StaticResolver{}})
+	node, err := grpcproc.NewNode(grpcproc.Config{Name: "shop", Resolver: grpcproc.StaticResolver{}})
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer func() { _ = node.Stop(ctx) }()
 
-	inventory, err := actor.Spawn(node, &Inventory{ledger: &Ledger{}}, golink.WithName("inventory"))
+	inventory, err := actor.Spawn(node, &Inventory{ledger: &Ledger{}}, grpcproc.WithName("inventory"))
 	if err != nil {
 		log.Fatal(err)
 	}

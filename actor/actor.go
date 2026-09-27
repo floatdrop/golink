@@ -1,16 +1,16 @@
-// Package actor is optional structure on top of golink processes: a handler
+// Package actor is optional structure on top of grpcproc processes: a handler
 // loop in the style of gen_server, and supervisors that restart what fails.
-// It uses only golink's public API, so it can be ignored or replaced.
+// It uses only grpcproc's public API, so it can be ignored or replaced.
 //
 // An actor is a plain struct holding its dependencies, built by a
 // constructor, so it fits a DI container:
 //
 //	type Orders struct{ repo *Repo }
 //
-//	func (o *Orders) HandleMessage(p *golink.Process[*orderspb.Order], m golink.Msg[*orderspb.Order]) error { … }
-//	func (o *Orders) HandleCall(p *golink.Process[*orderspb.Order], m golink.Msg[*orderspb.Order]) (proto.Message, error) { … }
+//	func (o *Orders) HandleMessage(p *grpcproc.Process[*orderspb.Order], m grpcproc.Msg[*orderspb.Order]) error { … }
+//	func (o *Orders) HandleCall(p *grpcproc.Process[*orderspb.Order], m grpcproc.Msg[*orderspb.Order]) (proto.Message, error) { … }
 //
-//	addr, err := actor.Spawn(node, &Orders{repo: repo}, golink.WithName("orders"))
+//	addr, err := actor.Spawn(node, &Orders{repo: repo}, grpcproc.WithName("orders"))
 package actor
 
 import (
@@ -20,14 +20,14 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/floatdrop/golink"
+	"github.com/floatdrop/grpcproc"
 )
 
 // Handler handles the messages sent to an actor whose mailbox holds M.
 // Returning an error ends the actor with that error as its exit reason;
 // ErrStop ends it normally.
 type Handler[M proto.Message] interface {
-	HandleMessage(p *golink.Process[M], m golink.Msg[M]) error
+	HandleMessage(p *grpcproc.Process[M], m grpcproc.Msg[M]) error
 }
 
 // CallHandler answers calls: the returned message, or error, is the reply,
@@ -36,27 +36,27 @@ type Handler[M proto.Message] interface {
 //
 // Without it, a call is answered with an error.
 type CallHandler[M proto.Message] interface {
-	HandleCall(p *golink.Process[M], m golink.Msg[M]) (proto.Message, error)
+	HandleCall(p *grpcproc.Process[M], m grpcproc.Msg[M]) (proto.Message, error)
 }
 
 // DownHandler is told when a process the actor monitors exits. Without it,
 // Downs are ignored.
 type DownHandler[M proto.Message] interface {
-	HandleDown(p *golink.Process[M], d golink.Down) error
+	HandleDown(p *grpcproc.Process[M], d grpcproc.Down) error
 }
 
 // Initializer runs before the first message. An error ends the actor
 // before it handles anything, and Terminate is not called.
 type Initializer[M proto.Message] interface {
-	Init(p *golink.Process[M]) error
+	Init(p *grpcproc.Process[M]) error
 }
 
 // Terminator runs when the actor ends, however it ends: err is nil after
-// ErrStop, the handler's error, an *golink.ExitError after Exit,
+// ErrStop, the handler's error, an *grpcproc.ExitError after Exit,
 // context.Canceled when the node stops, or "panic: …" (after which the panic
-// continues, and golink reports it).
+// continues, and grpcproc reports it).
 type Terminator[M proto.Message] interface {
-	Terminate(p *golink.Process[M], err error)
+	Terminate(p *grpcproc.Process[M], err error)
 }
 
 var (
@@ -68,13 +68,13 @@ var (
 	ErrNoReply = errors.New("actor: reply later")
 )
 
-// Run turns a Handler into a process function for golink.Spawn.
-func Run[M proto.Message](h Handler[M]) func(*golink.Process[M]) error {
+// Run turns a Handler into a process function for grpcproc.Spawn.
+func Run[M proto.Message](h Handler[M]) func(*grpcproc.Process[M]) error {
 	calls, _ := h.(CallHandler[M])
 	downs, _ := h.(DownHandler[M])
 	init, _ := h.(Initializer[M])
 	term, _ := h.(Terminator[M])
-	return func(p *golink.Process[M]) (err error) {
+	return func(p *grpcproc.Process[M]) (err error) {
 		if init != nil {
 			if err := init.Init(p); err != nil {
 				return err
@@ -114,7 +114,7 @@ func Run[M proto.Message](h Handler[M]) func(*golink.Process[M]) error {
 	}
 }
 
-func call[M proto.Message](p *golink.Process[M], calls CallHandler[M], m golink.Msg[M]) error {
+func call[M proto.Message](p *grpcproc.Process[M], calls CallHandler[M], m grpcproc.Msg[M]) error {
 	if calls == nil {
 		_ = p.Reply(m, nil, fmt.Errorf("actor: %s does not handle calls", reflect.TypeFor[M]()))
 		return nil
@@ -131,7 +131,7 @@ func call[M proto.Message](p *golink.Process[M], calls CallHandler[M], m golink.
 	return nil
 }
 
-// Spawn starts h as a process on n: golink.Spawn(n, Run(h), opts...).
-func Spawn[M proto.Message](n *golink.Node, h Handler[M], opts ...golink.SpawnOption) (golink.Addr[M], error) {
-	return golink.Spawn(n, Run(h), opts...)
+// Spawn starts h as a process on n: grpcproc.Spawn(n, Run(h), opts...).
+func Spawn[M proto.Message](n *grpcproc.Node, h Handler[M], opts ...grpcproc.SpawnOption) (grpcproc.Addr[M], error) {
+	return grpcproc.Spawn(n, Run(h), opts...)
 }

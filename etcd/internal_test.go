@@ -1,4 +1,4 @@
-package golinketcd
+package grpcprocetcd
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 
-	"github.com/floatdrop/golink"
+	"github.com/floatdrop/grpcproc"
 )
 
 // These tests reach the paths a healthy etcd never takes, through fakes
@@ -135,14 +135,14 @@ func setup(t *testing.T) env {
 	return e
 }
 
-func next(t *testing.T, ch <-chan golink.MemberEvent) golink.MemberEvent {
+func next(t *testing.T, ch <-chan grpcproc.MemberEvent) grpcproc.MemberEvent {
 	t.Helper()
 	select {
 	case ev := <-ch:
 		return ev
 	case <-time.After(10 * time.Second):
 		t.Fatal("no member event")
-		return golink.MemberEvent{}
+		return grpcproc.MemberEvent{}
 	}
 }
 
@@ -159,11 +159,11 @@ func TestEtcdErrorsSurface(t *testing.T) {
 		t.Fatalf("Watch: %v", err)
 	}
 	e.lease.failGrants.Store(1)
-	if _, err := e.c.Register(t.Context(), golink.Member{Name: "a"}); !errors.Is(err, errInjected) {
+	if _, err := e.c.Register(t.Context(), grpcproc.Member{Name: "a"}); !errors.Is(err, errInjected) {
 		t.Fatalf("Register (grant): %v", err)
 	}
 	e.kv.putErr = errInjected
-	if _, err := e.c.Register(t.Context(), golink.Member{Name: "a"}); !errors.Is(err, errInjected) {
+	if _, err := e.c.Register(t.Context(), grpcproc.Member{Name: "a"}); !errors.Is(err, errInjected) {
 		t.Fatalf("Register (put): %v", err)
 	}
 	if e.lease.revoked.Load() != 1 {
@@ -176,7 +176,7 @@ func TestKeepRegistersAgainThroughFailures(t *testing.T) {
 	// KeepAlive fails at once, and so does the first registration after it.
 	e.lease.failKeeps.Store(1)
 	e.lease.failGrants.Store(0)
-	withdraw, err := e.c.Register(t.Context(), golink.Member{Name: "a", Incarnation: 1, Addr: "a:1"})
+	withdraw, err := e.c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 1, Addr: "a:1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestKeepRegistersAgainThroughFailures(t *testing.T) {
 	// Withdrawn while waiting to register again: it stops waiting.
 	e.lease.failKeeps.Store(1)
 	e.c.retry = time.Hour
-	withdraw, err = e.c.Register(t.Context(), golink.Member{Name: "b", Incarnation: 1, Addr: "b:1"})
+	withdraw, err = e.c.Register(t.Context(), grpcproc.Member{Name: "b", Incarnation: 1, Addr: "b:1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestKeepRegistersAgainThroughFailures(t *testing.T) {
 	// Withdrawn while registering again keeps failing.
 	e.c.retry = 5 * time.Millisecond
 	e.lease.failKeeps.Store(1)
-	withdraw, err = e.c.Register(t.Context(), golink.Member{Name: "c", Incarnation: 1, Addr: "c:1"})
+	withdraw, err = e.c.Register(t.Context(), grpcproc.Member{Name: "c", Incarnation: 1, Addr: "c:1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,8 +223,8 @@ func TestKeepRegistersAgainThroughFailures(t *testing.T) {
 
 func TestWatchRecoversFromABrokenWatch(t *testing.T) {
 	e := setup(t)
-	wa, _ := e.c.Register(t.Context(), golink.Member{Name: "a", Incarnation: 1, Addr: "a:1"})
-	wb, _ := e.c.Register(t.Context(), golink.Member{Name: "b", Incarnation: 1, Addr: "b:1"})
+	wa, _ := e.c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 1, Addr: "a:1"})
+	wb, _ := e.c.Register(t.Context(), grpcproc.Member{Name: "b", Incarnation: 1, Addr: "b:1"})
 	first := make(chan clientv3.WatchResponse)
 	e.watcher.first = first
 	events, err := e.c.Watch(t.Context())
@@ -235,17 +235,17 @@ func TestWatchRecoversFromABrokenWatch(t *testing.T) {
 	next(t, events)
 	// While the watch sees nothing: b leaves, a restarts, c joins.
 	_ = wb(t.Context())
-	_, _ = e.c.Register(t.Context(), golink.Member{Name: "a", Incarnation: 2, Addr: "a:2"})
-	_, _ = e.c.Register(t.Context(), golink.Member{Name: "c", Incarnation: 1, Addr: "c:1"})
+	_, _ = e.c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 2, Addr: "a:2"})
+	_, _ = e.c.Register(t.Context(), grpcproc.Member{Name: "c", Incarnation: 1, Addr: "c:1"})
 	_ = wa
 	// The watch breaks; the first attempt to list again fails too.
 	e.kv.failGets.Store(1)
 	first <- clientv3.WatchResponse{CompactRevision: 1}
-	want := []golink.MemberEvent{
-		{Member: golink.Member{Name: "a", Incarnation: 1, Addr: "a:1"}},
-		{Member: golink.Member{Name: "b", Incarnation: 1, Addr: "b:1"}},
-		{Member: golink.Member{Name: "a", Incarnation: 2, Addr: "a:2"}, Up: true},
-		{Member: golink.Member{Name: "c", Incarnation: 1, Addr: "c:1"}, Up: true},
+	want := []grpcproc.MemberEvent{
+		{Member: grpcproc.Member{Name: "a", Incarnation: 1, Addr: "a:1"}},
+		{Member: grpcproc.Member{Name: "b", Incarnation: 1, Addr: "b:1"}},
+		{Member: grpcproc.Member{Name: "a", Incarnation: 2, Addr: "a:2"}, Up: true},
+		{Member: grpcproc.Member{Name: "c", Incarnation: 1, Addr: "c:1"}, Up: true},
 	}
 	for _, w := range want {
 		if ev := next(t, events); ev != w {
@@ -253,7 +253,7 @@ func TestWatchRecoversFromABrokenWatch(t *testing.T) {
 		}
 	}
 	// And it follows the real watch from there.
-	_, _ = e.c.Register(t.Context(), golink.Member{Name: "d", Incarnation: 1, Addr: "d:1"})
+	_, _ = e.c.Register(t.Context(), grpcproc.Member{Name: "d", Incarnation: 1, Addr: "d:1"})
 	if ev := next(t, events); !ev.Up || ev.Member.Name != "d" {
 		t.Fatalf("%+v", ev)
 	}
@@ -264,27 +264,27 @@ func TestWatchRecoversFromABrokenWatch(t *testing.T) {
 func TestWatchStopsWhenNobodyReads(t *testing.T) {
 	stages := []struct {
 		name string
-		run  func(t *testing.T, e env, ctx context.Context) <-chan golink.MemberEvent
+		run  func(t *testing.T, e env, ctx context.Context) <-chan grpcproc.MemberEvent
 	}{
-		{"snapshot", func(t *testing.T, e env, ctx context.Context) <-chan golink.MemberEvent {
-			_, _ = e.c.Register(t.Context(), golink.Member{Name: "a", Incarnation: 1})
+		{"snapshot", func(t *testing.T, e env, ctx context.Context) <-chan grpcproc.MemberEvent {
+			_, _ = e.c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 1})
 			ev, _ := e.c.Watch(ctx)
 			return ev
 		}},
-		{"put", func(t *testing.T, e env, ctx context.Context) <-chan golink.MemberEvent {
+		{"put", func(t *testing.T, e env, ctx context.Context) <-chan grpcproc.MemberEvent {
 			ev, _ := e.c.Watch(ctx)
-			_, _ = e.c.Register(t.Context(), golink.Member{Name: "a", Incarnation: 1})
+			_, _ = e.c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 1})
 			return ev
 		}},
-		{"delete", func(t *testing.T, e env, ctx context.Context) <-chan golink.MemberEvent {
-			w, _ := e.c.Register(t.Context(), golink.Member{Name: "a", Incarnation: 1})
+		{"delete", func(t *testing.T, e env, ctx context.Context) <-chan grpcproc.MemberEvent {
+			w, _ := e.c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 1})
 			ev, _ := e.c.Watch(ctx)
 			next(t, ev)
 			_ = w(t.Context())
 			return ev
 		}},
-		{"relist down", func(t *testing.T, e env, ctx context.Context) <-chan golink.MemberEvent {
-			w, _ := e.c.Register(t.Context(), golink.Member{Name: "a", Incarnation: 1})
+		{"relist down", func(t *testing.T, e env, ctx context.Context) <-chan grpcproc.MemberEvent {
+			w, _ := e.c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 1})
 			first := make(chan clientv3.WatchResponse, 1)
 			e.watcher.first = first
 			ev, _ := e.c.Watch(ctx)
@@ -293,15 +293,15 @@ func TestWatchStopsWhenNobodyReads(t *testing.T) {
 			first <- clientv3.WatchResponse{CompactRevision: 1}
 			return ev
 		}},
-		{"relist up", func(t *testing.T, e env, ctx context.Context) <-chan golink.MemberEvent {
+		{"relist up", func(t *testing.T, e env, ctx context.Context) <-chan grpcproc.MemberEvent {
 			first := make(chan clientv3.WatchResponse, 1)
 			e.watcher.first = first
 			ev, _ := e.c.Watch(ctx)
-			_, _ = e.c.Register(t.Context(), golink.Member{Name: "a", Incarnation: 1})
+			_, _ = e.c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 1})
 			first <- clientv3.WatchResponse{CompactRevision: 1}
 			return ev
 		}},
-		{"waiting to list again", func(t *testing.T, e env, ctx context.Context) <-chan golink.MemberEvent {
+		{"waiting to list again", func(t *testing.T, e env, ctx context.Context) <-chan grpcproc.MemberEvent {
 			e.c.retry = time.Hour
 			first := make(chan clientv3.WatchResponse, 1)
 			e.watcher.first = first
@@ -326,7 +326,7 @@ func TestWatchStopsWhenNobodyReads(t *testing.T) {
 	}
 }
 
-func drained(ch <-chan golink.MemberEvent) <-chan struct{} {
+func drained(ch <-chan grpcproc.MemberEvent) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		for range ch {

@@ -1,4 +1,4 @@
-// golink.inspect.v1 is the inspection surface of a golink node: what
+// grpcproc.inspect.v1 is the inspection surface of a grpcproc node: what
 // processes exist, what is in their mailboxes, what each says about itself,
 // what is happening on its links. Every tool (CLI, UI, MCP server) is a
 // client of this service.
@@ -7,12 +7,12 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        (unknown)
-// source: golink/inspect/v1/inspect.proto
+// source: grpcproc/inspect/v1/inspect.proto
 
 package inspectv1
 
 import (
-	v1 "github.com/floatdrop/golink/proto/golink/v1"
+	v1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	anypb "google.golang.org/protobuf/types/known/anypb"
@@ -66,11 +66,11 @@ func (x LinkState) String() string {
 }
 
 func (LinkState) Descriptor() protoreflect.EnumDescriptor {
-	return file_golink_inspect_v1_inspect_proto_enumTypes[0].Descriptor()
+	return file_grpcproc_inspect_v1_inspect_proto_enumTypes[0].Descriptor()
 }
 
 func (LinkState) Type() protoreflect.EnumType {
-	return &file_golink_inspect_v1_inspect_proto_enumTypes[0]
+	return &file_grpcproc_inspect_v1_inspect_proto_enumTypes[0]
 }
 
 func (x LinkState) Number() protoreflect.EnumNumber {
@@ -79,7 +79,7 @@ func (x LinkState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use LinkState.Descriptor instead.
 func (LinkState) EnumDescriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{0}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{0}
 }
 
 type ProcessState int32
@@ -121,11 +121,11 @@ func (x ProcessState) String() string {
 }
 
 func (ProcessState) Descriptor() protoreflect.EnumDescriptor {
-	return file_golink_inspect_v1_inspect_proto_enumTypes[1].Descriptor()
+	return file_grpcproc_inspect_v1_inspect_proto_enumTypes[1].Descriptor()
 }
 
 func (ProcessState) Type() protoreflect.EnumType {
-	return &file_golink_inspect_v1_inspect_proto_enumTypes[1]
+	return &file_grpcproc_inspect_v1_inspect_proto_enumTypes[1]
 }
 
 func (x ProcessState) Number() protoreflect.EnumNumber {
@@ -134,7 +134,7 @@ func (x ProcessState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ProcessState.Descriptor instead.
 func (ProcessState) EnumDescriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{1}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{1}
 }
 
 type NodeID struct {
@@ -147,7 +147,7 @@ type NodeID struct {
 
 func (x *NodeID) Reset() {
 	*x = NodeID{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[0]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -159,7 +159,7 @@ func (x *NodeID) String() string {
 func (*NodeID) ProtoMessage() {}
 
 func (x *NodeID) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[0]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -172,7 +172,7 @@ func (x *NodeID) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeID.ProtoReflect.Descriptor instead.
 func (*NodeID) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{0}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *NodeID) GetName() string {
@@ -193,7 +193,7 @@ type Link struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Peer          *NodeID                `protobuf:"bytes,1,opt,name=peer,proto3" json:"peer,omitempty"`
 	Outbound      bool                   `protobuf:"varint,2,opt,name=outbound,proto3" json:"outbound,omitempty"`
-	State         LinkState              `protobuf:"varint,3,opt,name=state,proto3,enum=golink.inspect.v1.LinkState" json:"state,omitempty"`
+	State         LinkState              `protobuf:"varint,3,opt,name=state,proto3,enum=grpcproc.inspect.v1.LinkState" json:"state,omitempty"`
 	EstablishedAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=established_at,json=establishedAt,proto3" json:"established_at,omitempty"`
 	Reconnects    uint64                 `protobuf:"varint,5,opt,name=reconnects,proto3" json:"reconnects,omitempty"`
 	Messages      uint64                 `protobuf:"varint,6,opt,name=messages,proto3" json:"messages,omitempty"`
@@ -205,7 +205,7 @@ type Link struct {
 
 func (x *Link) Reset() {
 	*x = Link{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[1]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -217,7 +217,7 @@ func (x *Link) String() string {
 func (*Link) ProtoMessage() {}
 
 func (x *Link) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[1]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -230,7 +230,7 @@ func (x *Link) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Link.ProtoReflect.Descriptor instead.
 func (*Link) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{1}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Link) GetPeer() *NodeID {
@@ -305,7 +305,7 @@ type NodeInfo struct {
 
 func (x *NodeInfo) Reset() {
 	*x = NodeInfo{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[2]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -317,7 +317,7 @@ func (x *NodeInfo) String() string {
 func (*NodeInfo) ProtoMessage() {}
 
 func (x *NodeInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[2]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -330,7 +330,7 @@ func (x *NodeInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeInfo.ProtoReflect.Descriptor instead.
 func (*NodeInfo) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{2}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *NodeInfo) GetId() *NodeID {
@@ -400,7 +400,7 @@ type Mailbox struct {
 
 func (x *Mailbox) Reset() {
 	*x = Mailbox{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[3]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -412,7 +412,7 @@ func (x *Mailbox) String() string {
 func (*Mailbox) ProtoMessage() {}
 
 func (x *Mailbox) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[3]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -425,7 +425,7 @@ func (x *Mailbox) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Mailbox.ProtoReflect.Descriptor instead.
 func (*Mailbox) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{3}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Mailbox) GetDepth() uint32 {
@@ -456,7 +456,7 @@ type ProcessInfo struct {
 	Label         string                 `protobuf:"bytes,3,opt,name=label,proto3" json:"label,omitempty"`
 	Type          string                 `protobuf:"bytes,4,opt,name=type,proto3" json:"type,omitempty"`
 	Parent        *v1.PID                `protobuf:"bytes,5,opt,name=parent,proto3" json:"parent,omitempty"`
-	State         ProcessState           `protobuf:"varint,6,opt,name=state,proto3,enum=golink.inspect.v1.ProcessState" json:"state,omitempty"`
+	State         ProcessState           `protobuf:"varint,6,opt,name=state,proto3,enum=grpcproc.inspect.v1.ProcessState" json:"state,omitempty"`
 	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
 	Mailbox       *Mailbox               `protobuf:"bytes,8,opt,name=mailbox,proto3" json:"mailbox,omitempty"`
 	Received      uint64                 `protobuf:"varint,9,opt,name=received,proto3" json:"received,omitempty"`
@@ -474,7 +474,7 @@ type ProcessInfo struct {
 
 func (x *ProcessInfo) Reset() {
 	*x = ProcessInfo{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[4]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -486,7 +486,7 @@ func (x *ProcessInfo) String() string {
 func (*ProcessInfo) ProtoMessage() {}
 
 func (x *ProcessInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[4]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -499,7 +499,7 @@ func (x *ProcessInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessInfo.ProtoReflect.Descriptor instead.
 func (*ProcessInfo) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{4}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ProcessInfo) GetPid() *v1.PID {
@@ -628,7 +628,7 @@ type Target struct {
 
 func (x *Target) Reset() {
 	*x = Target{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[5]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -640,7 +640,7 @@ func (x *Target) String() string {
 func (*Target) ProtoMessage() {}
 
 func (x *Target) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[5]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -653,7 +653,7 @@ func (x *Target) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Target.ProtoReflect.Descriptor instead.
 func (*Target) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{5}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Target) GetKind() isTarget_Kind {
@@ -706,7 +706,7 @@ type GetNodeRequest struct {
 
 func (x *GetNodeRequest) Reset() {
 	*x = GetNodeRequest{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[6]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -718,7 +718,7 @@ func (x *GetNodeRequest) String() string {
 func (*GetNodeRequest) ProtoMessage() {}
 
 func (x *GetNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[6]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -731,7 +731,7 @@ func (x *GetNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNodeRequest.ProtoReflect.Descriptor instead.
 func (*GetNodeRequest) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{6}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *GetNodeRequest) GetNode() string {
@@ -750,7 +750,7 @@ type GetNodeResponse struct {
 
 func (x *GetNodeResponse) Reset() {
 	*x = GetNodeResponse{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[7]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -762,7 +762,7 @@ func (x *GetNodeResponse) String() string {
 func (*GetNodeResponse) ProtoMessage() {}
 
 func (x *GetNodeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[7]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -775,7 +775,7 @@ func (x *GetNodeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNodeResponse.ProtoReflect.Descriptor instead.
 func (*GetNodeResponse) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{7}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GetNodeResponse) GetNode() *NodeInfo {
@@ -793,7 +793,7 @@ type ListProcessesRequest struct {
 	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// Exact label.
 	Label string       `protobuf:"bytes,3,opt,name=label,proto3" json:"label,omitempty"`
-	State ProcessState `protobuf:"varint,4,opt,name=state,proto3,enum=golink.inspect.v1.ProcessState" json:"state,omitempty"`
+	State ProcessState `protobuf:"varint,4,opt,name=state,proto3,enum=grpcproc.inspect.v1.ProcessState" json:"state,omitempty"`
 	// Only processes whose mailbox holds at least this many messages.
 	MinMailbox    uint32 `protobuf:"varint,5,opt,name=min_mailbox,json=minMailbox,proto3" json:"min_mailbox,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -802,7 +802,7 @@ type ListProcessesRequest struct {
 
 func (x *ListProcessesRequest) Reset() {
 	*x = ListProcessesRequest{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[8]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -814,7 +814,7 @@ func (x *ListProcessesRequest) String() string {
 func (*ListProcessesRequest) ProtoMessage() {}
 
 func (x *ListProcessesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[8]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -827,7 +827,7 @@ func (x *ListProcessesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProcessesRequest.ProtoReflect.Descriptor instead.
 func (*ListProcessesRequest) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{8}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListProcessesRequest) GetNode() string {
@@ -874,7 +874,7 @@ type ListProcessesResponse struct {
 
 func (x *ListProcessesResponse) Reset() {
 	*x = ListProcessesResponse{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[9]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -886,7 +886,7 @@ func (x *ListProcessesResponse) String() string {
 func (*ListProcessesResponse) ProtoMessage() {}
 
 func (x *ListProcessesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[9]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -899,7 +899,7 @@ func (x *ListProcessesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProcessesResponse.ProtoReflect.Descriptor instead.
 func (*ListProcessesResponse) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{9}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ListProcessesResponse) GetProcesses() []*ProcessInfo {
@@ -923,7 +923,7 @@ type GetProcessRequest struct {
 
 func (x *GetProcessRequest) Reset() {
 	*x = GetProcessRequest{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[10]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -935,7 +935,7 @@ func (x *GetProcessRequest) String() string {
 func (*GetProcessRequest) ProtoMessage() {}
 
 func (x *GetProcessRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[10]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -948,7 +948,7 @@ func (x *GetProcessRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProcessRequest.ProtoReflect.Descriptor instead.
 func (*GetProcessRequest) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{10}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GetProcessRequest) GetNode() string {
@@ -992,7 +992,7 @@ type GetProcessResponse struct {
 
 func (x *GetProcessResponse) Reset() {
 	*x = GetProcessResponse{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[11]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1004,7 +1004,7 @@ func (x *GetProcessResponse) String() string {
 func (*GetProcessResponse) ProtoMessage() {}
 
 func (x *GetProcessResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[11]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1017,7 +1017,7 @@ func (x *GetProcessResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProcessResponse.ProtoReflect.Descriptor instead.
 func (*GetProcessResponse) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{11}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GetProcessResponse) GetProcess() *ProcessInfo {
@@ -1052,7 +1052,7 @@ type SetLogLevelRequest struct {
 
 func (x *SetLogLevelRequest) Reset() {
 	*x = SetLogLevelRequest{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[12]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1064,7 +1064,7 @@ func (x *SetLogLevelRequest) String() string {
 func (*SetLogLevelRequest) ProtoMessage() {}
 
 func (x *SetLogLevelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[12]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1077,7 +1077,7 @@ func (x *SetLogLevelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetLogLevelRequest.ProtoReflect.Descriptor instead.
 func (*SetLogLevelRequest) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{12}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *SetLogLevelRequest) GetNode() string {
@@ -1109,7 +1109,7 @@ type SetLogLevelResponse struct {
 
 func (x *SetLogLevelResponse) Reset() {
 	*x = SetLogLevelResponse{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[13]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1121,7 +1121,7 @@ func (x *SetLogLevelResponse) String() string {
 func (*SetLogLevelResponse) ProtoMessage() {}
 
 func (x *SetLogLevelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[13]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1134,7 +1134,7 @@ func (x *SetLogLevelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetLogLevelResponse.ProtoReflect.Descriptor instead.
 func (*SetLogLevelResponse) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{13}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{13}
 }
 
 type SendRequest struct {
@@ -1148,7 +1148,7 @@ type SendRequest struct {
 
 func (x *SendRequest) Reset() {
 	*x = SendRequest{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[14]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1160,7 +1160,7 @@ func (x *SendRequest) String() string {
 func (*SendRequest) ProtoMessage() {}
 
 func (x *SendRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[14]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1173,7 +1173,7 @@ func (x *SendRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendRequest.ProtoReflect.Descriptor instead.
 func (*SendRequest) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{14}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SendRequest) GetNode() string {
@@ -1205,7 +1205,7 @@ type SendResponse struct {
 
 func (x *SendResponse) Reset() {
 	*x = SendResponse{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[15]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1217,7 +1217,7 @@ func (x *SendResponse) String() string {
 func (*SendResponse) ProtoMessage() {}
 
 func (x *SendResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[15]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1230,7 +1230,7 @@ func (x *SendResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendResponse.ProtoReflect.Descriptor instead.
 func (*SendResponse) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{15}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{15}
 }
 
 type ExitRequest struct {
@@ -1244,7 +1244,7 @@ type ExitRequest struct {
 
 func (x *ExitRequest) Reset() {
 	*x = ExitRequest{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[16]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1256,7 +1256,7 @@ func (x *ExitRequest) String() string {
 func (*ExitRequest) ProtoMessage() {}
 
 func (x *ExitRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[16]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1269,7 +1269,7 @@ func (x *ExitRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExitRequest.ProtoReflect.Descriptor instead.
 func (*ExitRequest) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{16}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ExitRequest) GetNode() string {
@@ -1301,7 +1301,7 @@ type ExitResponse struct {
 
 func (x *ExitResponse) Reset() {
 	*x = ExitResponse{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[17]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1313,7 +1313,7 @@ func (x *ExitResponse) String() string {
 func (*ExitResponse) ProtoMessage() {}
 
 func (x *ExitResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[17]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1326,7 +1326,7 @@ func (x *ExitResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExitResponse.ProtoReflect.Descriptor instead.
 func (*ExitResponse) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{17}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{17}
 }
 
 type WatchRequest struct {
@@ -1341,7 +1341,7 @@ type WatchRequest struct {
 
 func (x *WatchRequest) Reset() {
 	*x = WatchRequest{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[18]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1353,7 +1353,7 @@ func (x *WatchRequest) String() string {
 func (*WatchRequest) ProtoMessage() {}
 
 func (x *WatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[18]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1366,7 +1366,7 @@ func (x *WatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchRequest.ProtoReflect.Descriptor instead.
 func (*WatchRequest) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{18}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *WatchRequest) GetNode() string {
@@ -1392,7 +1392,7 @@ type WatchResponse struct {
 
 func (x *WatchResponse) Reset() {
 	*x = WatchResponse{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[19]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1404,7 +1404,7 @@ func (x *WatchResponse) String() string {
 func (*WatchResponse) ProtoMessage() {}
 
 func (x *WatchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[19]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1417,7 +1417,7 @@ func (x *WatchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchResponse.ProtoReflect.Descriptor instead.
 func (*WatchResponse) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{19}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *WatchResponse) GetEvent() *Event {
@@ -1446,7 +1446,7 @@ type Event struct {
 
 func (x *Event) Reset() {
 	*x = Event{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[20]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1458,7 +1458,7 @@ func (x *Event) String() string {
 func (*Event) ProtoMessage() {}
 
 func (x *Event) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[20]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1471,7 +1471,7 @@ func (x *Event) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Event.ProtoReflect.Descriptor instead.
 func (*Event) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{20}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *Event) GetTime() *timestamppb.Timestamp {
@@ -1584,7 +1584,7 @@ type Exited struct {
 
 func (x *Exited) Reset() {
 	*x = Exited{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[21]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1596,7 +1596,7 @@ func (x *Exited) String() string {
 func (*Exited) ProtoMessage() {}
 
 func (x *Exited) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[21]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1609,7 +1609,7 @@ func (x *Exited) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Exited.ProtoReflect.Descriptor instead.
 func (*Exited) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{21}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *Exited) GetProcess() *ProcessInfo {
@@ -1636,7 +1636,7 @@ type LinkDown struct {
 
 func (x *LinkDown) Reset() {
 	*x = LinkDown{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[22]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1648,7 +1648,7 @@ func (x *LinkDown) String() string {
 func (*LinkDown) ProtoMessage() {}
 
 func (x *LinkDown) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[22]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1661,7 +1661,7 @@ func (x *LinkDown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LinkDown.ProtoReflect.Descriptor instead.
 func (*LinkDown) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{22}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *LinkDown) GetPeer() *NodeID {
@@ -1691,7 +1691,7 @@ type DeadLetter struct {
 
 func (x *DeadLetter) Reset() {
 	*x = DeadLetter{}
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[23]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1703,7 +1703,7 @@ func (x *DeadLetter) String() string {
 func (*DeadLetter) ProtoMessage() {}
 
 func (x *DeadLetter) ProtoReflect() protoreflect.Message {
-	mi := &file_golink_inspect_v1_inspect_proto_msgTypes[23]
+	mi := &file_grpcproc_inspect_v1_inspect_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1716,7 +1716,7 @@ func (x *DeadLetter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeadLetter.ProtoReflect.Descriptor instead.
 func (*DeadLetter) Descriptor() ([]byte, []int) {
-	return file_golink_inspect_v1_inspect_proto_rawDescGZIP(), []int{23}
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *DeadLetter) GetFrom() *v1.PID {
@@ -1747,18 +1747,18 @@ func (x *DeadLetter) GetReason() string {
 	return ""
 }
 
-var File_golink_inspect_v1_inspect_proto protoreflect.FileDescriptor
+var File_grpcproc_inspect_v1_inspect_proto protoreflect.FileDescriptor
 
-const file_golink_inspect_v1_inspect_proto_rawDesc = "" +
+const file_grpcproc_inspect_v1_inspect_proto_rawDesc = "" +
 	"\n" +
-	"\x1fgolink/inspect/v1/inspect.proto\x12\x11golink.inspect.v1\x1a\x16golink/v1/golink.proto\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\">\n" +
+	"!grpcproc/inspect/v1/inspect.proto\x12\x13grpcproc.inspect.v1\x1a\x1agrpcproc/v1/grpcproc.proto\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\">\n" +
 	"\x06NodeID\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
-	"\vincarnation\x18\x02 \x01(\x04R\vincarnation\"\xb9\x02\n" +
-	"\x04Link\x12-\n" +
-	"\x04peer\x18\x01 \x01(\v2\x19.golink.inspect.v1.NodeIDR\x04peer\x12\x1a\n" +
-	"\boutbound\x18\x02 \x01(\bR\boutbound\x122\n" +
-	"\x05state\x18\x03 \x01(\x0e2\x1c.golink.inspect.v1.LinkStateR\x05state\x12A\n" +
+	"\vincarnation\x18\x02 \x01(\x04R\vincarnation\"\xbd\x02\n" +
+	"\x04Link\x12/\n" +
+	"\x04peer\x18\x01 \x01(\v2\x1b.grpcproc.inspect.v1.NodeIDR\x04peer\x12\x1a\n" +
+	"\boutbound\x18\x02 \x01(\bR\boutbound\x124\n" +
+	"\x05state\x18\x03 \x01(\x0e2\x1e.grpcproc.inspect.v1.LinkStateR\x05state\x12A\n" +
 	"\x0eestablished_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\restablishedAt\x12\x1e\n" +
 	"\n" +
 	"reconnects\x18\x05 \x01(\x04R\n" +
@@ -1766,32 +1766,32 @@ const file_golink_inspect_v1_inspect_proto_rawDesc = "" +
 	"\bmessages\x18\x06 \x01(\x04R\bmessages\x12\x14\n" +
 	"\x05bytes\x18\a \x01(\x04R\x05bytes\x12\x1d\n" +
 	"\n" +
-	"last_error\x18\b \x01(\tR\tlastError\"\xb0\x02\n" +
-	"\bNodeInfo\x12)\n" +
-	"\x02id\x18\x01 \x01(\v2\x19.golink.inspect.v1.NodeIDR\x02id\x12\x1c\n" +
+	"last_error\x18\b \x01(\tR\tlastError\"\xb4\x02\n" +
+	"\bNodeInfo\x12+\n" +
+	"\x02id\x18\x01 \x01(\v2\x1b.grpcproc.inspect.v1.NodeIDR\x02id\x12\x1c\n" +
 	"\tadvertise\x18\x02 \x01(\tR\tadvertise\x129\n" +
 	"\n" +
 	"started_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12\x1c\n" +
 	"\tprocesses\x18\x04 \x01(\rR\tprocesses\x12\x18\n" +
 	"\aspawned\x18\x05 \x01(\x04R\aspawned\x12\x16\n" +
 	"\x06exited\x18\x06 \x01(\x04R\x06exited\x12!\n" +
-	"\fdead_letters\x18\a \x01(\x04R\vdeadLetters\x12-\n" +
-	"\x05links\x18\b \x03(\v2\x17.golink.inspect.v1.LinkR\x05links\"m\n" +
+	"\fdead_letters\x18\a \x01(\x04R\vdeadLetters\x12/\n" +
+	"\x05links\x18\b \x03(\v2\x19.grpcproc.inspect.v1.LinkR\x05links\"m\n" +
 	"\aMailbox\x12\x14\n" +
 	"\x05depth\x18\x01 \x01(\rR\x05depth\x12\x12\n" +
 	"\x04peak\x18\x02 \x01(\rR\x04peak\x128\n" +
 	"\n" +
-	"oldest_age\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\toldestAge\"\xa9\x04\n" +
-	"\vProcessInfo\x12 \n" +
-	"\x03pid\x18\x01 \x01(\v2\x0e.golink.v1.PIDR\x03pid\x12\x14\n" +
+	"oldest_age\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\toldestAge\"\xb1\x04\n" +
+	"\vProcessInfo\x12\"\n" +
+	"\x03pid\x18\x01 \x01(\v2\x10.grpcproc.v1.PIDR\x03pid\x12\x14\n" +
 	"\x05names\x18\x02 \x03(\tR\x05names\x12\x14\n" +
 	"\x05label\x18\x03 \x01(\tR\x05label\x12\x12\n" +
-	"\x04type\x18\x04 \x01(\tR\x04type\x12&\n" +
-	"\x06parent\x18\x05 \x01(\v2\x0e.golink.v1.PIDR\x06parent\x125\n" +
-	"\x05state\x18\x06 \x01(\x0e2\x1f.golink.inspect.v1.ProcessStateR\x05state\x129\n" +
+	"\x04type\x18\x04 \x01(\tR\x04type\x12(\n" +
+	"\x06parent\x18\x05 \x01(\v2\x10.grpcproc.v1.PIDR\x06parent\x127\n" +
+	"\x05state\x18\x06 \x01(\x0e2!.grpcproc.inspect.v1.ProcessStateR\x05state\x129\n" +
 	"\n" +
-	"started_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x124\n" +
-	"\amailbox\x18\b \x01(\v2\x1a.golink.inspect.v1.MailboxR\amailbox\x12\x1a\n" +
+	"started_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x126\n" +
+	"\amailbox\x18\b \x01(\v2\x1c.grpcproc.inspect.v1.MailboxR\amailbox\x12\x1a\n" +
 	"\breceived\x18\t \x01(\x04R\breceived\x12\x12\n" +
 	"\x04sent\x18\n" +
 	" \x01(\x04R\x04sent\x12&\n" +
@@ -1800,76 +1800,76 @@ const file_golink_inspect_v1_inspect_proto_rawDesc = "" +
 	"\bmonitors\x18\r \x01(\rR\bmonitors\x12\x1a\n" +
 	"\bwatchers\x18\x0e \x01(\rR\bwatchers\x12\x18\n" +
 	"\awakeups\x18\x0f \x01(\x04R\awakeups\x12\x1b\n" +
-	"\tlog_level\x18\x10 \x01(\x11R\blogLevel\"J\n" +
-	"\x06Target\x12\"\n" +
-	"\x03pid\x18\x01 \x01(\v2\x0e.golink.v1.PIDH\x00R\x03pid\x12\x14\n" +
+	"\tlog_level\x18\x10 \x01(\x11R\blogLevel\"L\n" +
+	"\x06Target\x12$\n" +
+	"\x03pid\x18\x01 \x01(\v2\x10.grpcproc.v1.PIDH\x00R\x03pid\x12\x14\n" +
 	"\x04name\x18\x02 \x01(\tH\x00R\x04nameB\x06\n" +
 	"\x04kind\"$\n" +
 	"\x0eGetNodeRequest\x12\x12\n" +
-	"\x04node\x18\x01 \x01(\tR\x04node\"B\n" +
-	"\x0fGetNodeResponse\x12/\n" +
-	"\x04node\x18\x01 \x01(\v2\x1b.golink.inspect.v1.NodeInfoR\x04node\"\xac\x01\n" +
+	"\x04node\x18\x01 \x01(\tR\x04node\"D\n" +
+	"\x0fGetNodeResponse\x121\n" +
+	"\x04node\x18\x01 \x01(\v2\x1d.grpcproc.inspect.v1.NodeInfoR\x04node\"\xae\x01\n" +
 	"\x14ListProcessesRequest\x12\x12\n" +
 	"\x04node\x18\x01 \x01(\tR\x04node\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
-	"\x05label\x18\x03 \x01(\tR\x05label\x125\n" +
-	"\x05state\x18\x04 \x01(\x0e2\x1f.golink.inspect.v1.ProcessStateR\x05state\x12\x1f\n" +
+	"\x05label\x18\x03 \x01(\tR\x05label\x127\n" +
+	"\x05state\x18\x04 \x01(\x0e2!.grpcproc.inspect.v1.ProcessStateR\x05state\x12\x1f\n" +
 	"\vmin_mailbox\x18\x05 \x01(\rR\n" +
-	"minMailbox\"U\n" +
-	"\x15ListProcessesResponse\x12<\n" +
-	"\tprocesses\x18\x01 \x03(\v2\x1e.golink.inspect.v1.ProcessInfoR\tprocesses\"\xb8\x01\n" +
+	"minMailbox\"W\n" +
+	"\x15ListProcessesResponse\x12>\n" +
+	"\tprocesses\x18\x01 \x03(\v2 .grpcproc.inspect.v1.ProcessInfoR\tprocesses\"\xba\x01\n" +
 	"\x11GetProcessRequest\x12\x12\n" +
-	"\x04node\x18\x01 \x01(\tR\x04node\x121\n" +
-	"\x06target\x18\x02 \x01(\v2\x19.golink.inspect.v1.TargetR\x06target\x12\x18\n" +
+	"\x04node\x18\x01 \x01(\tR\x04node\x123\n" +
+	"\x06target\x18\x02 \x01(\v2\x1b.grpcproc.inspect.v1.TargetR\x06target\x12\x18\n" +
 	"\ainspect\x18\x03 \x01(\bR\ainspect\x12B\n" +
-	"\x0finspect_timeout\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x0einspectTimeout\"\xfd\x01\n" +
-	"\x12GetProcessResponse\x128\n" +
-	"\aprocess\x18\x01 \x01(\v2\x1e.golink.inspect.v1.ProcessInfoR\aprocess\x12L\n" +
-	"\ainspect\x18\x02 \x03(\v22.golink.inspect.v1.GetProcessResponse.InspectEntryR\ainspect\x12#\n" +
+	"\x0finspect_timeout\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x0einspectTimeout\"\x81\x02\n" +
+	"\x12GetProcessResponse\x12:\n" +
+	"\aprocess\x18\x01 \x01(\v2 .grpcproc.inspect.v1.ProcessInfoR\aprocess\x12N\n" +
+	"\ainspect\x18\x02 \x03(\v24.grpcproc.inspect.v1.GetProcessResponse.InspectEntryR\ainspect\x12#\n" +
 	"\rinspect_error\x18\x03 \x01(\tR\finspectError\x1a:\n" +
 	"\fInspectEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"q\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"s\n" +
 	"\x12SetLogLevelRequest\x12\x12\n" +
-	"\x04node\x18\x01 \x01(\tR\x04node\x121\n" +
-	"\x06target\x18\x02 \x01(\v2\x19.golink.inspect.v1.TargetR\x06target\x12\x14\n" +
+	"\x04node\x18\x01 \x01(\tR\x04node\x123\n" +
+	"\x06target\x18\x02 \x01(\v2\x1b.grpcproc.inspect.v1.TargetR\x06target\x12\x14\n" +
 	"\x05level\x18\x03 \x01(\x11R\x05level\"\x15\n" +
-	"\x13SetLogLevelResponse\"~\n" +
+	"\x13SetLogLevelResponse\"\x80\x01\n" +
 	"\vSendRequest\x12\x12\n" +
-	"\x04node\x18\x01 \x01(\tR\x04node\x121\n" +
-	"\x06target\x18\x02 \x01(\v2\x19.golink.inspect.v1.TargetR\x06target\x12(\n" +
+	"\x04node\x18\x01 \x01(\tR\x04node\x123\n" +
+	"\x06target\x18\x02 \x01(\v2\x1b.grpcproc.inspect.v1.TargetR\x06target\x12(\n" +
 	"\x04body\x18\x03 \x01(\v2\x14.google.protobuf.AnyR\x04body\"\x0e\n" +
-	"\fSendResponse\"l\n" +
+	"\fSendResponse\"n\n" +
 	"\vExitRequest\x12\x12\n" +
-	"\x04node\x18\x01 \x01(\tR\x04node\x121\n" +
-	"\x06target\x18\x02 \x01(\v2\x19.golink.inspect.v1.TargetR\x06target\x12\x16\n" +
+	"\x04node\x18\x01 \x01(\tR\x04node\x123\n" +
+	"\x06target\x18\x02 \x01(\v2\x1b.grpcproc.inspect.v1.TargetR\x06target\x12\x16\n" +
 	"\x06reason\x18\x03 \x01(\tR\x06reason\"\x0e\n" +
 	"\fExitResponse\":\n" +
 	"\fWatchRequest\x12\x12\n" +
 	"\x04node\x18\x01 \x01(\tR\x04node\x12\x16\n" +
-	"\x06buffer\x18\x02 \x01(\rR\x06buffer\"?\n" +
-	"\rWatchResponse\x12.\n" +
-	"\x05event\x18\x01 \x01(\v2\x18.golink.inspect.v1.EventR\x05event\"\xfc\x02\n" +
+	"\x06buffer\x18\x02 \x01(\rR\x06buffer\"A\n" +
+	"\rWatchResponse\x120\n" +
+	"\x05event\x18\x01 \x01(\v2\x1a.grpcproc.inspect.v1.EventR\x05event\"\x86\x03\n" +
 	"\x05Event\x12.\n" +
 	"\x04time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x12\x16\n" +
-	"\x06missed\x18\x02 \x01(\x04R\x06missed\x12:\n" +
-	"\aspawned\x18\x03 \x01(\v2\x1e.golink.inspect.v1.ProcessInfoH\x00R\aspawned\x123\n" +
-	"\x06exited\x18\x04 \x01(\v2\x19.golink.inspect.v1.ExitedH\x00R\x06exited\x124\n" +
-	"\alink_up\x18\x05 \x01(\v2\x19.golink.inspect.v1.NodeIDH\x00R\x06linkUp\x12:\n" +
-	"\tlink_down\x18\x06 \x01(\v2\x1b.golink.inspect.v1.LinkDownH\x00R\blinkDown\x12@\n" +
-	"\vdead_letter\x18\a \x01(\v2\x1d.golink.inspect.v1.DeadLetterH\x00R\n" +
+	"\x06missed\x18\x02 \x01(\x04R\x06missed\x12<\n" +
+	"\aspawned\x18\x03 \x01(\v2 .grpcproc.inspect.v1.ProcessInfoH\x00R\aspawned\x125\n" +
+	"\x06exited\x18\x04 \x01(\v2\x1b.grpcproc.inspect.v1.ExitedH\x00R\x06exited\x126\n" +
+	"\alink_up\x18\x05 \x01(\v2\x1b.grpcproc.inspect.v1.NodeIDH\x00R\x06linkUp\x12<\n" +
+	"\tlink_down\x18\x06 \x01(\v2\x1d.grpcproc.inspect.v1.LinkDownH\x00R\blinkDown\x12B\n" +
+	"\vdead_letter\x18\a \x01(\v2\x1f.grpcproc.inspect.v1.DeadLetterH\x00R\n" +
 	"deadLetterB\x06\n" +
-	"\x04kind\"Z\n" +
-	"\x06Exited\x128\n" +
-	"\aprocess\x18\x01 \x01(\v2\x1e.golink.inspect.v1.ProcessInfoR\aprocess\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"O\n" +
-	"\bLinkDown\x12-\n" +
-	"\x04peer\x18\x01 \x01(\v2\x19.golink.inspect.v1.NodeIDR\x04peer\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"|\n" +
+	"\x04kind\"\\\n" +
+	"\x06Exited\x12:\n" +
+	"\aprocess\x18\x01 \x01(\v2 .grpcproc.inspect.v1.ProcessInfoR\aprocess\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"Q\n" +
+	"\bLinkDown\x12/\n" +
+	"\x04peer\x18\x01 \x01(\v2\x1b.grpcproc.inspect.v1.NodeIDR\x04peer\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\x80\x01\n" +
 	"\n" +
-	"DeadLetter\x12\"\n" +
-	"\x04from\x18\x01 \x01(\v2\x0e.golink.v1.PIDR\x04from\x12\x1e\n" +
-	"\x02to\x18\x02 \x01(\v2\x0e.golink.v1.PIDR\x02to\x12\x12\n" +
+	"DeadLetter\x12$\n" +
+	"\x04from\x18\x01 \x01(\v2\x10.grpcproc.v1.PIDR\x04from\x12 \n" +
+	"\x02to\x18\x02 \x01(\v2\x10.grpcproc.v1.PIDR\x02to\x12\x12\n" +
 	"\x04type\x18\x03 \x01(\tR\x04type\x12\x16\n" +
 	"\x06reason\x18\x04 \x01(\tR\x06reason*j\n" +
 	"\tLinkState\x12\x1a\n" +
@@ -1882,114 +1882,114 @@ const file_golink_inspect_v1_inspect_proto_rawDesc = "" +
 	"\x12PROCESS_STATE_IDLE\x10\x01\x12\x19\n" +
 	"\x15PROCESS_STATE_RUNNING\x10\x02\x12\x1f\n" +
 	"\x1bPROCESS_STATE_WAITING_REPLY\x10\x03\x12\x19\n" +
-	"\x15PROCESS_STATE_EXITING\x10\x042\xda\x04\n" +
-	"\tInspector\x12P\n" +
-	"\aGetNode\x12!.golink.inspect.v1.GetNodeRequest\x1a\".golink.inspect.v1.GetNodeResponse\x12b\n" +
-	"\rListProcesses\x12'.golink.inspect.v1.ListProcessesRequest\x1a(.golink.inspect.v1.ListProcessesResponse\x12Y\n" +
+	"\x15PROCESS_STATE_EXITING\x10\x042\xf6\x04\n" +
+	"\tInspector\x12T\n" +
+	"\aGetNode\x12#.grpcproc.inspect.v1.GetNodeRequest\x1a$.grpcproc.inspect.v1.GetNodeResponse\x12f\n" +
+	"\rListProcesses\x12).grpcproc.inspect.v1.ListProcessesRequest\x1a*.grpcproc.inspect.v1.ListProcessesResponse\x12]\n" +
 	"\n" +
-	"GetProcess\x12$.golink.inspect.v1.GetProcessRequest\x1a%.golink.inspect.v1.GetProcessResponse\x12\\\n" +
-	"\vSetLogLevel\x12%.golink.inspect.v1.SetLogLevelRequest\x1a&.golink.inspect.v1.SetLogLevelResponse\x12G\n" +
-	"\x04Send\x12\x1e.golink.inspect.v1.SendRequest\x1a\x1f.golink.inspect.v1.SendResponse\x12G\n" +
-	"\x04Exit\x12\x1e.golink.inspect.v1.ExitRequest\x1a\x1f.golink.inspect.v1.ExitResponse\x12L\n" +
-	"\x05Watch\x12\x1f.golink.inspect.v1.WatchRequest\x1a .golink.inspect.v1.WatchResponse0\x01B?Z=github.com/floatdrop/golink/proto/golink/inspect/v1;inspectv1b\x06proto3"
+	"GetProcess\x12&.grpcproc.inspect.v1.GetProcessRequest\x1a'.grpcproc.inspect.v1.GetProcessResponse\x12`\n" +
+	"\vSetLogLevel\x12'.grpcproc.inspect.v1.SetLogLevelRequest\x1a(.grpcproc.inspect.v1.SetLogLevelResponse\x12K\n" +
+	"\x04Send\x12 .grpcproc.inspect.v1.SendRequest\x1a!.grpcproc.inspect.v1.SendResponse\x12K\n" +
+	"\x04Exit\x12 .grpcproc.inspect.v1.ExitRequest\x1a!.grpcproc.inspect.v1.ExitResponse\x12P\n" +
+	"\x05Watch\x12!.grpcproc.inspect.v1.WatchRequest\x1a\".grpcproc.inspect.v1.WatchResponse0\x01BCZAgithub.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1;inspectv1b\x06proto3"
 
 var (
-	file_golink_inspect_v1_inspect_proto_rawDescOnce sync.Once
-	file_golink_inspect_v1_inspect_proto_rawDescData []byte
+	file_grpcproc_inspect_v1_inspect_proto_rawDescOnce sync.Once
+	file_grpcproc_inspect_v1_inspect_proto_rawDescData []byte
 )
 
-func file_golink_inspect_v1_inspect_proto_rawDescGZIP() []byte {
-	file_golink_inspect_v1_inspect_proto_rawDescOnce.Do(func() {
-		file_golink_inspect_v1_inspect_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_golink_inspect_v1_inspect_proto_rawDesc), len(file_golink_inspect_v1_inspect_proto_rawDesc)))
+func file_grpcproc_inspect_v1_inspect_proto_rawDescGZIP() []byte {
+	file_grpcproc_inspect_v1_inspect_proto_rawDescOnce.Do(func() {
+		file_grpcproc_inspect_v1_inspect_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_grpcproc_inspect_v1_inspect_proto_rawDesc), len(file_grpcproc_inspect_v1_inspect_proto_rawDesc)))
 	})
-	return file_golink_inspect_v1_inspect_proto_rawDescData
+	return file_grpcproc_inspect_v1_inspect_proto_rawDescData
 }
 
-var file_golink_inspect_v1_inspect_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_golink_inspect_v1_inspect_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
-var file_golink_inspect_v1_inspect_proto_goTypes = []any{
-	(LinkState)(0),                // 0: golink.inspect.v1.LinkState
-	(ProcessState)(0),             // 1: golink.inspect.v1.ProcessState
-	(*NodeID)(nil),                // 2: golink.inspect.v1.NodeID
-	(*Link)(nil),                  // 3: golink.inspect.v1.Link
-	(*NodeInfo)(nil),              // 4: golink.inspect.v1.NodeInfo
-	(*Mailbox)(nil),               // 5: golink.inspect.v1.Mailbox
-	(*ProcessInfo)(nil),           // 6: golink.inspect.v1.ProcessInfo
-	(*Target)(nil),                // 7: golink.inspect.v1.Target
-	(*GetNodeRequest)(nil),        // 8: golink.inspect.v1.GetNodeRequest
-	(*GetNodeResponse)(nil),       // 9: golink.inspect.v1.GetNodeResponse
-	(*ListProcessesRequest)(nil),  // 10: golink.inspect.v1.ListProcessesRequest
-	(*ListProcessesResponse)(nil), // 11: golink.inspect.v1.ListProcessesResponse
-	(*GetProcessRequest)(nil),     // 12: golink.inspect.v1.GetProcessRequest
-	(*GetProcessResponse)(nil),    // 13: golink.inspect.v1.GetProcessResponse
-	(*SetLogLevelRequest)(nil),    // 14: golink.inspect.v1.SetLogLevelRequest
-	(*SetLogLevelResponse)(nil),   // 15: golink.inspect.v1.SetLogLevelResponse
-	(*SendRequest)(nil),           // 16: golink.inspect.v1.SendRequest
-	(*SendResponse)(nil),          // 17: golink.inspect.v1.SendResponse
-	(*ExitRequest)(nil),           // 18: golink.inspect.v1.ExitRequest
-	(*ExitResponse)(nil),          // 19: golink.inspect.v1.ExitResponse
-	(*WatchRequest)(nil),          // 20: golink.inspect.v1.WatchRequest
-	(*WatchResponse)(nil),         // 21: golink.inspect.v1.WatchResponse
-	(*Event)(nil),                 // 22: golink.inspect.v1.Event
-	(*Exited)(nil),                // 23: golink.inspect.v1.Exited
-	(*LinkDown)(nil),              // 24: golink.inspect.v1.LinkDown
-	(*DeadLetter)(nil),            // 25: golink.inspect.v1.DeadLetter
-	nil,                           // 26: golink.inspect.v1.GetProcessResponse.InspectEntry
+var file_grpcproc_inspect_v1_inspect_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_grpcproc_inspect_v1_inspect_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_grpcproc_inspect_v1_inspect_proto_goTypes = []any{
+	(LinkState)(0),                // 0: grpcproc.inspect.v1.LinkState
+	(ProcessState)(0),             // 1: grpcproc.inspect.v1.ProcessState
+	(*NodeID)(nil),                // 2: grpcproc.inspect.v1.NodeID
+	(*Link)(nil),                  // 3: grpcproc.inspect.v1.Link
+	(*NodeInfo)(nil),              // 4: grpcproc.inspect.v1.NodeInfo
+	(*Mailbox)(nil),               // 5: grpcproc.inspect.v1.Mailbox
+	(*ProcessInfo)(nil),           // 6: grpcproc.inspect.v1.ProcessInfo
+	(*Target)(nil),                // 7: grpcproc.inspect.v1.Target
+	(*GetNodeRequest)(nil),        // 8: grpcproc.inspect.v1.GetNodeRequest
+	(*GetNodeResponse)(nil),       // 9: grpcproc.inspect.v1.GetNodeResponse
+	(*ListProcessesRequest)(nil),  // 10: grpcproc.inspect.v1.ListProcessesRequest
+	(*ListProcessesResponse)(nil), // 11: grpcproc.inspect.v1.ListProcessesResponse
+	(*GetProcessRequest)(nil),     // 12: grpcproc.inspect.v1.GetProcessRequest
+	(*GetProcessResponse)(nil),    // 13: grpcproc.inspect.v1.GetProcessResponse
+	(*SetLogLevelRequest)(nil),    // 14: grpcproc.inspect.v1.SetLogLevelRequest
+	(*SetLogLevelResponse)(nil),   // 15: grpcproc.inspect.v1.SetLogLevelResponse
+	(*SendRequest)(nil),           // 16: grpcproc.inspect.v1.SendRequest
+	(*SendResponse)(nil),          // 17: grpcproc.inspect.v1.SendResponse
+	(*ExitRequest)(nil),           // 18: grpcproc.inspect.v1.ExitRequest
+	(*ExitResponse)(nil),          // 19: grpcproc.inspect.v1.ExitResponse
+	(*WatchRequest)(nil),          // 20: grpcproc.inspect.v1.WatchRequest
+	(*WatchResponse)(nil),         // 21: grpcproc.inspect.v1.WatchResponse
+	(*Event)(nil),                 // 22: grpcproc.inspect.v1.Event
+	(*Exited)(nil),                // 23: grpcproc.inspect.v1.Exited
+	(*LinkDown)(nil),              // 24: grpcproc.inspect.v1.LinkDown
+	(*DeadLetter)(nil),            // 25: grpcproc.inspect.v1.DeadLetter
+	nil,                           // 26: grpcproc.inspect.v1.GetProcessResponse.InspectEntry
 	(*timestamppb.Timestamp)(nil), // 27: google.protobuf.Timestamp
 	(*durationpb.Duration)(nil),   // 28: google.protobuf.Duration
-	(*v1.PID)(nil),                // 29: golink.v1.PID
+	(*v1.PID)(nil),                // 29: grpcproc.v1.PID
 	(*anypb.Any)(nil),             // 30: google.protobuf.Any
 }
-var file_golink_inspect_v1_inspect_proto_depIdxs = []int32{
-	2,  // 0: golink.inspect.v1.Link.peer:type_name -> golink.inspect.v1.NodeID
-	0,  // 1: golink.inspect.v1.Link.state:type_name -> golink.inspect.v1.LinkState
-	27, // 2: golink.inspect.v1.Link.established_at:type_name -> google.protobuf.Timestamp
-	2,  // 3: golink.inspect.v1.NodeInfo.id:type_name -> golink.inspect.v1.NodeID
-	27, // 4: golink.inspect.v1.NodeInfo.started_at:type_name -> google.protobuf.Timestamp
-	3,  // 5: golink.inspect.v1.NodeInfo.links:type_name -> golink.inspect.v1.Link
-	28, // 6: golink.inspect.v1.Mailbox.oldest_age:type_name -> google.protobuf.Duration
-	29, // 7: golink.inspect.v1.ProcessInfo.pid:type_name -> golink.v1.PID
-	29, // 8: golink.inspect.v1.ProcessInfo.parent:type_name -> golink.v1.PID
-	1,  // 9: golink.inspect.v1.ProcessInfo.state:type_name -> golink.inspect.v1.ProcessState
-	27, // 10: golink.inspect.v1.ProcessInfo.started_at:type_name -> google.protobuf.Timestamp
-	5,  // 11: golink.inspect.v1.ProcessInfo.mailbox:type_name -> golink.inspect.v1.Mailbox
-	29, // 12: golink.inspect.v1.Target.pid:type_name -> golink.v1.PID
-	4,  // 13: golink.inspect.v1.GetNodeResponse.node:type_name -> golink.inspect.v1.NodeInfo
-	1,  // 14: golink.inspect.v1.ListProcessesRequest.state:type_name -> golink.inspect.v1.ProcessState
-	6,  // 15: golink.inspect.v1.ListProcessesResponse.processes:type_name -> golink.inspect.v1.ProcessInfo
-	7,  // 16: golink.inspect.v1.GetProcessRequest.target:type_name -> golink.inspect.v1.Target
-	28, // 17: golink.inspect.v1.GetProcessRequest.inspect_timeout:type_name -> google.protobuf.Duration
-	6,  // 18: golink.inspect.v1.GetProcessResponse.process:type_name -> golink.inspect.v1.ProcessInfo
-	26, // 19: golink.inspect.v1.GetProcessResponse.inspect:type_name -> golink.inspect.v1.GetProcessResponse.InspectEntry
-	7,  // 20: golink.inspect.v1.SetLogLevelRequest.target:type_name -> golink.inspect.v1.Target
-	7,  // 21: golink.inspect.v1.SendRequest.target:type_name -> golink.inspect.v1.Target
-	30, // 22: golink.inspect.v1.SendRequest.body:type_name -> google.protobuf.Any
-	7,  // 23: golink.inspect.v1.ExitRequest.target:type_name -> golink.inspect.v1.Target
-	22, // 24: golink.inspect.v1.WatchResponse.event:type_name -> golink.inspect.v1.Event
-	27, // 25: golink.inspect.v1.Event.time:type_name -> google.protobuf.Timestamp
-	6,  // 26: golink.inspect.v1.Event.spawned:type_name -> golink.inspect.v1.ProcessInfo
-	23, // 27: golink.inspect.v1.Event.exited:type_name -> golink.inspect.v1.Exited
-	2,  // 28: golink.inspect.v1.Event.link_up:type_name -> golink.inspect.v1.NodeID
-	24, // 29: golink.inspect.v1.Event.link_down:type_name -> golink.inspect.v1.LinkDown
-	25, // 30: golink.inspect.v1.Event.dead_letter:type_name -> golink.inspect.v1.DeadLetter
-	6,  // 31: golink.inspect.v1.Exited.process:type_name -> golink.inspect.v1.ProcessInfo
-	2,  // 32: golink.inspect.v1.LinkDown.peer:type_name -> golink.inspect.v1.NodeID
-	29, // 33: golink.inspect.v1.DeadLetter.from:type_name -> golink.v1.PID
-	29, // 34: golink.inspect.v1.DeadLetter.to:type_name -> golink.v1.PID
-	8,  // 35: golink.inspect.v1.Inspector.GetNode:input_type -> golink.inspect.v1.GetNodeRequest
-	10, // 36: golink.inspect.v1.Inspector.ListProcesses:input_type -> golink.inspect.v1.ListProcessesRequest
-	12, // 37: golink.inspect.v1.Inspector.GetProcess:input_type -> golink.inspect.v1.GetProcessRequest
-	14, // 38: golink.inspect.v1.Inspector.SetLogLevel:input_type -> golink.inspect.v1.SetLogLevelRequest
-	16, // 39: golink.inspect.v1.Inspector.Send:input_type -> golink.inspect.v1.SendRequest
-	18, // 40: golink.inspect.v1.Inspector.Exit:input_type -> golink.inspect.v1.ExitRequest
-	20, // 41: golink.inspect.v1.Inspector.Watch:input_type -> golink.inspect.v1.WatchRequest
-	9,  // 42: golink.inspect.v1.Inspector.GetNode:output_type -> golink.inspect.v1.GetNodeResponse
-	11, // 43: golink.inspect.v1.Inspector.ListProcesses:output_type -> golink.inspect.v1.ListProcessesResponse
-	13, // 44: golink.inspect.v1.Inspector.GetProcess:output_type -> golink.inspect.v1.GetProcessResponse
-	15, // 45: golink.inspect.v1.Inspector.SetLogLevel:output_type -> golink.inspect.v1.SetLogLevelResponse
-	17, // 46: golink.inspect.v1.Inspector.Send:output_type -> golink.inspect.v1.SendResponse
-	19, // 47: golink.inspect.v1.Inspector.Exit:output_type -> golink.inspect.v1.ExitResponse
-	21, // 48: golink.inspect.v1.Inspector.Watch:output_type -> golink.inspect.v1.WatchResponse
+var file_grpcproc_inspect_v1_inspect_proto_depIdxs = []int32{
+	2,  // 0: grpcproc.inspect.v1.Link.peer:type_name -> grpcproc.inspect.v1.NodeID
+	0,  // 1: grpcproc.inspect.v1.Link.state:type_name -> grpcproc.inspect.v1.LinkState
+	27, // 2: grpcproc.inspect.v1.Link.established_at:type_name -> google.protobuf.Timestamp
+	2,  // 3: grpcproc.inspect.v1.NodeInfo.id:type_name -> grpcproc.inspect.v1.NodeID
+	27, // 4: grpcproc.inspect.v1.NodeInfo.started_at:type_name -> google.protobuf.Timestamp
+	3,  // 5: grpcproc.inspect.v1.NodeInfo.links:type_name -> grpcproc.inspect.v1.Link
+	28, // 6: grpcproc.inspect.v1.Mailbox.oldest_age:type_name -> google.protobuf.Duration
+	29, // 7: grpcproc.inspect.v1.ProcessInfo.pid:type_name -> grpcproc.v1.PID
+	29, // 8: grpcproc.inspect.v1.ProcessInfo.parent:type_name -> grpcproc.v1.PID
+	1,  // 9: grpcproc.inspect.v1.ProcessInfo.state:type_name -> grpcproc.inspect.v1.ProcessState
+	27, // 10: grpcproc.inspect.v1.ProcessInfo.started_at:type_name -> google.protobuf.Timestamp
+	5,  // 11: grpcproc.inspect.v1.ProcessInfo.mailbox:type_name -> grpcproc.inspect.v1.Mailbox
+	29, // 12: grpcproc.inspect.v1.Target.pid:type_name -> grpcproc.v1.PID
+	4,  // 13: grpcproc.inspect.v1.GetNodeResponse.node:type_name -> grpcproc.inspect.v1.NodeInfo
+	1,  // 14: grpcproc.inspect.v1.ListProcessesRequest.state:type_name -> grpcproc.inspect.v1.ProcessState
+	6,  // 15: grpcproc.inspect.v1.ListProcessesResponse.processes:type_name -> grpcproc.inspect.v1.ProcessInfo
+	7,  // 16: grpcproc.inspect.v1.GetProcessRequest.target:type_name -> grpcproc.inspect.v1.Target
+	28, // 17: grpcproc.inspect.v1.GetProcessRequest.inspect_timeout:type_name -> google.protobuf.Duration
+	6,  // 18: grpcproc.inspect.v1.GetProcessResponse.process:type_name -> grpcproc.inspect.v1.ProcessInfo
+	26, // 19: grpcproc.inspect.v1.GetProcessResponse.inspect:type_name -> grpcproc.inspect.v1.GetProcessResponse.InspectEntry
+	7,  // 20: grpcproc.inspect.v1.SetLogLevelRequest.target:type_name -> grpcproc.inspect.v1.Target
+	7,  // 21: grpcproc.inspect.v1.SendRequest.target:type_name -> grpcproc.inspect.v1.Target
+	30, // 22: grpcproc.inspect.v1.SendRequest.body:type_name -> google.protobuf.Any
+	7,  // 23: grpcproc.inspect.v1.ExitRequest.target:type_name -> grpcproc.inspect.v1.Target
+	22, // 24: grpcproc.inspect.v1.WatchResponse.event:type_name -> grpcproc.inspect.v1.Event
+	27, // 25: grpcproc.inspect.v1.Event.time:type_name -> google.protobuf.Timestamp
+	6,  // 26: grpcproc.inspect.v1.Event.spawned:type_name -> grpcproc.inspect.v1.ProcessInfo
+	23, // 27: grpcproc.inspect.v1.Event.exited:type_name -> grpcproc.inspect.v1.Exited
+	2,  // 28: grpcproc.inspect.v1.Event.link_up:type_name -> grpcproc.inspect.v1.NodeID
+	24, // 29: grpcproc.inspect.v1.Event.link_down:type_name -> grpcproc.inspect.v1.LinkDown
+	25, // 30: grpcproc.inspect.v1.Event.dead_letter:type_name -> grpcproc.inspect.v1.DeadLetter
+	6,  // 31: grpcproc.inspect.v1.Exited.process:type_name -> grpcproc.inspect.v1.ProcessInfo
+	2,  // 32: grpcproc.inspect.v1.LinkDown.peer:type_name -> grpcproc.inspect.v1.NodeID
+	29, // 33: grpcproc.inspect.v1.DeadLetter.from:type_name -> grpcproc.v1.PID
+	29, // 34: grpcproc.inspect.v1.DeadLetter.to:type_name -> grpcproc.v1.PID
+	8,  // 35: grpcproc.inspect.v1.Inspector.GetNode:input_type -> grpcproc.inspect.v1.GetNodeRequest
+	10, // 36: grpcproc.inspect.v1.Inspector.ListProcesses:input_type -> grpcproc.inspect.v1.ListProcessesRequest
+	12, // 37: grpcproc.inspect.v1.Inspector.GetProcess:input_type -> grpcproc.inspect.v1.GetProcessRequest
+	14, // 38: grpcproc.inspect.v1.Inspector.SetLogLevel:input_type -> grpcproc.inspect.v1.SetLogLevelRequest
+	16, // 39: grpcproc.inspect.v1.Inspector.Send:input_type -> grpcproc.inspect.v1.SendRequest
+	18, // 40: grpcproc.inspect.v1.Inspector.Exit:input_type -> grpcproc.inspect.v1.ExitRequest
+	20, // 41: grpcproc.inspect.v1.Inspector.Watch:input_type -> grpcproc.inspect.v1.WatchRequest
+	9,  // 42: grpcproc.inspect.v1.Inspector.GetNode:output_type -> grpcproc.inspect.v1.GetNodeResponse
+	11, // 43: grpcproc.inspect.v1.Inspector.ListProcesses:output_type -> grpcproc.inspect.v1.ListProcessesResponse
+	13, // 44: grpcproc.inspect.v1.Inspector.GetProcess:output_type -> grpcproc.inspect.v1.GetProcessResponse
+	15, // 45: grpcproc.inspect.v1.Inspector.SetLogLevel:output_type -> grpcproc.inspect.v1.SetLogLevelResponse
+	17, // 46: grpcproc.inspect.v1.Inspector.Send:output_type -> grpcproc.inspect.v1.SendResponse
+	19, // 47: grpcproc.inspect.v1.Inspector.Exit:output_type -> grpcproc.inspect.v1.ExitResponse
+	21, // 48: grpcproc.inspect.v1.Inspector.Watch:output_type -> grpcproc.inspect.v1.WatchResponse
 	42, // [42:49] is the sub-list for method output_type
 	35, // [35:42] is the sub-list for method input_type
 	35, // [35:35] is the sub-list for extension type_name
@@ -1997,16 +1997,16 @@ var file_golink_inspect_v1_inspect_proto_depIdxs = []int32{
 	0,  // [0:35] is the sub-list for field type_name
 }
 
-func init() { file_golink_inspect_v1_inspect_proto_init() }
-func file_golink_inspect_v1_inspect_proto_init() {
-	if File_golink_inspect_v1_inspect_proto != nil {
+func init() { file_grpcproc_inspect_v1_inspect_proto_init() }
+func file_grpcproc_inspect_v1_inspect_proto_init() {
+	if File_grpcproc_inspect_v1_inspect_proto != nil {
 		return
 	}
-	file_golink_inspect_v1_inspect_proto_msgTypes[5].OneofWrappers = []any{
+	file_grpcproc_inspect_v1_inspect_proto_msgTypes[5].OneofWrappers = []any{
 		(*Target_Pid)(nil),
 		(*Target_Name)(nil),
 	}
-	file_golink_inspect_v1_inspect_proto_msgTypes[20].OneofWrappers = []any{
+	file_grpcproc_inspect_v1_inspect_proto_msgTypes[20].OneofWrappers = []any{
 		(*Event_Spawned)(nil),
 		(*Event_Exited)(nil),
 		(*Event_LinkUp)(nil),
@@ -2017,18 +2017,18 @@ func file_golink_inspect_v1_inspect_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_golink_inspect_v1_inspect_proto_rawDesc), len(file_golink_inspect_v1_inspect_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_grpcproc_inspect_v1_inspect_proto_rawDesc), len(file_grpcproc_inspect_v1_inspect_proto_rawDesc)),
 			NumEnums:      2,
 			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_golink_inspect_v1_inspect_proto_goTypes,
-		DependencyIndexes: file_golink_inspect_v1_inspect_proto_depIdxs,
-		EnumInfos:         file_golink_inspect_v1_inspect_proto_enumTypes,
-		MessageInfos:      file_golink_inspect_v1_inspect_proto_msgTypes,
+		GoTypes:           file_grpcproc_inspect_v1_inspect_proto_goTypes,
+		DependencyIndexes: file_grpcproc_inspect_v1_inspect_proto_depIdxs,
+		EnumInfos:         file_grpcproc_inspect_v1_inspect_proto_enumTypes,
+		MessageInfos:      file_grpcproc_inspect_v1_inspect_proto_msgTypes,
 	}.Build()
-	File_golink_inspect_v1_inspect_proto = out.File
-	file_golink_inspect_v1_inspect_proto_goTypes = nil
-	file_golink_inspect_v1_inspect_proto_depIdxs = nil
+	File_grpcproc_inspect_v1_inspect_proto = out.File
+	file_grpcproc_inspect_v1_inspect_proto_goTypes = nil
+	file_grpcproc_inspect_v1_inspect_proto_depIdxs = nil
 }

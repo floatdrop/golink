@@ -3,10 +3,10 @@ package client
 import (
 	"time"
 
-	"github.com/floatdrop/golink"
+	"github.com/floatdrop/grpcproc"
 )
 
-// NodeView is a node as golinkctl shows it and its MCP tools return it.
+// NodeView is a node as grpcprocctl shows it and its MCP tools return it.
 type NodeView struct {
 	Name        string     `json:"name" jsonschema:"node name"`
 	Incarnation uint64     `json:"incarnation,omitempty" jsonschema:"changes every time the node starts"`
@@ -33,7 +33,7 @@ type LinkView struct {
 	LastError   string `json:"last_error,omitempty"`
 }
 
-// ProcessView is a process as golinkctl shows it and its MCP tools return it.
+// ProcessView is a process as grpcprocctl shows it and its MCP tools return it.
 type ProcessView struct {
 	PID           string            `json:"pid"`
 	Names         []string          `json:"names,omitempty"`
@@ -91,14 +91,14 @@ func (c *Client) since(t time.Time) string {
 	return Short(c.now().Sub(t))
 }
 
-func pidString(p golink.PID) string {
+func pidString(p grpcproc.PID) string {
 	if p.IsZero() {
 		return ""
 	}
 	return p.String()
 }
 
-func (c *Client) nodeView(n golink.NodeInfo) NodeView {
+func (c *Client) nodeView(n grpcproc.NodeInfo) NodeView {
 	v := NodeView{
 		Name: n.ID.Name, Incarnation: n.ID.Incarnation, Advertise: n.Advertise,
 		Uptime: c.since(n.StartedAt), Processes: n.Processes,
@@ -117,7 +117,7 @@ func (c *Client) nodeView(n golink.NodeInfo) NodeView {
 	return v
 }
 
-func (c *Client) processView(p golink.ProcessInfo) ProcessView {
+func (c *Client) processView(p grpcproc.ProcessInfo) ProcessView {
 	return ProcessView{
 		PID: p.PID.String(), Names: p.Names, Label: p.Label, Type: p.Type, Parent: pidString(p.Parent),
 		State: p.State.String(), Uptime: c.since(p.StartedAt),
@@ -127,10 +127,10 @@ func (c *Client) processView(p golink.ProcessInfo) ProcessView {
 	}
 }
 
-func (c *Client) eventView(e golink.Event) EventView {
+func (c *Client) eventView(e grpcproc.Event) EventView {
 	v := EventView{Time: e.Time.Format(time.RFC3339Nano), Kind: e.Kind.String(), Missed: e.Missed,
 		Reason: e.Reason, Error: e.Err, From: pidString(e.From), To: pidString(e.To), Type: e.Type}
-	if e.Kind == golink.EventSpawn || e.Kind == golink.EventExit {
+	if e.Kind == grpcproc.EventSpawn || e.Kind == grpcproc.EventExit {
 		p := c.processView(e.Process)
 		v.Process = &p
 	}

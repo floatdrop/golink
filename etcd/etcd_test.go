@@ -1,4 +1,4 @@
-package golinketcd_test
+package grpcprocetcd_test
 
 import (
 	"context"
@@ -14,9 +14,9 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/floatdrop/golink"
-	golinketcd "github.com/floatdrop/golink/etcd"
-	"github.com/floatdrop/golink/internal/testpb"
+	"github.com/floatdrop/grpcproc"
+	grpcprocetcd "github.com/floatdrop/grpcproc/etcd"
+	"github.com/floatdrop/grpcproc/internal/testpb"
 )
 
 func freeURL(t *testing.T) url.URL {
@@ -57,28 +57,28 @@ func startEtcd(t *testing.T) *clientv3.Client {
 	return cli
 }
 
-func next(t *testing.T, ch <-chan golink.MemberEvent) golink.MemberEvent {
+func next(t *testing.T, ch <-chan grpcproc.MemberEvent) grpcproc.MemberEvent {
 	t.Helper()
 	select {
 	case ev := <-ch:
 		return ev
 	case <-time.After(10 * time.Second):
 		t.Fatal("no member event")
-		return golink.MemberEvent{}
+		return grpcproc.MemberEvent{}
 	}
 }
 
 func TestRegisterResolveAndMembers(t *testing.T) {
 	cli := startEtcd(t)
-	c := golinketcd.New(cli, "/test/", golinketcd.WithTTL(5*time.Second))
-	withdraw, err := c.Register(t.Context(), golink.Member{Name: "a", Incarnation: 7, Addr: "10.0.0.1:9000"})
+	c := grpcprocetcd.New(cli, "/test/", grpcprocetcd.WithTTL(5*time.Second))
+	withdraw, err := c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 7, Addr: "10.0.0.1:9000"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if addr, err := c.Resolve(t.Context(), "a"); err != nil || addr != "10.0.0.1:9000" {
 		t.Fatalf("%q %v", addr, err)
 	}
-	if _, err := c.Resolve(t.Context(), "nobody"); !errors.Is(err, golinketcd.ErrNotRegistered) {
+	if _, err := c.Resolve(t.Context(), "nobody"); !errors.Is(err, grpcprocetcd.ErrNotRegistered) {
 		t.Fatalf("got %v", err)
 	}
 	// A record that is not JSON, and one without an address.
@@ -86,7 +86,7 @@ func TestRegisterResolveAndMembers(t *testing.T) {
 	if _, err := c.Resolve(t.Context(), "garbage"); err == nil {
 		t.Fatal("garbage resolved")
 	}
-	noAddr, err := c.Register(t.Context(), golink.Member{Name: "b", Incarnation: 1})
+	noAddr, err := c.Register(t.Context(), grpcproc.Member{Name: "b", Incarnation: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestRegisterResolveAndMembers(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = noAddr(t.Context())
-	if _, err := c.Resolve(t.Context(), "a"); !errors.Is(err, golinketcd.ErrNotRegistered) {
+	if _, err := c.Resolve(t.Context(), "a"); !errors.Is(err, grpcprocetcd.ErrNotRegistered) {
 		t.Fatalf("still registered: %v", err)
 	}
 	// Withdrawing twice revokes a lease that is gone.
@@ -113,8 +113,8 @@ func TestRegisterResolveAndMembers(t *testing.T) {
 
 func TestWatch(t *testing.T) {
 	cli := startEtcd(t)
-	c := golinketcd.New(cli, "/w")
-	wa, _ := c.Register(t.Context(), golink.Member{Name: "a", Incarnation: 1, Addr: "a:1"})
+	c := grpcprocetcd.New(cli, "/w")
+	wa, _ := c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 1, Addr: "a:1"})
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	events, err := c.Watch(ctx)
@@ -122,20 +122,20 @@ func TestWatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The snapshot first.
-	if ev := next(t, events); !ev.Up || ev.Member != (golink.Member{Name: "a", Incarnation: 1, Addr: "a:1"}) {
+	if ev := next(t, events); !ev.Up || ev.Member != (grpcproc.Member{Name: "a", Incarnation: 1, Addr: "a:1"}) {
 		t.Fatalf("%+v", ev)
 	}
-	wb, _ := c.Register(t.Context(), golink.Member{Name: "b", Incarnation: 1, Addr: "b:1"})
+	wb, _ := c.Register(t.Context(), grpcproc.Member{Name: "b", Incarnation: 1, Addr: "b:1"})
 	if ev := next(t, events); !ev.Up || ev.Member.Name != "b" {
 		t.Fatalf("%+v", ev)
 	}
 	// b stops: a down with its incarnation.
 	_ = wb(t.Context())
-	if ev := next(t, events); ev.Up || ev.Member != (golink.Member{Name: "b", Incarnation: 1, Addr: "b:1"}) {
+	if ev := next(t, events); ev.Up || ev.Member != (grpcproc.Member{Name: "b", Incarnation: 1, Addr: "b:1"}) {
 		t.Fatalf("%+v", ev)
 	}
 	// a restarts before its old lease expired: the new incarnation replaces it.
-	wa2, _ := c.Register(t.Context(), golink.Member{Name: "a", Incarnation: 2, Addr: "a:2"})
+	wa2, _ := c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 2, Addr: "a:2"})
 	if ev := next(t, events); !ev.Up || ev.Member.Incarnation != 2 {
 		t.Fatalf("%+v", ev)
 	}
@@ -143,7 +143,7 @@ func TestWatch(t *testing.T) {
 	// Garbage is skipped; deleting it is a down for whichever incarnation.
 	_, _ = cli.Put(t.Context(), "/w/nodes/junk", "{")
 	_, _ = cli.Delete(t.Context(), "/w/nodes/junk")
-	if ev := next(t, events); ev.Up || ev.Member != (golink.Member{Name: "junk"}) {
+	if ev := next(t, events); ev.Up || ev.Member != (grpcproc.Member{Name: "junk"}) {
 		t.Fatalf("%+v", ev)
 	}
 	_ = wa2(t.Context())
@@ -155,8 +155,8 @@ func TestWatch(t *testing.T) {
 
 func TestLostLeaseRegistersAgain(t *testing.T) {
 	cli := startEtcd(t)
-	c := golinketcd.New(cli, "/l", golinketcd.WithRetry(10*time.Millisecond))
-	withdraw, err := c.Register(t.Context(), golink.Member{Name: "a", Incarnation: 1, Addr: "a:1"})
+	c := grpcprocetcd.New(cli, "/l", grpcprocetcd.WithRetry(10*time.Millisecond))
+	withdraw, err := c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 1, Addr: "a:1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,15 +180,15 @@ func TestLostLeaseRegistersAgain(t *testing.T) {
 	}
 }
 
-// node starts a golink node over real TCP, registered in etcd.
-func node(t *testing.T, c *golinketcd.Cluster, name string) *golink.Node {
+// node starts a grpcproc node over real TCP, registered in etcd.
+func node(t *testing.T, c *grpcprocetcd.Cluster, name string) *grpcproc.Node {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	srv := grpc.NewServer()
-	n, err := golink.NewNode(golink.Config{
+	n, err := grpcproc.NewNode(grpcproc.Config{
 		Name:        name,
 		Advertise:   ln.Addr().String(),
 		Resolver:    c,
@@ -215,11 +215,11 @@ func node(t *testing.T, c *golinketcd.Cluster, name string) *golink.Node {
 
 func TestNodesFindAndLoseEachOther(t *testing.T) {
 	cli := startEtcd(t)
-	c := golinketcd.New(cli, "/golink/test", golinketcd.WithRetry(time.Hour)) // no re-registering in this test
+	c := grpcprocetcd.New(cli, "/grpcproc/test", grpcprocetcd.WithRetry(time.Hour)) // no re-registering in this test
 	a, b := node(t, c, "a"), node(t, c, "b")
 
 	// b's process is found through etcd; a monitors it.
-	target, _ := golink.Spawn[*testpb.Ping](b, func(p *golink.Process[*testpb.Ping]) error {
+	target, _ := grpcproc.Spawn[*testpb.Ping](b, func(p *grpcproc.Process[*testpb.Ping]) error {
 		for {
 			m, err := p.Receive()
 			if err != nil {
@@ -229,10 +229,10 @@ func TestNodesFindAndLoseEachOther(t *testing.T) {
 				_ = p.Reply(m, &testpb.Pong{N: m.Body.GetN() + 1}, nil)
 			}
 		}
-	}, golink.WithName("echo"))
-	downs := make(chan golink.Down, 1)
+	}, grpcproc.WithName("echo"))
+	downs := make(chan grpcproc.Down, 1)
 	ready := make(chan struct{})
-	_, _ = golink.Spawn[proto.Message](a, func(p *golink.Process[proto.Message]) error {
+	_, _ = grpcproc.Spawn[proto.Message](a, func(p *grpcproc.Process[proto.Message]) error {
 		p.Monitor(target)
 		close(ready)
 		for {
@@ -246,19 +246,19 @@ func TestNodesFindAndLoseEachOther(t *testing.T) {
 		}
 	})
 	<-ready
-	if r, err := a.Call[*testpb.Pong](t.Context(), golink.Named[*testpb.Ping]("b", "echo"), &testpb.Ping{N: 1}); err != nil || r.GetN() != 2 {
+	if r, err := a.Call[*testpb.Pong](t.Context(), grpcproc.Named[*testpb.Ping]("b", "echo"), &testpb.Ping{N: 1}); err != nil || r.GetN() != 2 {
 		t.Fatalf("%v %v", r, err)
 	}
 
 	// b goes silent: its lease ends while its TCP connection stays up.
 	// Only etcd can tell a, and it does.
-	resp, _ := cli.Get(t.Context(), "/golink/test/nodes/b")
+	resp, _ := cli.Get(t.Context(), "/grpcproc/test/nodes/b")
 	if _, err := cli.Revoke(t.Context(), clientv3.LeaseID(resp.Kvs[0].Lease)); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case d := <-downs:
-		if d.PID != target.PID() || d.Reason != golink.ReasonNoConnection {
+		if d.PID != target.PID() || d.Reason != grpcproc.ReasonNoConnection {
 			t.Fatalf("%+v", d)
 		}
 	case <-time.After(10 * time.Second):

@@ -283,7 +283,7 @@ const file_shoppb_shop_proto_rawDesc = "" +
 	"\x05Stock\x12,\n" +
 	"\areserve\x18\x01 \x01(\v2\x10.shop.v1.ReserveH\x00R\areserve\x12,\n" +
 	"\arestock\x18\x02 \x01(\v2\x10.shop.v1.RestockH\x00R\arestockB\x04\n" +
-	"\x02opB4Z2github.com/floatdrop/golink/examples/shoppb;shoppbb\x06proto3"
+	"\x02opB6Z4github.com/floatdrop/grpcproc/examples/shoppb;shoppbb\x06proto3"
 
 var (
 	file_shoppb_shop_proto_rawDescOnce sync.Once

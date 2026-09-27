@@ -3,7 +3,7 @@ package cli
 import (
 	"testing"
 
-	"github.com/floatdrop/golink/tools/client"
+	"github.com/floatdrop/grpcproc/tools/client"
 )
 
 func TestEventLine(t *testing.T) {

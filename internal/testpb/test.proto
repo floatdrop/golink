@@ -1,9 +1,9 @@
-// Messages used by mesh's own tests and benchmarks.
+// Messages used by grpcproc's own tests and benchmarks.
 syntax = "proto3";
 
-package golink.test.v1;
+package grpcproc.test.v1;
 
-option go_package = "github.com/floatdrop/golink/internal/testpb;testpb";
+option go_package = "github.com/floatdrop/grpcproc/internal/testpb;testpb";
 
 message Ping {
   int64 n = 1;

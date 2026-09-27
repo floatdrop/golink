@@ -1,16 +1,16 @@
-// Separate module, so golink itself does not depend on what it is compared
+// Separate module, so grpcproc itself does not depend on what it is compared
 // with. It measures the working tree: nothing imports this module, so the
 // replace below is never seen by anyone else.
-module github.com/floatdrop/golink/benchmarks
+module github.com/floatdrop/grpcproc/benchmarks
 
 go 1.27.1
 
-replace github.com/floatdrop/golink => ../
+replace github.com/floatdrop/grpcproc => ../
 
 require (
 	github.com/anthdm/hollywood v1.0.5
 	github.com/asynkron/protoactor-go v0.0.0-20260118094027-288962e52f3f
-	github.com/floatdrop/golink v0.0.0
+	github.com/floatdrop/grpcproc v0.0.0
 	github.com/tochemey/goakt/v4 v4.5.6
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12

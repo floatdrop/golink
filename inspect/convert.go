@@ -7,31 +7,31 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/floatdrop/golink"
-	inspectv1 "github.com/floatdrop/golink/proto/golink/inspect/v1"
-	golinkv1 "github.com/floatdrop/golink/proto/golink/v1"
+	"github.com/floatdrop/grpcproc"
+	inspectv1 "github.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1"
+	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
-// The To functions turn golink snapshots into wire messages; the exported
+// The To functions turn grpcproc snapshots into wire messages; the exported
 // ones turn wire messages back, for clients (a CLI, a UI, a test).
 
-func pidTo(p golink.PID) *golinkv1.PID {
+func pidTo(p grpcproc.PID) *grpcprocv1.PID {
 	if p.IsZero() {
 		return nil
 	}
-	return &golinkv1.PID{Node: p.Node, Incarnation: p.Incarnation, Id: p.ID}
+	return &grpcprocv1.PID{Node: p.Node, Incarnation: p.Incarnation, Id: p.ID}
 }
 
-func pidFrom(p *golinkv1.PID) golink.PID {
-	return golink.PID{Node: p.GetNode(), Incarnation: p.GetIncarnation(), ID: p.GetId()}
+func pidFrom(p *grpcprocv1.PID) grpcproc.PID {
+	return grpcproc.PID{Node: p.GetNode(), Incarnation: p.GetIncarnation(), ID: p.GetId()}
 }
 
-func nodeIDTo(n golink.NodeID) *inspectv1.NodeID {
+func nodeIDTo(n grpcproc.NodeID) *inspectv1.NodeID {
 	return &inspectv1.NodeID{Name: n.Name, Incarnation: n.Incarnation}
 }
 
-func nodeIDFrom(n *inspectv1.NodeID) golink.NodeID {
-	return golink.NodeID{Name: n.GetName(), Incarnation: n.GetIncarnation()}
+func nodeIDFrom(n *inspectv1.NodeID) grpcproc.NodeID {
+	return grpcproc.NodeID{Name: n.GetName(), Incarnation: n.GetIncarnation()}
 }
 
 func timeTo(t time.Time) *timestamppb.Timestamp {
@@ -41,15 +41,15 @@ func timeTo(t time.Time) *timestamppb.Timestamp {
 	return timestamppb.New(t)
 }
 
-func stateTo(s golink.ProcessState) inspectv1.ProcessState {
+func stateTo(s grpcproc.ProcessState) inspectv1.ProcessState {
 	return inspectv1.ProcessState(s + 1)
 }
 
-func linkStateTo(s golink.LinkState) inspectv1.LinkState {
+func linkStateTo(s grpcproc.LinkState) inspectv1.LinkState {
 	return inspectv1.LinkState(s + 1)
 }
 
-func nodeInfoTo(n golink.NodeInfo) *inspectv1.NodeInfo {
+func nodeInfoTo(n grpcproc.NodeInfo) *inspectv1.NodeInfo {
 	out := &inspectv1.NodeInfo{
 		Id:          nodeIDTo(n.ID),
 		Advertise:   n.Advertise,
@@ -74,7 +74,7 @@ func nodeInfoTo(n golink.NodeInfo) *inspectv1.NodeInfo {
 	return out
 }
 
-func processInfoTo(p golink.ProcessInfo) *inspectv1.ProcessInfo {
+func processInfoTo(p grpcproc.ProcessInfo) *inspectv1.ProcessInfo {
 	return &inspectv1.ProcessInfo{
 		Pid:       pidTo(p.PID),
 		Names:     p.Names,
@@ -99,18 +99,18 @@ func processInfoTo(p golink.ProcessInfo) *inspectv1.ProcessInfo {
 	}
 }
 
-func eventTo(ev golink.Event) *inspectv1.Event {
+func eventTo(ev grpcproc.Event) *inspectv1.Event {
 	out := &inspectv1.Event{Time: timestamppb.New(ev.Time), Missed: ev.Missed}
 	switch ev.Kind {
-	case golink.EventSpawn:
+	case grpcproc.EventSpawn:
 		out.Kind = &inspectv1.Event_Spawned{Spawned: processInfoTo(ev.Process)}
-	case golink.EventExit:
+	case grpcproc.EventExit:
 		out.Kind = &inspectv1.Event_Exited{Exited: &inspectv1.Exited{Process: processInfoTo(ev.Process), Reason: ev.Reason}}
-	case golink.EventLinkUp:
+	case grpcproc.EventLinkUp:
 		out.Kind = &inspectv1.Event_LinkUp{LinkUp: nodeIDTo(ev.Peer)}
-	case golink.EventLinkDown:
+	case grpcproc.EventLinkDown:
 		out.Kind = &inspectv1.Event_LinkDown{LinkDown: &inspectv1.LinkDown{Peer: nodeIDTo(ev.Peer), Error: ev.Err}}
-	case golink.EventDeadLetter:
+	case grpcproc.EventDeadLetter:
 		out.Kind = &inspectv1.Event_DeadLetter{DeadLetter: &inspectv1.DeadLetter{
 			From: pidTo(ev.From), To: pidTo(ev.To), Type: ev.Type, Reason: ev.Reason,
 		}}
@@ -118,9 +118,9 @@ func eventTo(ev golink.Event) *inspectv1.Event {
 	return out
 }
 
-// NodeInfo converts a wire NodeInfo back to golink's.
-func NodeInfo(n *inspectv1.NodeInfo) golink.NodeInfo {
-	out := golink.NodeInfo{
+// NodeInfo converts a wire NodeInfo back to grpcproc's.
+func NodeInfo(n *inspectv1.NodeInfo) grpcproc.NodeInfo {
+	out := grpcproc.NodeInfo{
 		ID:          nodeIDFrom(n.GetId()),
 		Advertise:   n.GetAdvertise(),
 		Processes:   int(n.GetProcesses()),
@@ -132,10 +132,10 @@ func NodeInfo(n *inspectv1.NodeInfo) golink.NodeInfo {
 		out.StartedAt = n.GetStartedAt().AsTime()
 	}
 	for _, l := range n.GetLinks() {
-		li := golink.LinkInfo{
+		li := grpcproc.LinkInfo{
 			Peer:       nodeIDFrom(l.GetPeer()),
 			Outbound:   l.GetOutbound(),
-			State:      golink.LinkState(l.GetState() - 1),
+			State:      grpcproc.LinkState(l.GetState() - 1),
 			Reconnects: l.GetReconnects(),
 			Messages:   l.GetMessages(),
 			Bytes:      l.GetBytes(),
@@ -149,15 +149,15 @@ func NodeInfo(n *inspectv1.NodeInfo) golink.NodeInfo {
 	return out
 }
 
-// ProcessInfo converts a wire ProcessInfo back to golink's.
-func ProcessInfo(p *inspectv1.ProcessInfo) golink.ProcessInfo {
-	out := golink.ProcessInfo{
+// ProcessInfo converts a wire ProcessInfo back to grpcproc's.
+func ProcessInfo(p *inspectv1.ProcessInfo) grpcproc.ProcessInfo {
+	out := grpcproc.ProcessInfo{
 		PID:   pidFrom(p.GetPid()),
 		Names: p.GetNames(),
 		Label: p.GetLabel(),
 		Type:  p.GetType(),
-		State: golink.ProcessState(p.GetState() - 1),
-		Mailbox: golink.MailboxInfo{
+		State: grpcproc.ProcessState(p.GetState() - 1),
+		Mailbox: grpcproc.MailboxInfo{
 			Depth:     int(p.GetMailbox().GetDepth()),
 			Peak:      int(p.GetMailbox().GetPeak()),
 			OldestAge: p.GetMailbox().GetOldestAge().AsDuration(),
@@ -178,21 +178,21 @@ func ProcessInfo(p *inspectv1.ProcessInfo) golink.ProcessInfo {
 	return out
 }
 
-// Event converts a wire Event back to golink's.
-func Event(e *inspectv1.Event) golink.Event {
-	out := golink.Event{Time: e.GetTime().AsTime(), Missed: e.GetMissed()}
+// Event converts a wire Event back to grpcproc's.
+func Event(e *inspectv1.Event) grpcproc.Event {
+	out := grpcproc.Event{Time: e.GetTime().AsTime(), Missed: e.GetMissed()}
 	switch k := e.GetKind().(type) {
 	case *inspectv1.Event_Spawned:
-		out.Kind, out.Process = golink.EventSpawn, ProcessInfo(k.Spawned)
+		out.Kind, out.Process = grpcproc.EventSpawn, ProcessInfo(k.Spawned)
 	case *inspectv1.Event_Exited:
-		out.Kind, out.Process, out.Reason = golink.EventExit, ProcessInfo(k.Exited.GetProcess()), k.Exited.GetReason()
+		out.Kind, out.Process, out.Reason = grpcproc.EventExit, ProcessInfo(k.Exited.GetProcess()), k.Exited.GetReason()
 	case *inspectv1.Event_LinkUp:
-		out.Kind, out.Peer = golink.EventLinkUp, nodeIDFrom(k.LinkUp)
+		out.Kind, out.Peer = grpcproc.EventLinkUp, nodeIDFrom(k.LinkUp)
 	case *inspectv1.Event_LinkDown:
-		out.Kind, out.Peer, out.Err = golink.EventLinkDown, nodeIDFrom(k.LinkDown.GetPeer()), k.LinkDown.GetError()
+		out.Kind, out.Peer, out.Err = grpcproc.EventLinkDown, nodeIDFrom(k.LinkDown.GetPeer()), k.LinkDown.GetError()
 	case *inspectv1.Event_DeadLetter:
 		d := k.DeadLetter
-		out.Kind, out.From, out.To, out.Type, out.Reason = golink.EventDeadLetter, pidFrom(d.GetFrom()), pidFrom(d.GetTo()), d.GetType(), d.GetReason()
+		out.Kind, out.From, out.To, out.Type, out.Reason = grpcproc.EventDeadLetter, pidFrom(d.GetFrom()), pidFrom(d.GetTo()), d.GetType(), d.GetReason()
 	}
 	return out
 }

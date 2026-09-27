@@ -1,19 +1,19 @@
-// golink.inspect.v1 is the inspection surface of a golink node: what
+// grpcproc.inspect.v1 is the inspection surface of a grpcproc node: what
 // processes exist, what is in their mailboxes, what each says about itself,
 // what is happening on its links. Every tool (CLI, UI, MCP server) is a
 // client of this service.
 syntax = "proto3";
 
-package golink.inspect.v1;
+package grpcproc.inspect.v1;
 
-import "golink/v1/golink.proto";
+import "grpcproc/v1/grpcproc.proto";
 import "google/protobuf/any.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/floatdrop/golink/proto/golink/inspect/v1;inspectv1";
+option go_package = "github.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1;inspectv1";
 
-// Inspector is registered by the application next to golink.v1.Node.
+// Inspector is registered by the application next to grpcproc.v1.Node.
 //
 // Every request names the node it is about. An empty node, or this node's
 // own name, is answered here; any other name is forwarded to that node's
@@ -81,11 +81,11 @@ message Mailbox {
 }
 
 message ProcessInfo {
-  golink.v1.PID pid = 1;
+  grpcproc.v1.PID pid = 1;
   repeated string names = 2;
   string label = 3;
   string type = 4;
-  golink.v1.PID parent = 5;
+  grpcproc.v1.PID parent = 5;
   ProcessState state = 6;
   google.protobuf.Timestamp started_at = 7;
   Mailbox mailbox = 8;
@@ -103,7 +103,7 @@ message ProcessInfo {
 // Target names a process by pid or by name, on the request's node.
 message Target {
   oneof kind {
-    golink.v1.PID pid = 1;
+    grpcproc.v1.PID pid = 1;
     string name = 2;
   }
 }
@@ -208,8 +208,8 @@ message LinkDown {
 }
 
 message DeadLetter {
-  golink.v1.PID from = 1;
-  golink.v1.PID to = 2;
+  grpcproc.v1.PID from = 1;
+  grpcproc.v1.PID to = 2;
   // Proto full name of the message.
   string type = 3;
   string reason = 4;

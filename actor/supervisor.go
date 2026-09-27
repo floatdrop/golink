@@ -11,7 +11,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/floatdrop/golink"
+	"github.com/floatdrop/grpcproc"
 )
 
 // Strategy says which children a supervisor restarts when one exits.
@@ -50,17 +50,17 @@ func (r Restart) String() string { return [...]string{"permanent", "transient", 
 // own supervisor restarts it: that is how failure escalates.
 const ReasonMaxRestarts = "max restarts"
 
-type spawnFunc func(fn func(*golink.Process[proto.Message]) error, opts []golink.SpawnOption) (golink.PID, golink.Ref, error)
+type spawnFunc func(fn func(*grpcproc.Process[proto.Message]) error, opts []grpcproc.SpawnOption) (grpcproc.PID, grpcproc.Ref, error)
 
 // ChildSpec says how to start one child. Build it with Child, ChildFunc or
 // ChildSupervisor.
 type ChildSpec struct {
 	// Name is the child's identity in the supervisor and the name it is
 	// registered under on the node, so it stays reachable across restarts,
-	// with golink.Named. It must be unique on the node.
+	// with grpcproc.Named. It must be unique on the node.
 	Name    string
 	Restart Restart
-	start   func(sup *golink.Process[proto.Message]) (golink.PID, golink.Ref, error)
+	start   func(sup *grpcproc.Process[proto.Message]) (grpcproc.PID, grpcproc.Ref, error)
 }
 
 // WithRestart returns a copy of c with restart policy r.
@@ -70,8 +70,8 @@ func (c ChildSpec) WithRestart(r Restart) ChildSpec {
 }
 
 // ChildFunc is a child that runs fn, registered as name.
-func ChildFunc[M proto.Message](name string, fn func(*golink.Process[M]) error, opts ...golink.SpawnOption) ChildSpec {
-	return ChildSpec{Name: name, start: func(sup *golink.Process[proto.Message]) (golink.PID, golink.Ref, error) {
+func ChildFunc[M proto.Message](name string, fn func(*grpcproc.Process[M]) error, opts ...grpcproc.SpawnOption) ChildSpec {
+	return ChildSpec{Name: name, start: func(sup *grpcproc.Process[proto.Message]) (grpcproc.PID, grpcproc.Ref, error) {
 		a, ref, err := sup.SpawnMonitor[M](fn, childOpts(sup, name, opts)...)
 		return a.PID(), ref, err
 	}}
@@ -81,22 +81,22 @@ func ChildFunc[M proto.Message](name string, fn func(*golink.Process[M]) error, 
 // start so a restart begins from a clean state:
 //
 //	actor.Child("orders", func() *Orders { return &Orders{repo: repo} })
-func Child[M proto.Message, H Handler[M]](name string, newHandler func() H, opts ...golink.SpawnOption) ChildSpec {
-	return ChildFunc(name, func(p *golink.Process[M]) error { return Run[M](newHandler())(p) }, opts...)
+func Child[M proto.Message, H Handler[M]](name string, newHandler func() H, opts ...grpcproc.SpawnOption) ChildSpec {
+	return ChildFunc(name, func(p *grpcproc.Process[M]) error { return Run[M](newHandler())(p) }, opts...)
 }
 
 // ChildSupervisor is a child that is itself a supervisor.
-func ChildSupervisor(name string, spec Spec, opts ...golink.SpawnOption) ChildSpec {
-	return ChildSpec{Name: name, start: func(sup *golink.Process[proto.Message]) (golink.PID, golink.Ref, error) {
-		return startSupervisor(spec, childOpts(sup, name, opts), func(fn func(*golink.Process[proto.Message]) error, o []golink.SpawnOption) (golink.PID, golink.Ref, error) {
+func ChildSupervisor(name string, spec Spec, opts ...grpcproc.SpawnOption) ChildSpec {
+	return ChildSpec{Name: name, start: func(sup *grpcproc.Process[proto.Message]) (grpcproc.PID, grpcproc.Ref, error) {
+		return startSupervisor(spec, childOpts(sup, name, opts), func(fn func(*grpcproc.Process[proto.Message]) error, o []grpcproc.SpawnOption) (grpcproc.PID, grpcproc.Ref, error) {
 			a, ref, err := sup.SpawnMonitor[proto.Message](fn, o...)
 			return a.PID(), ref, err
 		})
 	}}
 }
 
-func childOpts(sup *golink.Process[proto.Message], name string, opts []golink.SpawnOption) []golink.SpawnOption {
-	return append([]golink.SpawnOption{golink.WithName(name), golink.WithParent(sup.PID())}, opts...)
+func childOpts(sup *grpcproc.Process[proto.Message], name string, opts []grpcproc.SpawnOption) []grpcproc.SpawnOption {
+	return append([]grpcproc.SpawnOption{grpcproc.WithName(name), grpcproc.WithParent(sup.PID())}, opts...)
 }
 
 // Spec describes a supervisor.
@@ -108,7 +108,7 @@ type Spec struct {
 	MaxRestarts int
 	// Within defaults to 5s.
 	Within time.Duration
-	// Shutdown is how long a child has to exit once told to; golink cannot
+	// Shutdown is how long a child has to exit once told to; grpcproc cannot
 	// kill a goroutine, so a child that ignores Exit is left behind. Default 5s.
 	Shutdown time.Duration
 	// Children start in order and stop in reverse order.
@@ -134,17 +134,17 @@ func (s Spec) validate() error {
 // Supervise starts a supervisor on n and its children, in order. It returns
 // once they have all started, or with the first error, after stopping those
 // already started. opts apply to the supervisor itself (a name, a label).
-func Supervise(n *golink.Node, spec Spec, opts ...golink.SpawnOption) (golink.PID, error) {
-	pid, _, err := startSupervisor(spec, opts, func(fn func(*golink.Process[proto.Message]) error, o []golink.SpawnOption) (golink.PID, golink.Ref, error) {
-		a, err := golink.Spawn(n, fn, o...)
-		return a.PID(), golink.Ref{}, err
+func Supervise(n *grpcproc.Node, spec Spec, opts ...grpcproc.SpawnOption) (grpcproc.PID, error) {
+	pid, _, err := startSupervisor(spec, opts, func(fn func(*grpcproc.Process[proto.Message]) error, o []grpcproc.SpawnOption) (grpcproc.PID, grpcproc.Ref, error) {
+		a, err := grpcproc.Spawn(n, fn, o...)
+		return a.PID(), grpcproc.Ref{}, err
 	})
 	return pid, err
 }
 
-func startSupervisor(spec Spec, opts []golink.SpawnOption, spawn spawnFunc) (golink.PID, golink.Ref, error) {
+func startSupervisor(spec Spec, opts []grpcproc.SpawnOption, spawn spawnFunc) (grpcproc.PID, grpcproc.Ref, error) {
 	if err := spec.validate(); err != nil {
-		return golink.PID{}, golink.Ref{}, err
+		return grpcproc.PID{}, grpcproc.Ref{}, err
 	}
 	if spec.MaxRestarts == 0 {
 		spec.MaxRestarts = 3
@@ -155,30 +155,30 @@ func startSupervisor(spec Spec, opts []golink.SpawnOption, spawn spawnFunc) (gol
 	for _, c := range spec.Children {
 		s.kids = append(s.kids, &kid{spec: c})
 	}
-	opts = append([]golink.SpawnOption{golink.WithLabel("supervisor"), golink.WithInspect(s.inspect)}, opts...)
+	opts = append([]grpcproc.SpawnOption{grpcproc.WithLabel("supervisor"), grpcproc.WithInspect(s.inspect)}, opts...)
 	pid, ref, err := spawn(s.run, opts)
 	if err != nil {
-		return golink.PID{}, golink.Ref{}, err
+		return grpcproc.PID{}, grpcproc.Ref{}, err
 	}
 	if err := <-s.ready; err != nil {
-		return golink.PID{}, golink.Ref{}, err
+		return grpcproc.PID{}, grpcproc.Ref{}, err
 	}
 	return pid, ref, nil
 }
 
 type kid struct {
 	spec     ChildSpec
-	pid      golink.PID
-	ref      golink.Ref
+	pid      grpcproc.PID
+	ref      grpcproc.Ref
 	running  bool
 	restarts int
 }
 
 // supervisor state is touched only by its own process's goroutine,
-// including inspect, which golink runs inside Receive.
+// including inspect, which grpcproc runs inside Receive.
 type supervisor struct {
 	spec    Spec
-	p       *golink.Process[proto.Message]
+	p       *grpcproc.Process[proto.Message]
 	kids    []*kid
 	history []time.Time // restarts within the window
 	ready   chan error
@@ -189,7 +189,7 @@ var errAborted = errors.New("actor: supervisor exited while starting")
 
 func (s *supervisor) signal(err error) { s.once.Do(func() { s.ready <- err }) }
 
-func (s *supervisor) run(p *golink.Process[proto.Message]) error {
+func (s *supervisor) run(p *grpcproc.Process[proto.Message]) error {
 	s.p = p
 	defer s.signal(errAborted) // a no-op once start has reported
 	defer s.stopAll()
@@ -227,7 +227,7 @@ func (s *supervisor) start(k *kid) error {
 }
 
 // exited handles the Down of a child.
-func (s *supervisor) exited(d golink.Down) error {
+func (s *supervisor) exited(d grpcproc.Down) error {
 	for i, k := range s.kids {
 		if k.running && k.ref == d.Ref {
 			k.running = false
@@ -245,7 +245,7 @@ func restartable(r Restart, reason string) bool {
 	case Permanent:
 		return true
 	case Transient:
-		return reason != golink.ReasonNormal && reason != golink.ReasonShutdown
+		return reason != grpcproc.ReasonNormal && reason != grpcproc.ReasonShutdown
 	}
 	return false
 }
@@ -263,7 +263,7 @@ func (s *supervisor) restart(i int) error {
 	if len(s.history) > s.spec.MaxRestarts {
 		s.p.Log().Error("restart intensity reached, giving up", "child", s.kids[i].spec.Name,
 			"restarts", len(s.history), "within", s.spec.Within)
-		return &golink.ExitError{Reason: ReasonMaxRestarts}
+		return &grpcproc.ExitError{Reason: ReasonMaxRestarts}
 	}
 	group := []int{i}
 	switch s.spec.Strategy {
@@ -322,7 +322,7 @@ func (s *supervisor) stop(k *kid) {
 	defer cancel()
 	events := n.Subscribe(ctx, 256)
 	s.p.Demonitor(k.ref)
-	_ = s.p.Exit(k.pid, golink.ReasonShutdown)
+	_ = s.p.Exit(k.pid, grpcproc.ReasonShutdown)
 	for {
 		if _, alive := n.Process(k.pid); !alive {
 			return

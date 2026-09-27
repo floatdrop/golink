@@ -1,14 +1,14 @@
 // Separate module, like benchmarks/: the programs the README embeds, checked
 // by CI. It builds against the working tree, so the README always shows code
-// that compiles with the golink next to it.
-module github.com/floatdrop/golink/examples
+// that compiles with the grpcproc next to it.
+module github.com/floatdrop/grpcproc/examples
 
 go 1.27.1
 
-replace github.com/floatdrop/golink => ../
+replace github.com/floatdrop/grpcproc => ../
 
 require (
-	github.com/floatdrop/golink v0.0.1
+	github.com/floatdrop/grpcproc v0.0.1
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
 )

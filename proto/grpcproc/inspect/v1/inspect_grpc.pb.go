@@ -1,4 +1,4 @@
-// golink.inspect.v1 is the inspection surface of a golink node: what
+// grpcproc.inspect.v1 is the inspection surface of a grpcproc node: what
 // processes exist, what is in their mailboxes, what each says about itself,
 // what is happening on its links. Every tool (CLI, UI, MCP server) is a
 // client of this service.
@@ -7,7 +7,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             (unknown)
-// source: golink/inspect/v1/inspect.proto
+// source: grpcproc/inspect/v1/inspect.proto
 
 package inspectv1
 
@@ -24,20 +24,20 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Inspector_GetNode_FullMethodName       = "/golink.inspect.v1.Inspector/GetNode"
-	Inspector_ListProcesses_FullMethodName = "/golink.inspect.v1.Inspector/ListProcesses"
-	Inspector_GetProcess_FullMethodName    = "/golink.inspect.v1.Inspector/GetProcess"
-	Inspector_SetLogLevel_FullMethodName   = "/golink.inspect.v1.Inspector/SetLogLevel"
-	Inspector_Send_FullMethodName          = "/golink.inspect.v1.Inspector/Send"
-	Inspector_Exit_FullMethodName          = "/golink.inspect.v1.Inspector/Exit"
-	Inspector_Watch_FullMethodName         = "/golink.inspect.v1.Inspector/Watch"
+	Inspector_GetNode_FullMethodName       = "/grpcproc.inspect.v1.Inspector/GetNode"
+	Inspector_ListProcesses_FullMethodName = "/grpcproc.inspect.v1.Inspector/ListProcesses"
+	Inspector_GetProcess_FullMethodName    = "/grpcproc.inspect.v1.Inspector/GetProcess"
+	Inspector_SetLogLevel_FullMethodName   = "/grpcproc.inspect.v1.Inspector/SetLogLevel"
+	Inspector_Send_FullMethodName          = "/grpcproc.inspect.v1.Inspector/Send"
+	Inspector_Exit_FullMethodName          = "/grpcproc.inspect.v1.Inspector/Exit"
+	Inspector_Watch_FullMethodName         = "/grpcproc.inspect.v1.Inspector/Watch"
 )
 
 // InspectorClient is the client API for Inspector service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// Inspector is registered by the application next to golink.v1.Node.
+// Inspector is registered by the application next to grpcproc.v1.Node.
 //
 // Every request names the node it is about. An empty node, or this node's
 // own name, is answered here; any other name is forwarded to that node's
@@ -147,7 +147,7 @@ type Inspector_WatchClient = grpc.ServerStreamingClient[WatchResponse]
 // All implementations must embed UnimplementedInspectorServer
 // for forward compatibility.
 //
-// Inspector is registered by the application next to golink.v1.Node.
+// Inspector is registered by the application next to grpcproc.v1.Node.
 //
 // Every request names the node it is about. An empty node, or this node's
 // own name, is answered here; any other name is forwarded to that node's
@@ -339,7 +339,7 @@ type Inspector_WatchServer = grpc.ServerStreamingServer[WatchResponse]
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var Inspector_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "golink.inspect.v1.Inspector",
+	ServiceName: "grpcproc.inspect.v1.Inspector",
 	HandlerType: (*InspectorServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -374,5 +374,5 @@ var Inspector_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "golink/inspect/v1/inspect.proto",
+	Metadata: "grpcproc/inspect/v1/inspect.proto",
 }
