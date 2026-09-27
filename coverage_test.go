@@ -439,7 +439,7 @@ func TestHandshakeFailures(t *testing.T) {
 		{"empty frame", &fakePeer{hello: frame()}, "expected Hello"},
 		{"wrong version", &fakePeer{hello: hello("b", 99)}, "protocol 99"},
 		{"wrong node", &fakePeer{hello: hello("c", 1)}, `reached "c"`},
-		{"no hello", &fakePeer{hang: true}, "deadline"},
+		{"no hello", &fakePeer{hang: true}, "no Hello within DialTimeout (200ms): context canceled"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -447,6 +447,98 @@ func TestHandshakeFailures(t *testing.T) {
 			err := n.SendTo(t.Context(), grpcproc.Named[*testpb.Ping]("b", "x"), &testpb.Ping{})
 			if !errors.Is(err, grpcproc.ErrNoConnection) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("got %v", err)
+			}
+		})
+	}
+}
+
+// A dial that gets no answer ends at DialTimeout, for a node's send and a
+// process's alike: not at gRPC's 20s connect timeout, and not never.
+func TestDialTimeoutBoundsTheDial(t *testing.T) {
+	tcp, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tcp.Close() })
+	unserved := bufconn.Listen(1 << 20)
+	t.Cleanup(func() { _ = unserved.Close() })
+	cases := []struct {
+		name string
+		dial func(ctx context.Context, _ string) (net.Conn, error)
+		opts []grpc.DialOption
+		want string
+	}{{
+		// The connect never completes: nothing accepts it.
+		name: "no connect",
+		dial: func(ctx context.Context, _ string) (net.Conn, error) { return unserved.DialContext(ctx) },
+		want: "no connection within DialTimeout (100ms): context canceled",
+	}, {
+		// The kernel accepts the connection, and nothing ever speaks on it:
+		// a frozen process.
+		name: "silent peer",
+		dial: func(ctx context.Context, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "tcp", tcp.Addr().String())
+		},
+		want: "no connection within DialTimeout (100ms)",
+	}, {
+		// WaitForReady waits through failed connects; the message keeps why
+		// they failed.
+		name: "wait for ready",
+		dial: func(context.Context, string) (net.Conn, error) {
+			return nil, errors.New("certificate signed by unknown authority")
+		},
+		opts: []grpc.DialOption{grpc.WithDefaultCallOptions(grpc.WaitForReady(true))},
+		want: "no connection within DialTimeout (100ms): latest balancer error",
+	}}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			n, err := grpcproc.NewNode(grpcproc.Config{
+				Name:     "a",
+				Resolver: grpcproc.StaticResolver{"b": "passthrough:///b"},
+				DialOptions: append([]grpc.DialOption{
+					grpc.WithTransportCredentials(insecure.NewCredentials()),
+					grpc.WithContextDialer(tc.dial),
+				}, tc.opts...),
+				DialTimeout: 100 * time.Millisecond,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = n.Stop(context.Background()) })
+			to := grpcproc.Named[*testpb.Ping]("b", "x")
+			check := func(who string, start time.Time, err error) {
+				t.Helper()
+				if !errors.Is(err, grpcproc.ErrNoConnection) || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("%s: got %v", who, err)
+				}
+				if tc.opts != nil && !strings.Contains(err.Error(), "certificate signed by unknown authority") {
+					t.Fatalf("%s: the cause is lost: %v", who, err)
+				}
+				if d := time.Since(start); d > 5*time.Second {
+					t.Fatalf("%s: the dial took %v", who, d)
+				}
+			}
+
+			start := time.Now()
+			check("node", start, n.SendTo(t.Context(), to, &testpb.Ping{}))
+
+			type result struct {
+				start time.Time
+				err   error
+			}
+			sent := make(chan result, 1)
+			if _, err := n.Spawn(func(p *grpcproc.Process[proto.Message]) error {
+				start := time.Now()
+				sent <- result{start, p.SendTo(to, &testpb.Ping{})}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case r := <-sent:
+				check("process", r.start, r.err)
+			case <-time.After(10 * time.Second):
+				t.Fatal("process: the dial did not end")
 			}
 		})
 	}

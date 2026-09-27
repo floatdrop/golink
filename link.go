@@ -245,10 +245,31 @@ func (n *Node) dial(peer string) (*outLink, error) {
 		mdIncarnation, strconv.FormatUint(n.id.Incarnation, 10),
 		mdVersion, strconv.Itoa(protoVersion),
 	)
+	// Opening the stream waits for a connection, and the handshake for the
+	// peer's Hello. Both wait on sctx, which outlives the dial, so the dial's
+	// deadline ends them by cancelling it. Nothing else would: the wait for a
+	// connection lasts gRPC's connect timeout (20s), or forever with
+	// WaitForReady, and the wait for the Hello forever.
+	stop := context.AfterFunc(ctx, scancel)
 	stream, err := grpcprocv1.NewNodeClient(cc).Link(sctx)
 	var inc uint64
 	if err == nil {
-		inc, err = handshake(ctx, peer, stream)
+		inc, err = handshake(peer, stream)
+	}
+	if !stop() {
+		// The deadline passed and cancelled the stream, whatever the dial
+		// got to. What gRPC reported stays in the message: a wait for a
+		// connection that WaitForReady kept through failed connects says
+		// why they failed.
+		what := "connection"
+		if stream != nil {
+			what = "Hello"
+		}
+		msg := fmt.Sprintf("grpcproc: no %s within DialTimeout (%v)", what, n.cfg.DialTimeout)
+		if err != nil {
+			msg += ": " + status.Convert(err).Message()
+		}
+		err = errors.New(msg)
 	}
 	if err != nil {
 		scancel()
@@ -274,40 +295,27 @@ func (n *Node) dial(peer string) (*outLink, error) {
 	return l, nil
 }
 
-// handshake waits for the server's Hello within ctx and checks it names the
-// peer we meant to reach.
-func handshake(ctx context.Context, peer string, stream grpc.BidiStreamingClient[grpcprocv1.Frame, grpcprocv1.Frame]) (uint64, error) {
-	type res struct {
-		f   *grpcprocv1.Frame
-		err error
+// handshake waits for the server's Hello and checks it names the peer we
+// meant to reach. The dial's deadline ends the wait by cancelling the stream.
+func handshake(peer string, stream grpc.BidiStreamingClient[grpcprocv1.Frame, grpcprocv1.Frame]) (uint64, error) {
+	f, err := stream.Recv()
+	if err != nil {
+		return 0, err
 	}
-	ch := make(chan res, 1)
-	go func() {
-		f, err := stream.Recv()
-		ch <- res{f, err}
-	}()
-	select {
-	case r := <-ch:
-		if r.err != nil {
-			return 0, r.err
-		}
-		var h *grpcprocv1.Hello
-		if envs := r.f.GetEnvelopes(); len(envs) == 1 && envs[0].GetKind() == grpcprocv1.Kind_KIND_HELLO {
-			h = envs[0].GetHello()
-		}
-		if h == nil {
-			return 0, errors.New("grpcproc: handshake: expected Hello")
-		}
-		if h.GetVersion() != protoVersion {
-			return 0, fmt.Errorf("grpcproc: handshake: peer speaks protocol %d, this node %d", h.GetVersion(), protoVersion)
-		}
-		if h.GetNode() != peer {
-			return 0, fmt.Errorf("grpcproc: handshake: dialed %q but reached %q", peer, h.GetNode())
-		}
-		return h.GetIncarnation(), nil
-	case <-ctx.Done():
-		return 0, fmt.Errorf("grpcproc: handshake: %w", ctx.Err())
+	var h *grpcprocv1.Hello
+	if envs := f.GetEnvelopes(); len(envs) == 1 && envs[0].GetKind() == grpcprocv1.Kind_KIND_HELLO {
+		h = envs[0].GetHello()
 	}
+	if h == nil {
+		return 0, errors.New("grpcproc: handshake: expected Hello")
+	}
+	if h.GetVersion() != protoVersion {
+		return 0, fmt.Errorf("grpcproc: handshake: peer speaks protocol %d, this node %d", h.GetVersion(), protoVersion)
+	}
+	if h.GetNode() != peer {
+		return 0, fmt.Errorf("grpcproc: handshake: dialed %q but reached %q", peer, h.GetNode())
+	}
+	return h.GetIncarnation(), nil
 }
 
 // ---------- inbound ----------

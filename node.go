@@ -20,7 +20,8 @@ import (
 	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
-// Resolver turns a node name into an address grpc can dial.
+// Resolver turns a node name into an address grpc can dial. Resolve must
+// return once ctx is done: that is what bounds a dial by Config.DialTimeout.
 type Resolver interface {
 	Resolve(ctx context.Context, node string) (addr string, err error)
 }
@@ -108,7 +109,10 @@ type Config struct {
 	// CopyLocal clones every locally delivered message, so a sender can keep
 	// mutating what it sent. Off by default: the pointer is shared.
 	CopyLocal bool
-	// DialTimeout bounds the connect + handshake of a link. Default 5s.
+	// DialTimeout bounds a dial: resolving the peer, connecting, and the
+	// handshake. A send that waits for a dial waits at most this long, as
+	// long as the Resolver and any interceptors in DialOptions honour their
+	// ctx. Default 5s.
 	DialTimeout time.Duration
 }
 
