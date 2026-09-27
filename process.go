@@ -729,11 +729,11 @@ func (p *proc) terminate(reason string) {
 	// terminate runs on the process's goroutine, the mailbox's consumer, so
 	// it may collect what Receive had swapped in but not yet taken.
 	for _, it := range append(p.mbox.taken(), p.mbox.close()...) {
-		if it.ref != 0 {
-			_ = n.reply(p.pid, it.from, it.ref, nil, grpcprocv1.Status_STATUS_NOPROC, "", false)
-		}
 		if it.body != nil {
 			n.deadLetter(it.from, p.pid, it.body, ReasonNoProc)
+		}
+		if it.ref != 0 { // counted first, as deliver does: a caller woken here sees its dead letter
+			_ = n.reply(p.pid, it.from, it.ref, nil, grpcprocv1.Status_STATUS_NOPROC, "", false)
 		}
 	}
 	// The exit is reported before its watchers hear of it, so an observer

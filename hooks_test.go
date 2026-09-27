@@ -126,17 +126,20 @@ func TestMetadataFlowsThroughProcesses(t *testing.T) {
 		"send s3 parent=s2 label=relay",
 		"recv s4 parent=s3 msg label=collector",
 		"end s1",
-		"end s3",
 	} {
 		if !slices.Contains(events, want) {
 			t.Errorf("missing %q in\n%s", want, strings.Join(events, "\n"))
 		}
 	}
 	// Handling ends at the next Receive: send another message and s2 closes.
+	// By then the relay's send has returned too: s3 ended. (The collector
+	// may have its message before that.)
 	_ = a.Send(ctx, relay, &testpb.Ping{N: 2})
 	recv(t, got)
-	if !slices.Contains(tr.Events(), "handled s2") {
-		t.Fatalf("handling not ended:\n%s", strings.Join(tr.Events(), "\n"))
+	for _, want := range []string{"handled s2", "end s3"} {
+		if !slices.Contains(tr.Events(), want) {
+			t.Fatalf("missing %q in\n%s", want, strings.Join(tr.Events(), "\n"))
+		}
 	}
 }
 
@@ -264,5 +267,66 @@ func TestJoinHooks(t *testing.T) {
 	h.OnLinkDown(grpcproc.NodeID{}, nil)
 	if counts.spawns.Load() != 1 || counts.exits.Load() != 1 || counts.deadLetters.Load() != 1 || counts.linkUps.Load() != 1 || counts.linkDowns.Load() != 1 {
 		t.Fatal("join did not fan out")
+	}
+}
+
+// exitOrderHooks notes whether a caller heard ErrNoProc before the dead letter
+// for its call was counted: OnDeadLetter waits a moment for the caller.
+type exitOrderHooks struct {
+	grpcproc.NopHooks
+	answered, counted chan struct{}
+	early             bool // read after counted
+}
+
+func (h *exitOrderHooks) OnDeadLetter(_, _ grpcproc.PID, _ proto.Message, reason string) {
+	if reason != grpcproc.ReasonNoProc {
+		return
+	}
+	select {
+	case <-h.answered:
+		h.early = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(h.counted)
+}
+
+// A call still queued when its process exits is a dead letter, counted
+// before its caller hears ErrNoProc, as when a call finds no process.
+func TestExitCountsQueuedCallBeforeAnswering(t *testing.T) {
+	h := &exitOrderHooks{answered: make(chan struct{}), counted: make(chan struct{})}
+	n, err := grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Hooks: h})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = n.Stop(t.Context()) })
+	release := make(chan struct{})
+	pid, err := n.Spawn(func(p *grpcproc.Process[*testpb.Ping]) error {
+		<-release
+		return nil // exits with the call still queued
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 1)
+	go func() {
+		_, err := n.Call[*testpb.Ping](t.Context(), pid, &testpb.Ping{})
+		close(h.answered)
+		errs <- err
+	}()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		if info, _ := n.Process(pid.PID()); info.Mailbox.Depth == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the call was never queued")
+		}
+	}
+	close(release)
+	if err := <-errs; !errors.Is(err, grpcproc.ErrNoProc) {
+		t.Fatalf("got %v", err)
+	}
+	<-h.counted
+	if h.early {
+		t.Fatal("the caller heard before its dead letter was counted")
 	}
 }

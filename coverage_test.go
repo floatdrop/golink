@@ -298,15 +298,16 @@ func TestProcessSendReplyAndMonitorVariants(t *testing.T) {
 	}
 	// A process exiting while it monitors others (by name and by pid) cleans up.
 	e2, _ := b.Spawn(echo, grpcproc.WithName("echo2"))
+	exit := make(chan struct{})
 	_, _ = a.Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
 		p.Monitor(e2)
 		p.Monitor(grpcproc.Name{Node: "b", Name: "echo2"})
+		<-exit
 		return nil
 	})
-	time.Sleep(50 * time.Millisecond)
-	if info, _ := b.Process(e2.PID()); info.Watchers != 0 {
-		t.Fatalf("watchers not cleaned: %+v", info)
-	}
+	waitWatchers(t, b, e2.PID(), 2)
+	close(exit)
+	waitWatchers(t, b, e2.PID(), 0)
 }
 
 func TestEncodeErrors(t *testing.T) {

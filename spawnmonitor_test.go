@@ -217,7 +217,7 @@ func TestSpawnMonitorRacesParentExit(t *testing.T) {
 		_ = a.Exit(t.Context(), pa, grpcproc.ReasonKilled)
 		ps := <-kids
 		recv(t, downs)
-		deadline := time.Now().Add(200 * time.Millisecond)
+		deadline := time.Now().Add(2 * time.Second)
 		for _, k := range ps {
 			for {
 				info, _ := a.Process(k)

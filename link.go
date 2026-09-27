@@ -208,19 +208,19 @@ func (l *outLink) close(err error) {
 // down, and a lost exit is lost, as in Erlang.
 func (n *Node) lost(peer string, envs []*grpcprocv1.Envelope, unsent error) {
 	for _, env := range envs {
-		switch env.GetKind() {
-		case grpcprocv1.Kind_KIND_SEND:
-		case grpcprocv1.Kind_KIND_CALL:
-			if unsent != nil {
-				n.failCall(env.GetRef(), &LinkError{Peer: peer, Err: unsent, Unsent: true})
-			}
-		default:
+		kind := env.GetKind()
+		if kind != grpcprocv1.Kind_KIND_SEND && kind != grpcprocv1.Kind_KIND_CALL {
 			continue
 		}
 		body, _ := decodeBody(env)
 		from := PID{Node: n.id.Name, Incarnation: env.GetFromIncarnation(), ID: env.GetFromId()}
 		to := PID{Node: peer, Incarnation: env.GetToIncarnation(), ID: env.GetToId()}
 		n.deadLetter(from, to, body, ReasonNoConnection)
+		// Counted before failCall, as deliver does before replying: a caller
+		// woken here sees its dead letter.
+		if kind == grpcprocv1.Kind_KIND_CALL && unsent != nil {
+			n.failCall(env.GetRef(), &LinkError{Peer: peer, Err: unsent, Unsent: true})
+		}
 	}
 }
 
