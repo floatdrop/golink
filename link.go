@@ -365,8 +365,9 @@ func frameOf(batch []*grpcprocv1.Envelope) (n, body int) {
 
 func bodySize(env *grpcprocv1.Envelope) int { return len(env.GetBody()) }
 
-// Link implements grpcproc.v1.Node.
-func (n *Node) Link(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcprocv1.Frame]) error {
+// serveLink is the server side of a link: the peer's stream of frames to
+// this node.
+func (n *Node) serveLink(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcprocv1.Frame]) error {
 	ctx := stream.Context()
 	md, _ := metadata.FromIncomingContext(ctx)
 	peer := NodeID{Name: first(md, mdNode)}

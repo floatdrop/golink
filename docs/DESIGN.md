@@ -34,7 +34,7 @@ node, err := grpcproc.NewNode(grpcproc.Config{
     Logger:      slog.Default(),
     Hooks:       otelHooks, // grpcprocotel.New(): optional, see Observability
 })
-node.Register(grpcServer) // mounts grpcproc.v1.Mesh (+ grpcproc.v1.Inspector if enabled)
+node.Register(grpcServer) // mounts grpcproc.v1.Node
 node.Start(ctx)
 defer node.Stop(ctx)
 

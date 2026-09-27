@@ -215,13 +215,13 @@ func TestLinkHandlerBranches(t *testing.T) {
 	ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(mdNode, "b", mdIncarnation, "2", mdVersion, "1"))
 	// Hello cannot be sent.
 	fs := &fakeStream{ctx: ctx, sendErr: io.ErrClosedPipe, recv: make(chan *grpcprocv1.Frame)}
-	if err := n.Link(fs); !errors.Is(err, io.ErrClosedPipe) {
+	if err := n.serveLink(fs); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatalf("%v", err)
 	}
 	// Closed from this side while the peer is still sending.
 	fs = &fakeStream{ctx: ctx, recvErr: io.EOF, recv: make(chan *grpcprocv1.Frame)}
 	done := make(chan error, 1)
-	go func() { done <- n.Link(fs) }()
+	go func() { done <- n.serveLink(fs) }()
 	time.Sleep(20 * time.Millisecond)
 	if !n.Disconnect("b") {
 		t.Fatal("no inbound link registered")
@@ -233,7 +233,7 @@ func TestLinkHandlerBranches(t *testing.T) {
 	// A node that has stopped refuses links.
 	_ = n.Stop(context.Background())
 	fs = &fakeStream{ctx: ctx, recv: make(chan *grpcprocv1.Frame)}
-	if err := n.Link(fs); err == nil {
+	if err := n.serveLink(fs); err == nil {
 		t.Fatal("link after stop")
 	}
 }
@@ -340,7 +340,7 @@ func TestRecvGoroutineStopsWhenClosed(t *testing.T) {
 	ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(mdNode, "b", mdIncarnation, "2", mdVersion, "1"))
 	fs := &fakeStream{ctx: ctx, recvErr: io.EOF, recv: make(chan *grpcprocv1.Frame)}
 	done := make(chan error, 1)
-	go func() { done <- n.Link(fs) }()
+	go func() { done <- n.serveLink(fs) }()
 	time.Sleep(20 * time.Millisecond)
 	n.Disconnect("b")
 	<-done

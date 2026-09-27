@@ -142,8 +142,6 @@ type Node struct {
 
 	spawned, exited, deadLetters atomic.Uint64
 	subs                         subscribers
-
-	grpcprocv1.UnimplementedNodeServer
 }
 
 type pendingCall struct {
@@ -188,7 +186,21 @@ func NewNode(cfg Config) (*Node, error) {
 
 // Register mounts the grpcproc.v1.Node service on s. Call it before the server
 // starts serving.
-func (n *Node) Register(s grpc.ServiceRegistrar) { grpcprocv1.RegisterNodeServer(s, n) }
+func (n *Node) Register(s grpc.ServiceRegistrar) {
+	grpcprocv1.RegisterNodeServer(s, linkServer{n: n})
+}
+
+// linkServer is the grpcproc.v1.Node service. It is a type of its own so that
+// Node's API does not carry the generated server's methods.
+type linkServer struct {
+	grpcprocv1.UnimplementedNodeServer
+	n *Node
+}
+
+// Link serves one inbound link; see serveLink.
+func (s linkServer) Link(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcprocv1.Frame]) error {
+	return s.n.serveLink(stream)
+}
 
 // Name is the node's logical name.
 func (n *Node) Name() string { return n.id.Name }
