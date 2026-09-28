@@ -3,6 +3,7 @@ package grpcprocetcd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/url"
@@ -25,7 +26,8 @@ var errInjected = errors.New("injected")
 type faultKV struct {
 	clientv3.KV
 	failGets atomic.Int32 // fail this many Gets
-	putErr   error
+	txnErr   error
+	between  func() // runs before the next Txn commits
 }
 
 func (f *faultKV) Get(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
@@ -35,21 +37,41 @@ func (f *faultKV) Get(ctx context.Context, key string, opts ...clientv3.OpOption
 	return f.KV.Get(ctx, key, opts...)
 }
 
-func (f *faultKV) Put(ctx context.Context, key, val string, opts ...clientv3.OpOption) (*clientv3.PutResponse, error) {
-	if f.putErr != nil {
-		return nil, f.putErr
+func (f *faultKV) Txn(ctx context.Context) clientv3.Txn { return &faultTxn{f.KV.Txn(ctx), f} }
+
+type faultTxn struct {
+	clientv3.Txn
+	kv *faultKV
+}
+
+func (t *faultTxn) If(cs ...clientv3.Cmp) clientv3.Txn   { t.Txn = t.Txn.If(cs...); return t }
+func (t *faultTxn) Then(ops ...clientv3.Op) clientv3.Txn { t.Txn = t.Txn.Then(ops...); return t }
+
+func (t *faultTxn) Commit() (*clientv3.TxnResponse, error) {
+	if t.kv.txnErr != nil {
+		return nil, t.kv.txnErr
 	}
-	return f.KV.Put(ctx, key, val, opts...)
+	if f := t.kv.between; f != nil {
+		t.kv.between = nil
+		f()
+	}
+	return t.Txn.Commit()
 }
 
 type faultLease struct {
 	clientv3.Lease
+	grants     atomic.Int32
 	failGrants atomic.Int32 // fail this many Grants
 	failKeeps  atomic.Int32 // fail this many KeepAlives
 	revoked    atomic.Int32
+	// hang has Revoke wait for ctx, as clientv3's does when etcd is out of
+	// reach, closing hanging first.
+	hang    atomic.Bool
+	hanging chan struct{}
 }
 
 func (f *faultLease) Grant(ctx context.Context, ttl int64) (*clientv3.LeaseGrantResponse, error) {
+	f.grants.Add(1)
 	if f.failGrants.Add(-1) >= 0 {
 		return nil, errInjected
 	}
@@ -65,6 +87,11 @@ func (f *faultLease) KeepAlive(ctx context.Context, id clientv3.LeaseID) (<-chan
 
 func (f *faultLease) Revoke(ctx context.Context, id clientv3.LeaseID) (*clientv3.LeaseRevokeResponse, error) {
 	f.revoked.Add(1)
+	if f.hang.Load() {
+		close(f.hanging)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	return f.Lease.Revoke(ctx, id)
 }
 
@@ -162,12 +189,123 @@ func TestEtcdErrorsSurface(t *testing.T) {
 	if _, err := e.c.Register(t.Context(), grpcproc.Member{Name: "a"}); !errors.Is(err, errInjected) {
 		t.Fatalf("Register (grant): %v", err)
 	}
-	e.kv.putErr = errInjected
+	e.kv.txnErr = errInjected
 	if _, err := e.c.Register(t.Context(), grpcproc.Member{Name: "a"}); !errors.Is(err, errInjected) {
-		t.Fatalf("Register (put): %v", err)
+		t.Fatalf("Register (txn): %v", err)
 	}
 	if e.lease.revoked.Load() != 1 {
 		t.Fatal("the lease of a failed put was not revoked")
+	}
+	e.kv.txnErr = nil
+	e.kv.failGets.Store(1)
+	if _, err := e.c.Register(t.Context(), grpcproc.Member{Name: "a"}); !errors.Is(err, errInjected) {
+		t.Fatalf("Register (get): %v", err)
+	}
+}
+
+// A registration that comes in between claim's read and its write is judged
+// too, whether the key was there or not: a newer incarnation's stays, an
+// older one's is replaced. So is a record that cannot be read.
+func TestClaimJudgesARegistrationThatCameMeanwhile(t *testing.T) {
+	e := setup(t)
+	register := func(inc uint64) error {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		withdraw, err := e.c.Register(ctx, grpcproc.Member{Name: "b", Incarnation: inc, Addr: "b"})
+		if err == nil {
+			t.Cleanup(func() { _ = withdraw(context.Background()) })
+		}
+		return err
+	}
+	registered := func() uint64 {
+		t.Helper()
+		resp, err := e.cli.Get(t.Context(), "/x/nodes/b")
+		if err != nil || len(resp.Kvs) != 1 {
+			t.Fatal(resp, err)
+		}
+		m, _ := decode(resp.Kvs[0].Value)
+		return m.Incarnation
+	}
+	put := func(inc uint64) func() {
+		return func() { _, _ = e.cli.Put(t.Context(), "/x/nodes/b", fmt.Sprintf(`{"name":"b","incarnation":%d}`, inc)) }
+	}
+	e.kv.between = put(2)
+	if err := register(1); !errors.Is(err, ErrSuperseded) || err.Error() != ErrSuperseded.Error()+": b#2, and this node is b#1" {
+		t.Fatalf("got %v", err)
+	}
+	e.kv.between = put(1)
+	if err := register(3); err != nil || registered() != 3 {
+		t.Fatal(err, registered())
+	}
+	e.kv.between = put(5)
+	if err := register(4); !errors.Is(err, ErrSuperseded) || registered() != 5 {
+		t.Fatal(err, registered())
+	}
+	if _, err := e.cli.Put(t.Context(), "/x/nodes/b", "garbage"); err != nil {
+		t.Fatal(err)
+	}
+	if err := register(1); err != nil || registered() != 1 {
+		t.Fatal(err, registered())
+	}
+}
+
+// withdraw waits for keep no longer than its ctx: keep may be revoking the
+// lease of a registration etcd did not answer, which could take the TTL.
+func TestWithdrawDoesNotWaitOutKeepsCleanup(t *testing.T) {
+	e := setup(t)
+	e.c.retry = 200 * time.Millisecond
+	e.lease.failKeeps.Store(1)
+	e.lease.hanging = make(chan struct{})
+	e.lease.hang.Store(true)
+	withdraw, err := e.c.Register(t.Context(), grpcproc.Member{Name: "b", Incarnation: 1, Addr: "b:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// keep's next registration fails, and it revokes that lease.
+	e.kv.failGets.Store(1 << 20)
+	<-e.lease.hanging
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if err := withdraw(ctx); !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 5*time.Second {
+		t.Fatalf("got %v after %v", err, time.Since(start))
+	}
+}
+
+// An instance that lost its lease, and finds a newer incarnation registered
+// when it comes back, stops registering.
+func TestKeepStopsWhenANewerIncarnationIsRegistered(t *testing.T) {
+	e := setup(t)
+	withdraw, err := e.c.Register(t.Context(), grpcproc.Member{Name: "b", Incarnation: 1, Addr: "b:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, _ := e.cli.Get(t.Context(), "/x/nodes/b")
+	old := clientv3.LeaseID(resp.Kvs[0].Lease)
+	if _, err := e.cli.Put(t.Context(), "/x/nodes/b", `{"name":"b","incarnation":2}`); err != nil {
+		t.Fatal(err)
+	}
+	grants := e.lease.grants.Load()
+	if _, err := e.cli.Revoke(t.Context(), old); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for e.lease.grants.Load() == grants {
+		if time.Now().After(deadline) {
+			t.Fatal("never tried to register again")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond) // ten retry intervals
+	if n := e.lease.grants.Load() - grants; n != 1 {
+		t.Fatalf("tried %d times", n)
+	}
+	if resp, _ := e.cli.Get(t.Context(), "/x/nodes/b"); string(resp.Kvs[0].Value) != `{"name":"b","incarnation":2}` {
+		t.Fatalf("took the name back: %s", resp.Kvs[0].Value)
+	}
+	// Nothing is published: nothing to withdraw.
+	if err := withdraw(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }
 

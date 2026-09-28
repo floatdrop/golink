@@ -3,6 +3,7 @@ package grpcprocetcd_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"net/url"
 	"testing"
@@ -177,6 +178,60 @@ func TestLostLeaseRegistersAgain(t *testing.T) {
 			t.Fatal("not registered again")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// logged sends the message of every record it handles to a channel.
+type logged chan string
+
+func (l logged) Enabled(context.Context, slog.Level) bool { return true }
+func (l logged) Handle(_ context.Context, r slog.Record) error {
+	select {
+	case l <- r.Message:
+	default:
+	}
+	return nil
+}
+func (l logged) WithAttrs([]slog.Attr) slog.Handler { return l }
+func (l logged) WithGroup(string) slog.Handler      { return l }
+
+// An instance that was replaced cannot register its name again, neither
+// anew nor when it comes back to etcd after losing its lease: peers go on
+// resolving the name to the instance that replaced it.
+func TestReplacedInstanceDoesNotTakeTheNameBack(t *testing.T) {
+	cli := startEtcd(t)
+	logs := make(logged, 16)
+	c := grpcprocetcd.New(cli, "/r", grpcprocetcd.WithRetry(10*time.Millisecond), grpcprocetcd.WithLogger(slog.New(logs)))
+	old, err := c.Register(t.Context(), grpcproc.Member{Name: "b", Incarnation: 1, Addr: "b:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = old(t.Context()) }()
+	resp, _ := cli.Get(t.Context(), "/r/nodes/b")
+	lease := clientv3.LeaseID(resp.Kvs[0].Lease)
+	current, err := c.Register(t.Context(), grpcproc.Member{Name: "b", Incarnation: 2, Addr: "b:2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = current(t.Context()) }()
+	if _, err := c.Register(t.Context(), grpcproc.Member{Name: "b", Incarnation: 1, Addr: "b:1"}); !errors.Is(err, grpcprocetcd.ErrSuperseded) {
+		t.Fatalf("got %v", err)
+	}
+	// The old instance's lease is lost, as when etcd was out of its reach.
+	// It finds out at its next keepalive, and gives up on the name.
+	if _, err := cli.Revoke(t.Context(), lease); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(10 * time.Second)
+	for msg := ""; msg != "replaced by a newer incarnation, not registering again"; {
+		select {
+		case msg = <-logs:
+		case <-deadline:
+			t.Fatal("the old instance never gave up the name")
+		}
+	}
+	if addr, err := c.Resolve(t.Context(), "b"); addr != "b:2" {
+		t.Fatalf("b resolves to %q, %v", addr, err)
 	}
 }
 

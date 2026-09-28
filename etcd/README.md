@@ -29,14 +29,21 @@ forwarding too: `inspect.WithResolver(cluster, dialOptions...)`.
 
 | grpcproc role | etcd |
 | --- | --- |
-| `Registrar` | one key per node, `<prefix>/nodes/<name>`, holding `{"name","incarnation","addr"}`, attached to a lease kept alive. If the lease is lost (etcd unreachable longer than the TTL), the node registers again every retry interval until it succeeds. `Stop` revokes the lease, which removes the key at once. |
+| `Registrar` | one key per node, `<prefix>/nodes/<name>`, holding `{"name","incarnation","addr"}`, attached to a lease kept alive. If the lease is lost (etcd unreachable longer than the TTL), the node registers again every retry interval until it succeeds, or until it finds a newer incarnation registered. `Stop` revokes the lease, which removes the key at once. |
 | `Resolver` | reads the key. |
 | `Membership` | lists the keys (every node is reported up), then watches the prefix: a put is a member up, a delete a member down, with the incarnation from the previous value. If the watch breaks (compaction, etcd restarting), it lists again and reports what changed in between. |
 
 A node that registers a name already present replaces it: a restarted node
 supersedes its previous incarnation, whose lease may not have expired yet.
 Its peers see the new incarnation come up and drop their links to the old
-one.
+one. An older incarnation never replaces a newer one's record, which a
+compare-and-swap settles: `Register` fails with `ErrSuperseded` until the
+newer one's lease ends, and an instance that was replaced, and comes back
+to etcd after losing its lease, stops registering if it finds a newer
+incarnation registered, rather than take the name back. grpcproc peers
+that have seen the newer one refuse its links too. Incarnations must
+therefore grow with each start: with the default, the start time, the
+hosts' clocks must agree.
 
 ## Why a lease and not just the links
 

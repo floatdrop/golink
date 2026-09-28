@@ -14,7 +14,8 @@
 // Each node is one key, <prefix>/nodes/<name>, holding its name,
 // incarnation and address as JSON. A node that registers a name already
 // present replaces it: a restarted node supersedes its previous
-// incarnation, whose lease has not yet expired.
+// incarnation, whose lease has not yet expired. An older incarnation never
+// replaces a newer one.
 package grpcprocetcd
 
 import (
@@ -35,8 +36,13 @@ import (
 	"github.com/floatdrop/grpcproc"
 )
 
-// ErrNotRegistered is returned by Resolve for a node absent from etcd.
-var ErrNotRegistered = errors.New("grpcprocetcd: node is not registered")
+var (
+	// ErrNotRegistered is returned by Resolve for a node absent from etcd.
+	ErrNotRegistered = errors.New("grpcprocetcd: node is not registered")
+	// ErrSuperseded is returned by Register when a newer incarnation of the
+	// node is registered.
+	ErrSuperseded = errors.New("grpcprocetcd: a newer incarnation is registered")
+)
 
 // Option configures New.
 type Option func(*Cluster)
@@ -159,12 +165,16 @@ func (c *Cluster) list(ctx context.Context) (map[string]grpcproc.Member, int64, 
 
 // Register publishes self under a lease and keeps it alive. If the lease is
 // lost (etcd was unreachable for longer than the TTL), it registers again,
-// every retry interval, until it succeeds or withdraw is called. withdraw
-// revokes the lease, which removes the key at once.
+// every retry interval, until it succeeds or withdraw is called, or until
+// it finds a newer incarnation of self registered: an instance that was
+// replaced does not take the name back. It fails with ErrSuperseded while
+// one is registered, until that one's lease ends; the same incarnation
+// replaces its own record. withdraw revokes the lease, which removes the
+// key at once.
 func (c *Cluster) Register(ctx context.Context, self grpcproc.Member) (func(context.Context) error, error) {
 	// Cannot fail: a struct of strings and an integer.
 	value, _ := json.Marshal(record{Name: self.Name, Incarnation: self.Incarnation, Addr: self.Addr})
-	id, err := c.publish(ctx, self.Name, value)
+	id, err := c.publish(ctx, self, value)
 	if err != nil {
 		return nil, err
 	}
@@ -172,31 +182,77 @@ func (c *Cluster) Register(ctx context.Context, self grpcproc.Member) (func(cont
 	lease.Store(int64(id))
 	kctx, stop := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go c.keep(kctx, self.Name, value, &lease, done)
+	go c.keep(kctx, self, value, &lease, done)
 	return func(ctx context.Context) error {
 		stop()
-		<-done
-		if _, err := c.lease.Revoke(ctx, clientv3.LeaseID(lease.Load())); err != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			// keep is still cleaning up after etcd went out of reach; the
+			// lease expires by itself.
+			return fmt.Errorf("grpcprocetcd: withdraw %s: %w", self.Name, ctx.Err())
+		}
+		id := lease.Load()
+		if id == 0 {
+			return nil // superseded: nothing is published
+		}
+		if _, err := c.lease.Revoke(ctx, clientv3.LeaseID(id)); err != nil {
 			return fmt.Errorf("grpcprocetcd: withdraw %s: %w", self.Name, err)
 		}
 		return nil
 	}, nil
 }
 
-func (c *Cluster) publish(ctx context.Context, name string, value []byte) (clientv3.LeaseID, error) {
+func (c *Cluster) publish(ctx context.Context, self grpcproc.Member, value []byte) (clientv3.LeaseID, error) {
 	grant, err := c.lease.Grant(ctx, c.ttl)
 	if err != nil {
-		return 0, fmt.Errorf("grpcprocetcd: register %s: %w", name, err)
+		return 0, fmt.Errorf("grpcprocetcd: register %s: %w", self.Name, err)
 	}
-	if _, err := c.kv.Put(ctx, c.key(name), string(value), clientv3.WithLease(grant.ID)); err != nil {
-		_, _ = c.lease.Revoke(context.WithoutCancel(ctx), grant.ID)
-		return 0, fmt.Errorf("grpcprocetcd: register %s: %w", name, err)
+	if err := c.claim(ctx, self, value, grant.ID); err != nil {
+		// Bounded, as etcd may be out of reach: the lease expires by itself
+		// within the TTL.
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(c.ttl)*time.Second)
+		_, _ = c.lease.Revoke(rctx, grant.ID)
+		cancel()
+		return 0, err
 	}
 	return grant.ID, nil
 }
 
-// keep keeps the lease alive until ctx is done, registering again when it is lost.
-func (c *Cluster) keep(ctx context.Context, name string, value []byte, lease *atomic.Int64, done chan<- struct{}) {
+// claim puts self's record under lease, unless a newer incarnation's is
+// there. It compares and swaps, so that a registration that comes in between
+// is judged too.
+func (c *Cluster) claim(ctx context.Context, self grpcproc.Member, value []byte, lease clientv3.LeaseID) error {
+	key := c.key(self.Name)
+	for {
+		resp, err := c.kv.Get(ctx, key)
+		if err != nil {
+			return fmt.Errorf("grpcprocetcd: register %s: %w", self.Name, err)
+		}
+		var rev int64 // an absent key's ModRevision compares as 0
+		if len(resp.Kvs) > 0 {
+			kv := resp.Kvs[0]
+			if m, err := decode(kv.Value); err == nil && m.Incarnation > self.Incarnation {
+				return fmt.Errorf("%w: %v, and this node is %v", ErrSuperseded,
+					grpcproc.NodeID{Name: self.Name, Incarnation: m.Incarnation}, grpcproc.NodeID{Name: self.Name, Incarnation: self.Incarnation})
+			}
+			rev = kv.ModRevision
+		}
+		unchanged := clientv3.Compare(clientv3.ModRevision(key), "=", rev)
+		put := clientv3.OpPut(key, string(value), clientv3.WithLease(lease))
+		txn, err := c.kv.Txn(ctx).If(unchanged).Then(put).Commit()
+		if err != nil {
+			return fmt.Errorf("grpcprocetcd: register %s: %w", self.Name, err)
+		}
+		if txn.Succeeded {
+			return nil
+		}
+	}
+}
+
+// keep keeps the lease alive until ctx is done, registering again when it
+// is lost, until a newer incarnation of self is registered.
+func (c *Cluster) keep(ctx context.Context, self grpcproc.Member, value []byte, lease *atomic.Int64, done chan<- struct{}) {
 	defer close(done)
 	for {
 		alive, err := c.lease.KeepAlive(ctx, clientv3.LeaseID(lease.Load()))
@@ -208,16 +264,21 @@ func (c *Cluster) keep(ctx context.Context, name string, value []byte, lease *at
 			if ctx.Err() != nil {
 				return
 			}
-			c.log.Warn("lease lost, registering again", "node", name, "err", err)
+			c.log.Warn("lease lost, registering again", "node", self.Name, "err", err)
 			select {
 			case <-ctx.Done():
 				return
 			case <-time.After(c.retry):
 			}
 			var id clientv3.LeaseID
-			if id, err = c.publish(ctx, name, value); err == nil {
+			if id, err = c.publish(ctx, self, value); err == nil {
 				lease.Store(int64(id))
 				break
+			}
+			if errors.Is(err, ErrSuperseded) {
+				c.log.Error("replaced by a newer incarnation, not registering again", "node", self.Name, "err", err)
+				lease.Store(0)
+				return
 			}
 		}
 	}
