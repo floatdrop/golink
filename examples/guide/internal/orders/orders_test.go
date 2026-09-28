@@ -50,7 +50,7 @@ func desk(t *testing.T, cashier func(*grpcproc.Process[*paymentsv1.Charge]) erro
 }
 
 func place(t *testing.T, n *grpcproc.Node) (*ordersv1.Placed, error) {
-	return n.Call[*ordersv1.Placed](t.Context(), ordersv1.Desk("shop"), &ordersv1.Place{Sku: "apple", Qty: 2, Card: "4242"})
+	return ordersv1.Desk("shop").Place(t.Context(), n, &ordersv1.Place{Sku: "apple", Qty: 2, Card: "4242"})
 }
 
 func TestADeclinedCardGivesTheItemsBack(t *testing.T) {

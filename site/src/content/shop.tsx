@@ -103,9 +103,12 @@ export const shop: Doc = {
 					<p>
 						A refusal is part of the answer: <C>Reserved</C> says what is left, or why nothing was
 						reserved, so an error means the stock failed, not that it said no. The registered name
-						is part of the contract too. The package exports it with a function that makes the
-						address from a node name; <C>Addr[*Command]</C> carries the message type, so the
-						compiler checks every send to it, wherever the process runs.
+						is part of the contract too. The package exports the address, made from a node name, as
+						a type of its own: it embeds <C>Addr[*Command]</C>, which carries the message type, so
+						the compiler checks every send to it, wherever the process runs. Its methods are the
+						protocol. <C>Reserve</C> is a call answered with <C>Reserved</C>, <C>Release</C> is a
+						send, and the <C>Command</C> around each is wrapped here, once. Each takes its sender, a
+						node or a process, as a <C>grpcproc.Caller</C>.
 					</p>
 					<Code caption="proto/inventory/v1/address.go">{inventoryAddress}</Code>
 				</>

@@ -30,8 +30,8 @@ type Prices map[string]int64
 // waits in its mailbox.
 type desk struct {
 	actor.CallsOnly[*ordersv1.Place]
-	stock   grpcproc.Addr[*inventoryv1.Command]
-	cashier grpcproc.Addr[*paymentsv1.Charge]
+	stock   inventoryv1.StockAddr
+	cashier paymentsv1.CashierAddr
 	prices  Prices
 }
 
@@ -48,9 +48,7 @@ func (d *desk) HandleCall(p *grpcproc.Process[*ordersv1.Place], m grpcproc.Msg[*
 	// A no is part of each answer. An error is no answer, or a failure:
 	// what happened is not known, so it is left as it is, logged for
 	// whoever reconciles orders, and the call fails.
-	reserved, err := p.Call[*inventoryv1.Reserved](ctx, d.stock, &inventoryv1.Command{
-		Op: &inventoryv1.Command_Reserve{Reserve: &inventoryv1.Reserve{Order: order, Sku: place.Sku, Qty: place.Qty}},
-	})
+	reserved, err := d.stock.Reserve(ctx, p, &inventoryv1.Reserve{Order: order, Sku: place.Sku, Qty: place.Qty})
 	if err != nil {
 		p.Log().Error("reservation unsettled", "order", order, "err", err)
 		return nil, err
@@ -58,7 +56,7 @@ func (d *desk) HandleCall(p *grpcproc.Process[*ordersv1.Place], m grpcproc.Msg[*
 	if reserved.Refused != "" {
 		return &ordersv1.Placed{Refused: reserved.Refused}, nil
 	}
-	charged, err := p.Call[*paymentsv1.Charged](ctx, d.cashier, &paymentsv1.Charge{
+	charged, err := d.cashier.Charge(ctx, p, &paymentsv1.Charge{
 		Order: order, Card: place.Card, Amount: price * place.Qty,
 	})
 	if err != nil {
@@ -69,10 +67,8 @@ func (d *desk) HandleCall(p *grpcproc.Process[*ordersv1.Place], m grpcproc.Msg[*
 	if charged.Declined != "" {
 		// Nothing was taken, so give the items back. A send, since
 		// nothing here needs to wait for it.
-		release := &inventoryv1.Command{
-			Op: &inventoryv1.Command_Release{Release: &inventoryv1.Release{Order: order, Sku: place.Sku, Qty: place.Qty}},
-		}
-		if err := p.Send(d.stock, release); err != nil {
+		release := &inventoryv1.Release{Order: order, Sku: place.Sku, Qty: place.Qty}
+		if err := d.stock.Release(ctx, p, release); err != nil {
 			p.Log().Error("release failed", "order", order, "err", err)
 		}
 		return &ordersv1.Placed{Order: order, Refused: charged.Declined}, nil

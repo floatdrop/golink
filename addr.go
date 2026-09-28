@@ -46,6 +46,60 @@ func (a Addr[M]) String() string {
 
 func (a Addr[M]) target() (PID, string) { return a.pid, a.name }
 
+// Call sends req to the address and waits for the reply, typed as R. from
+// is who calls: the Node, as Node.Call does, or a Process, as Process.Call
+// does, with the metadata of the message it is handling. Errors are as for
+// Node.Call.
+//
+// It lets a contract package write its protocol once, as a method per
+// operation on its own address type, which names R so callers do not:
+//
+//	type StockAddr struct{ grpcproc.Addr[*Command] }
+//
+//	func (s StockAddr) Reserve(ctx context.Context, from grpcproc.Caller, r *Reserve) (*Reserved, error) {
+//		return s.Call[*Reserved](ctx, from, &Command{Op: &Command_Reserve{Reserve: r}})
+//	}
+//
+// and then, from a node or from inside a process alike:
+//
+//	reserved, err := stock.Reserve(ctx, p, &Reserve{Sku: "apple", Qty: 2})
+func (a Addr[M]) Call[R proto.Message](ctx context.Context, from Caller, req M) (R, error) {
+	o := from.origin(ctx)
+	return typed[R](o.n.doCall(ctx, o.from, o.p, a.dest(), req, o.md))
+}
+
+// Send delivers m to the address, from the Node or a Process, as their Send
+// does. Unlike Process.Send it takes a ctx: from a process, ctx's metadata
+// is merged over what the process inherited, as for Process.Call, and ctx
+// bounds the wait for a first connection, as for Node.Send.
+func (a Addr[M]) Send(ctx context.Context, from Caller, m M) error {
+	o := from.origin(ctx)
+	return o.n.send(ctx, o.from, o.p, a.dest(), m, o.md)
+}
+
+// Caller is who sends or calls through Addr.Call and Addr.Send: a *Node, or
+// a *Process from inside its handler. Only this package implements it.
+type Caller interface {
+	origin(ctx context.Context) origin
+}
+
+// origin is what the send path needs of a sender: its node, the PID the
+// message is from, the process when one sends it, and the metadata to carry.
+type origin struct {
+	n    *Node
+	from PID
+	p    *proc
+	md   Metadata
+}
+
+func (n *Node) origin(ctx context.Context) origin {
+	return origin{n: n, from: n.PID(), md: MetadataFrom(ctx)}
+}
+
+func (p *proc) origin(ctx context.Context) origin {
+	return origin{n: p.n, from: p.pid, p: p, md: p.outgoing(MetadataFrom(ctx))}
+}
+
 // dest is a target as the send path carries it: a plain value, where a
 // Target would be boxed on the heap for every message.
 type dest struct {

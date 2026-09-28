@@ -221,6 +221,8 @@ type Addr[M proto.Message] struct { /* PID or Name, plus the phantom type M */ }
 func (n *Node) Spawn[M proto.Message](fn func(*Process[M]) error, opts ...SpawnOption) (Addr[M], error)
 func Named[M proto.Message](node, name string) Addr[M]   // remote by name; checked on delivery
 func (a Addr[M]) PID() PID
+func (a Addr[M]) Call[R proto.Message](ctx, from Caller, req M) (R, error) // from: a *Node or a *Process
+func (a Addr[M]) Send(ctx, from Caller, m M) error
 
 func (p *Process[M]) Receive() (Msg[M], error)
 func (p *Process[M]) ReceiveTimeout(d time.Duration) (Msg[M], error)
@@ -265,6 +267,29 @@ func (m Msg[M]) Context() context.Context      // sender's deadline and metadata
 With an interface `M`, the send names it: Go infers `N` from the address and
 from the message alike, and they differ. That is why the examples use a
 oneof.
+
+`Addr.Call` and `Addr.Send` take the sender as an argument, a `Caller`: the
+`*Node` or a `*Process`. A contract package uses them to write its protocol
+as methods on an address type of its own, so the reply type of each
+operation, and the oneof around its request, are named once, in the package,
+instead of at every call site:
+
+```go
+type StockAddr struct{ grpcproc.Addr[*Command] }
+
+func (s StockAddr) Reserve(ctx context.Context, from grpcproc.Caller, r *Reserve) (*Reserved, error) {
+    return s.Call[*Reserved](ctx, from, &Command{Op: &Command_Reserve{Reserve: r}})
+}
+
+reserved, err := stock.Reserve(ctx, p, &Reserve{Sku: "apple", Qty: 2}) // p, or a node
+```
+
+`Caller` has one unexported method, because an interface cannot declare a
+generic one: `Node.Call` and `Process.Call` make no common method set. The
+sender is an argument, not bound into the address, because who sends matters:
+a process's call carries the metadata of the message it is handling and
+shows the process waiting on a reply, and an actor keeps its addresses in
+fields but has its process only inside a handler.
 
 The untyped process is the typed one instantiated with the interface, so
 there is one implementation. Types do not cross the wire: a remote sender can

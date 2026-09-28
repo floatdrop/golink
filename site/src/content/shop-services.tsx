@@ -77,8 +77,8 @@ export const shopServices: Doc = {
 					<p>
 						The desk takes an order: it reserves the items, charges for them and answers with the
 						receipt. The stock and the cashier belong to other services, perhaps on other nodes; the
-						desk calls them the same way wherever they run: <C>p.Call</C> to a typed address under a
-						deadline.
+						desk calls them the same way wherever they run: through the methods of their addresses,
+						as its process <C>p</C>, under a deadline.
 					</p>
 					<p>
 						A refusal from either is passed on in the desk's answer, and after a declined card the
@@ -107,8 +107,9 @@ export const shopServices: Doc = {
 				<>
 					<p>
 						The web front is not a process. An HTTP handler calls the desk through the node, as any
-						code outside a process does. <C>node.Call</C> gets the request's context, so a client
-						that hangs up stops the wait, not the order: the desk still takes it.
+						code outside a process does: the node is the sender it passes to the desk's{' '}
+						<C>Place</C>. The call gets the request's context, so a client that hangs up stops the
+						wait, not the order: the desk still takes it.
 					</p>
 					<p>
 						A refusal becomes a 422 with the reason; an error a 503, whether the desk could not be

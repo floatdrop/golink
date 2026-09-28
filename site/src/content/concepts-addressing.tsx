@@ -1,3 +1,4 @@
+import inventoryAddress from '../../../examples/guide/proto/inventory/v1/address.go?raw';
 import quickstart from '../../../examples/quickstart/main.go?raw';
 
 import { Code, region } from '../code.tsx';
@@ -131,6 +132,38 @@ pid, ok := warehouse.Whereis("stock") // on this node, now`}</Code>
 						<C>Addr</C>. <C>Monitor</C>, <C>Link</C> and <C>Exit</C> take a target, since they do not
 						care about the mailbox's type; <C>SendTo</C> and <C>CallTo</C> take one too, and the type
 						is checked on delivery only.
+					</p>
+				</>
+			)
+		},
+		{
+			id: 'protocol',
+			title: 'An address with its protocol',
+			body: (
+				<>
+					<p>
+						A typed call names its reply, <C>node.Call[*shoppb.Reserved](ctx, stock, req)</C>, and
+						every call site does, wrapping the request in the mailbox's oneof when it has one. The
+						package that owns a process can do both once. An address has <C>Call</C> and{' '}
+						<C>Send</C> of its own, which take the sender as an argument, a <C>Caller</C>: the{' '}
+						<C>*Node</C>, or a <C>*Process</C> from inside a handler, as <C>Node.Call</C> or{' '}
+						<C>Process.Call</C> would send it. A contract wraps them in a method per operation, on an
+						address type of its own:
+					</p>
+					<Code caption="examples/guide/proto/inventory/v1/address.go">
+						{`${region(inventoryAddress, /^\/\/ StockAddr addresses/, /^type StockAddr/)}
+
+${region(inventoryAddress, /^\/\/ Reserve takes items/, /^}/)}`}
+					</Code>
+					<p>
+						A caller then writes <C>stock.Reserve(ctx, p, req)</C> from a handler, or{' '}
+						<C>stock.Reserve(ctx, node, req)</C> from anywhere else, and names neither the reply nor
+						the oneof. The sender is an argument rather than part of the address because who sends
+						matters: a process's call carries the metadata of the message it is handling, and an
+						actor keeps its addresses in fields but has its process only inside a handler. The type
+						embeds <C>Addr</C>, so it is still a <C>Target</C>, and its raw <C>Call</C> and{' '}
+						<C>Send</C> are still there: the methods make the protocol the easy way, not the only
+						one. <A to="shop/#contracts">The shop</A>'s contracts are written this way.
 					</p>
 				</>
 			)

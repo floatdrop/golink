@@ -21,7 +21,7 @@ import (
 
 type front struct {
 	node *grpcproc.Node
-	desk grpcproc.Addr[*ordersv1.Place]
+	desk ordersv1.DeskAddr
 	log  *slog.Logger
 }
 
@@ -49,7 +49,7 @@ func (f *front) place(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	p, err := f.node.Call[*ordersv1.Placed](r.Context(), f.desk, &ordersv1.Place{Sku: o.Sku, Qty: o.Qty, Card: o.Card})
+	p, err := f.desk.Place(r.Context(), f.node, &ordersv1.Place{Sku: o.Sku, Qty: o.Qty, Card: o.Card})
 	switch {
 	case err != nil:
 		// No answer: the desk, or a service it needs, is out of reach.
