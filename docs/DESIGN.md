@@ -649,7 +649,10 @@ them. Two primitives went into the core because they need process internals:
   `actor.StopChild` stops one for good. A spec holds Go functions, so
   `StartChild` registers it in the actor package and calls the supervisor
   with its id (`grpcproc.actor.v1.Control`): only a supervisor on the same
-  node can start it. `StopChild` carries a PID and works across nodes. A
+  node can start it, and the supervisor refuses a caller of another node.
+  Both take who asks as a `grpcproc.Caller`, the node or a process, so a
+  process asks as itself, with its metadata, and the supervisor as a
+  `Target`, a PID or a name. `StopChild` carries a PID and works across nodes. A
   child `StartChild` added is forgotten once it ends for good, so a pool of
   anonymous workers does not grow the supervisor. There is no
   `simple_one_for_one`: a pool is a `OneForOne` supervisor whose children
@@ -741,7 +744,10 @@ leader's singleton, and its state the singleton's.
 - **Standard crontab**, Vixie's day rule, plus `L`, `5L` and `5#2` from
   Quartz; the standard macros. `AddJob` takes Go functions, so it works on
   the cron process's own node only, through the registry `actor.StartChild`
-  uses; enable, disable and remove work from any node.
+  uses; enable, disable and remove work from any node. They are methods of
+  a `Crontab`, the cron process's address, which `Start` returns and
+  `Named` finds, and take who asks as a `grpcproc.Caller`, as pubsub's
+  `Topic` does.
 
 ### `grpcproc/leader`
 

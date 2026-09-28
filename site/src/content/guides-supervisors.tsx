@@ -210,8 +210,10 @@ export const guidesSupervisors: Doc = {
 			body: (
 				<>
 					<p>
-						<C>actor.StartChild(ctx, node, sup, spec)</C> adds a child to a running supervisor and
-						starts it, after the children it already has; it returns the child's PID once it runs.
+						<C>actor.StartChild(ctx, from, sup, spec)</C> adds a child to a running supervisor and
+						starts it, after the children it already has; it returns the child's PID once it runs.{' '}
+						<C>from</C> is who asks, the node or a process from inside its handler, as for an
+						address's <C>Call</C>, and <C>sup</C> is a PID or a name.
 						The child is the supervisor's like the others, with one difference: once it ends for
 						good, because it is temporary, or transient and ended normally, or <C>StopChild</C>{' '}
 						stopped it, the supervisor forgets it. A pool of workers is a <C>OneForOne</C>{' '}
@@ -221,13 +223,13 @@ export const guidesSupervisors: Doc = {
 					<Code>{`worker, err := actor.StartChild(ctx, node, pool, actor.ChildFunc("", handle(job)).WithRestart(actor.Temporary))`}</Code>
 					<p>
 						A spec holds Go functions, which no message can carry, so <C>StartChild</C> works only
-						for a supervisor on the same node: it registers the spec locally and calls the supervisor
-						with its id. A child that fails to start is an error, and the supervisor does not count
+						from the supervisor's own node, which the supervisor checks: it registers the spec
+						locally and calls the supervisor with its id. A child that fails to start is an error, and the supervisor does not count
 						it as a restart. <C>StartChild</C> is refused while a restart waits on a stuck child,
 						since the new one would start before those owed a start.
 					</p>
 					<p>
-						<C>actor.StopChild(ctx, node, sup, child)</C> stops a child for good: it is not
+						<C>actor.StopChild(ctx, from, sup, child)</C> stops a child for good: it is not
 						restarted, whatever its <C>Restart</C>, and a strategy no longer counts it, until the
 						supervisor itself is started again from its <C>Spec</C>. It carries a PID, so the
 						supervisor may be on another node. A significant child stopped this way does not end its

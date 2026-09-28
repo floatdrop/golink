@@ -710,7 +710,7 @@ func (e *elector[S]) start(now time.Time) {
 	// It fails only while the node stops.
 	_, _ = e.p.Spawn(func(h *grpcproc.Process[proto.Message]) error {
 		started := &leaderv1.Started{Term: term}
-		pid, err := startSingleton(h.Context(), n, top, term, confirm, func() (actor.ChildSpec, error) { return build(lease, state) })
+		pid, err := startSingleton(h.Context(), h, top, term, confirm, func() (actor.ChildSpec, error) { return build(lease, state) })
 		if err != nil {
 			started.Error = err.Error()
 		} else {
@@ -720,7 +720,7 @@ func (e *elector[S]) start(now time.Time) {
 	}, grpcproc.LinkParent(), grpcproc.WithLabel("leader starter"))
 }
 
-func startSingleton(ctx context.Context, n *grpcproc.Node, top grpcproc.PID, term uint64, confirm func(context.Context, uint64) error, build func() (actor.ChildSpec, error)) (grpcproc.PID, error) {
+func startSingleton(ctx context.Context, from grpcproc.Caller, top grpcproc.PID, term uint64, confirm func(context.Context, uint64) error, build func() (actor.ChildSpec, error)) (grpcproc.PID, error) {
 	if confirm != nil {
 		if err := confirm(ctx, term); err != nil {
 			return grpcproc.PID{}, fmt.Errorf("leader: Confirm: %w", err)
@@ -730,7 +730,7 @@ func startSingleton(ctx context.Context, n *grpcproc.Node, top grpcproc.PID, ter
 	if err != nil {
 		return grpcproc.PID{}, fmt.Errorf("leader: Singleton: %w", err)
 	}
-	return actor.StartChild(ctx, n, top, child.WithRestart(actor.Temporary).WithSignificant(false))
+	return actor.StartChild(ctx, from, top, child.WithRestart(actor.Temporary).WithSignificant(false))
 }
 
 func (e *elector[S]) started(b *leaderv1.Started, now time.Time) {

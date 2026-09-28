@@ -692,7 +692,7 @@ func (n *Node) CallTo[R proto.Message](ctx context.Context, to Target, req proto
 	return typed[R](n.doCall(ctx, n.PID(), nil, destOf(to), req, MetadataFrom(ctx)))
 }
 
-// Exit asks a process anywhere to terminate with reason. As for Send, ctx
+// Exit asks a process anywhere to terminate with reason. As for SendTo, ctx
 // bounds only the wait for a connection to a peer this node has no link to
 // yet.
 func (n *Node) Exit(ctx context.Context, to Target, reason string) error {

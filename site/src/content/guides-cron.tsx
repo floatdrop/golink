@@ -194,10 +194,16 @@ export const guidesCron: Doc = {
 			title: 'Changing jobs',
 			body: (
 				<>
-					<Code>{`cron.AddJob(ctx, node, c, job)           // on c's node only: a job holds Go functions
-cron.DisableJob(ctx, node, c, "nightly") // from any node
-cron.EnableJob(ctx, node, c, "nightly")  // runs from the next minute; what it missed is not caught up
-cron.RemoveJob(ctx, node, c, "nightly")`}</Code>
+					<Code>{`c.AddJob(ctx, node, job)           // from c's node only: a job holds Go functions
+c.DisableJob(ctx, node, "nightly") // from any node
+c.EnableJob(ctx, node, "nightly")  // runs from the next minute; what it missed is not caught up
+c.RemoveJob(ctx, node, "nightly")
+
+c = cron.Named("a", "cron")        // a cron process by its name`}</Code>
+					<p>
+						<C>c</C> is a <C>cron.Crontab</C>, what <C>cron.Start</C> returns. Each change takes who
+						asks, the node or a process from inside its handler, as an address's <C>Call</C> does.
+					</p>
 					<p>
 						Runs already going go on. An unknown name is <C>cron.ErrNoJob</C>, a name taken{' '}
 						<C>cron.ErrJobExists</C>, whichever node asked. A cron process a supervisor restarts

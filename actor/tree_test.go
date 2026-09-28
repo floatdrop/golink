@@ -11,6 +11,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/floatdrop/grpcproc"
 	"github.com/floatdrop/grpcproc/actor"
 	"github.com/floatdrop/grpcproc/grpcproctest"
@@ -173,6 +175,36 @@ func TestAnonymousChildren(t *testing.T) {
 			if p.Name != "" {
 				t.Fatalf("%v registered as %q", p.PID, p.Name)
 			}
+		}
+	})
+}
+
+// A process asks as itself, and reaches its supervisor by name.
+func TestStartAndStopChildFromAProcess(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		n := grpcproctest.New(t, "a").Node("a")
+		if _, err := actor.Supervise(n, actor.Spec{}, grpcproc.WithName("pool")); err != nil {
+			t.Fatal(err)
+		}
+		pool := grpcproc.Name{Node: "a", Name: "pool"}
+		done := make(chan error, 1)
+		asker, err := n.Spawn(func(p *grpcproc.Process[proto.Message]) error {
+			child, err := actor.StartChild(p.Context(), p, pool, actor.ChildFunc("", worker).WithRestart(actor.Temporary))
+			if err == nil {
+				err = actor.StopChild(p.Context(), p, pool, child)
+			}
+			done <- err
+			_, err = p.Receive() // stays, for its counters to be read
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := within(t, done); err != nil {
+			t.Fatal(err)
+		}
+		if info, _ := n.Process(asker.PID()); info.Sent != 2 {
+			t.Fatalf("the process sent %d calls, want 2: it asked as itself", info.Sent)
 		}
 	})
 }

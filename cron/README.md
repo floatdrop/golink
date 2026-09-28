@@ -111,11 +111,17 @@ leader.Start(node, leader.Spec[*cronv1.State]{
 ## Changing jobs
 
 ```go
-cron.AddJob(ctx, node, c, job)            // only on c's node: a job holds Go functions
-cron.DisableJob(ctx, node, c, "nightly")  // from any node
-cron.EnableJob(ctx, node, c, "nightly")   // runs from the next minute; nothing missed is caught up
-cron.RemoveJob(ctx, node, c, "nightly")
+c.AddJob(ctx, node, job)            // only from c's node: a job holds Go functions
+c.DisableJob(ctx, node, "nightly")  // from any node
+c.EnableJob(ctx, node, "nightly")   // runs from the next minute; nothing missed is caught up
+c.RemoveJob(ctx, node, "nightly")
+
+c = cron.Named("a", "cron")         // a cron process by its name
 ```
+
+`c` is a `cron.Crontab`, what `cron.Start` returns. Each change takes who
+asks, the node or a process from inside its handler, as an address's `Call`
+does.
 
 Runs already going go on. A cron process a supervisor restarts starts again
 from its `Spec`'s jobs.

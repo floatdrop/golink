@@ -412,6 +412,12 @@ func toMsg[M proto.Message](taker *proc, it item) Msg[M] {
 // waits for the dial, up to Config.DialTimeout, unless dials to it are
 // failing (Config.DialBackoff). The target's type is checked on delivery
 // only.
+//
+// It takes no ctx, as Exit takes none: a process carries its own, the
+// metadata it inherits and the node's DialTimeout. Its own Context would be
+// no better, since it ends as the process is asked to exit, when a process
+// may still have a send to make. For a ctx of its own, a process sends
+// through the address: AddrOf[proto.Message](to).Send(ctx, p, msg).
 func (p *proc) SendTo(to Target, msg proto.Message) error {
 	return p.n.send(context.Background(), p.pid, p, destOf(to), msg, p.outgoing(nil))
 }
@@ -475,8 +481,9 @@ func (p *proc) sendAfter(d time.Duration, to dest, m proto.Message) *Timer {
 }
 
 // Exit asks another process, anywhere, to terminate with reason. A first
-// exit to a node with no link yet waits for the dial as Send does. It is not
-// trapped: a process that traps exits ends all the same.
+// exit to a node with no link yet waits for the dial as SendTo does, and,
+// as SendTo, it takes no ctx. It is not trapped: a process that traps exits
+// ends all the same.
 func (p *proc) Exit(to Target, reason string) error {
 	return p.n.exit(context.Background(), p.pid, to, reason)
 }

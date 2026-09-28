@@ -166,12 +166,12 @@ func TestRunsOnSchedule(t *testing.T) {
 		sleepUntil(t, "2026-09-28T11:00:30Z")
 		check(t, "runs", r.String(), "quarter 10:15 UTC; quarter 10:30 UTC; quarter 10:45 UTC; ny 07:00 EDT; quarter 11:00 UTC")
 
-		info := inspect(t, n, c.PID())
+		info := inspect(t, n, c.Addr().PID())
 		check(t, "quarter", info["quarter"], "*/15 * * * * UTC, next 2026-09-28T11:15:00Z, last 2026-09-28T11:00:00Z")
 		check(t, "ny", info["ny"], "0 7 * * * America/New_York, next 2026-09-29T07:00:00-04:00, last 2026-09-28T07:00:00-04:00")
 		check(t, "every", info["every"], "* * * * * UTC, disabled")
 		for _, p := range n.Processes() {
-			if p.PID == c.PID() && p.Label != "cron" {
+			if p.PID == c.Addr().PID() && p.Label != "cron" {
 				t.Errorf("label %q", p.Label)
 			}
 		}
@@ -204,8 +204,8 @@ func TestRunsAreProcesses(t *testing.T) {
 		}
 		sleepUntil(t, "2026-09-28T10:08:30Z")
 		check(t, "label", <-labels, "cron:report")
-		if got := <-parents; got != c.PID() {
-			t.Errorf("parent %v, want %v", got, c.PID())
+		if got := <-parents; got != c.Addr().PID() {
+			t.Errorf("parent %v, want %v", got, c.Addr().PID())
 		}
 	})
 }
@@ -284,14 +284,14 @@ func TestFailures(t *testing.T) {
 		if !strings.Contains(got, "10:08 disk full") || !strings.Contains(got, "10:08 panic: kaboom") {
 			t.Errorf("failures %s", got)
 		}
-		info := inspect(t, n, c.PID())
+		info := inspect(t, n, c.Addr().PID())
 		check(t, "error", info["error"], "* * * * * UTC, next 2026-09-28T10:09:00Z, last 2026-09-28T10:08:00Z, failed: disk full")
 		check(t, "quiet", info["quiet"], "8 * * * * UTC, next 2026-09-28T11:08:00Z, last 2026-09-28T10:08:00Z, failed: unheard")
 		if !strings.Contains(logs.String(), "unheard") {
 			t.Errorf("a failure OnFailure does not hear is logged: %s", logs)
 		}
 		sleepUntil(t, "2026-09-28T10:09:30Z")
-		check(t, "error, once it succeeds", inspect(t, n, c.PID())["error"], "* * * * * UTC, next 2026-09-28T10:10:00Z, last 2026-09-28T10:09:00Z")
+		check(t, "error, once it succeeds", inspect(t, n, c.Addr().PID())["error"], "* * * * * UTC, next 2026-09-28T10:10:00Z, last 2026-09-28T10:09:00Z")
 	})
 }
 
@@ -316,7 +316,7 @@ func TestOverlap(t *testing.T) {
 				sleepUntil(t, "2026-09-28T10:10:30Z")
 				check(t, "started", started.String(), tc.started)
 				check(t, "failures", f.String(), tc.failures)
-				check(t, "job", inspect(t, n, c.PID())["job"], "* * * * * UTC, next 2026-09-28T10:11:00Z, last 2026-09-28T10:10:00Z, "+tc.running)
+				check(t, "job", inspect(t, n, c.Addr().PID())["job"], "* * * * * UTC, next 2026-09-28T10:11:00Z, last 2026-09-28T10:10:00Z, "+tc.running)
 			})
 		})
 	}
@@ -459,61 +459,63 @@ func TestControl(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := cron.AddJob(ctx, n, c, cron.Job{Name: "b", Spec: "* * * * *", Action: r.action()}); err != nil {
+		if err := c.AddJob(ctx, n, cron.Job{Name: "b", Spec: "* * * * *", Action: r.action()}); err != nil {
 			t.Fatal(err)
 		}
-		if err := cron.AddJob(ctx, n, c, cron.Job{Name: "a", Spec: "* * * * *", Action: r.action()}); !errors.Is(err, cron.ErrJobExists) {
+		if err := c.AddJob(ctx, n, cron.Job{Name: "a", Spec: "* * * * *", Action: r.action()}); !errors.Is(err, cron.ErrJobExists) {
 			t.Errorf("AddJob of a taken name: %v", err)
 		}
-		if err := cron.AddJob(ctx, n, c, cron.Job{Name: "c", Spec: "bad"}); err == nil {
+		if err := c.AddJob(ctx, n, cron.Job{Name: "c", Spec: "bad"}); err == nil {
 			t.Error("AddJob of a bad job")
 		}
 		sleepUntil(t, "2026-09-28T10:08:30Z")
 		check(t, "added", r.String(), "a 10:08 UTC; b 10:08 UTC")
 
-		if err := cron.DisableJob(ctx, n, c, "a"); err != nil {
+		if err := c.DisableJob(ctx, n, "a"); err != nil {
 			t.Fatal(err)
 		}
-		if err := cron.RemoveJob(ctx, n, grpcproc.Named[*cronv1.Control]("a", "cron"), "b"); err != nil {
+		named := cron.Named("a", "cron")
+		check(t, "a Crontab by name", named.String(), "{cron@a}")
+		if err := named.RemoveJob(ctx, n, "b"); err != nil {
 			t.Fatal(err)
 		}
 		sleepUntil(t, "2026-09-28T10:10:30Z")
 		check(t, "disabled and removed", r.String(), "a 10:08 UTC; b 10:08 UTC")
-		if _, ok := inspect(t, n, c.PID())["b"]; ok {
+		if _, ok := inspect(t, n, c.Addr().PID())["b"]; ok {
 			t.Error("a removed job is still inspected")
 		}
 
 		// Enabled, it runs from the next minute on, without catching up.
-		if err := cron.EnableJob(ctx, n, c, "a"); err != nil {
+		if err := c.EnableJob(ctx, n, "a"); err != nil {
 			t.Fatal(err)
 		}
-		if err := cron.EnableJob(ctx, n, c, "a"); err != nil {
+		if err := c.EnableJob(ctx, n, "a"); err != nil {
 			t.Fatal(err)
 		}
 		sleepUntil(t, "2026-09-28T10:11:30Z")
 		check(t, "enabled", r.String(), "a 10:08 UTC; b 10:08 UTC; a 10:11 UTC")
 
 		for name, err := range map[string]error{
-			"remove":  cron.RemoveJob(ctx, n, c, "nope"),
-			"enable":  cron.EnableJob(ctx, n, c, "nope"),
-			"disable": cron.DisableJob(ctx, n, c, "nope"),
+			"remove":  c.RemoveJob(ctx, n, "nope"),
+			"enable":  c.EnableJob(ctx, n, "nope"),
+			"disable": c.DisableJob(ctx, n, "nope"),
 		} {
 			if !errors.Is(err, cron.ErrNoJob) {
 				t.Errorf("%s of an unknown job: %v", name, err)
 			}
 		}
-		if err := cron.RemoveJob(ctx, n, grpcproc.Named[*cronv1.Control]("a", "nocron"), "a"); !errors.Is(err, grpcproc.ErrNoProc) {
+		if err := cron.Named("a", "nocron").RemoveJob(ctx, n, "a"); !errors.Is(err, grpcproc.ErrNoProc) {
 			t.Errorf("RemoveJob from no cron process: %v", err)
 		}
 		for what, op := range map[string]*cronv1.Control{
 			"without an op":         {},
 			"the job was withdrawn": {Op: &cronv1.Control_Add{Add: 1 << 60}},
 		} {
-			if _, err := c.Call[*emptypb.Empty](ctx, n, op); err == nil || !strings.Contains(err.Error(), what) {
+			if _, err := c.Addr().Call[*emptypb.Empty](ctx, n, op); err == nil || !strings.Contains(err.Error(), what) {
 				t.Errorf("%s: %v", what, err)
 			}
 		}
-		if err := c.Send(ctx, n, &cronv1.Control{}); err != nil {
+		if err := c.Addr().Send(ctx, n, &cronv1.Control{}); err != nil {
 			t.Fatal(err)
 		}
 		synctest.Wait()
@@ -528,12 +530,12 @@ func TestAddJobOnlyFromItsNode(t *testing.T) {
 	if _, err := cron.Start(c.Node("a"), cron.Spec{}, grpcproc.WithName("cron")); err != nil {
 		t.Fatal(err)
 	}
-	remote := grpcproc.Named[*cronv1.Control]("a", "cron")
-	err := cron.AddJob(t.Context(), c.Node("b"), remote, cron.Job{Name: "x", Spec: "@daily", Action: cron.Func(func(context.Context, cron.Run) error { return nil })})
+	remote := cron.Named("a", "cron")
+	err := remote.AddJob(t.Context(), c.Node("b"), cron.Job{Name: "x", Spec: "@daily", Action: cron.Func(func(context.Context, cron.Run) error { return nil })})
 	if err == nil || !strings.Contains(err.Error(), "only from the cron process's node") {
 		t.Errorf("AddJob from another node: %v", err)
 	}
-	if err := cron.RemoveJob(t.Context(), c.Node("b"), remote, "x"); !errors.Is(err, cron.ErrNoJob) {
+	if err := remote.RemoveJob(t.Context(), c.Node("b"), "x"); !errors.Is(err, cron.ErrNoJob) {
 		t.Errorf("RemoveJob from another node: %v", err)
 	}
 }

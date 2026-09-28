@@ -195,15 +195,34 @@ type Spec struct {
 	OnState func(*cronv1.State)
 }
 
-// Start checks spec and spawns a cron process for it on n. opts apply to
-// the process: a name, to reach it by.
-func Start(n *grpcproc.Node, spec Spec, opts ...grpcproc.SpawnOption) (grpcproc.Addr[*cronv1.Control], error) {
+// Start checks spec and spawns a cron process for it on n, and returns its
+// Crontab. opts apply to the process: a name, to reach it by.
+func Start(n *grpcproc.Node, spec Spec, opts ...grpcproc.SpawnOption) (Crontab, error) {
 	s, err := build(spec)
 	if err != nil {
-		return grpcproc.Addr[*cronv1.Control]{}, err
+		return Crontab{}, err
 	}
-	return n.Spawn(s.run, s.options(opts)...)
+	a, err := n.Spawn(s.run, s.options(opts)...)
+	return Crontab{a}, err
 }
+
+// Crontab addresses a cron process, and changes its jobs: what Start
+// returns, or Named finds. from, in each of its methods, is who asks: the
+// Node, or a Process from inside its handler, as for grpcproc.Addr.Call.
+type Crontab struct {
+	addr grpcproc.Addr[*cronv1.Control]
+}
+
+// Named addresses the cron process registered as name on node.
+func Named(node, name string) Crontab {
+	return Crontab{grpcproc.Named[*cronv1.Control](node, name)}
+}
+
+// Addr returns the address of the cron process, to monitor it, link to it,
+// or ask it to exit.
+func (c Crontab) Addr() grpcproc.Addr[*cronv1.Control] { return c.addr }
+
+func (c Crontab) String() string { return c.addr.String() }
 
 // Child checks spec and returns a child for a supervisor, registered as
 // name unless name is empty, that runs a cron process for it.
@@ -215,10 +234,11 @@ func Child(name string, spec Spec, opts ...grpcproc.SpawnOption) (actor.ChildSpe
 	return actor.ChildFunc(name, s.run, s.options(opts)...), nil
 }
 
-// AddJob adds job to the cron process cron, which must run on n: a job
-// holds Go functions, which no message can carry. The job's runs are due
-// from the minute after it is added.
-func AddJob(ctx context.Context, n *grpcproc.Node, cron grpcproc.Target, job Job) error {
+// AddJob adds job to the cron process. from must be on its node: a job
+// holds Go functions, which no message can carry, and the cron process
+// refuses a caller of another node. The job's runs are due from the minute
+// after it is added.
+func (c Crontab) AddJob(ctx context.Context, from grpcproc.Caller, job Job) error {
 	j, err := newJob(job)
 	if err != nil {
 		return err
@@ -226,25 +246,25 @@ func AddJob(ctx context.Context, n *grpcproc.Node, cron grpcproc.Target, job Job
 	id := requestID.Add(1)
 	requests.Store(id, j)
 	defer requests.Delete(id)
-	return control(ctx, n, cron, &cronv1.Control{Op: &cronv1.Control_Add{Add: id}})
+	return c.control(ctx, from, &cronv1.Control{Op: &cronv1.Control_Add{Add: id}})
 }
 
-// RemoveJob removes the job called name from cron, which may run on any
-// node. Its runs already going go on.
-func RemoveJob(ctx context.Context, n *grpcproc.Node, cron grpcproc.Target, name string) error {
-	return control(ctx, n, cron, &cronv1.Control{Op: &cronv1.Control_Remove{Remove: name}})
+// RemoveJob removes the job called name, from any node. Its runs already
+// going go on.
+func (c Crontab) RemoveJob(ctx context.Context, from grpcproc.Caller, name string) error {
+	return c.control(ctx, from, &cronv1.Control{Op: &cronv1.Control_Remove{Remove: name}})
 }
 
 // EnableJob runs a disabled job again, from the minute after. Runs it
 // missed while disabled are not caught up.
-func EnableJob(ctx context.Context, n *grpcproc.Node, cron grpcproc.Target, name string) error {
-	return control(ctx, n, cron, &cronv1.Control{Op: &cronv1.Control_Enable{Enable: name}})
+func (c Crontab) EnableJob(ctx context.Context, from grpcproc.Caller, name string) error {
+	return c.control(ctx, from, &cronv1.Control{Op: &cronv1.Control_Enable{Enable: name}})
 }
 
 // DisableJob keeps a job but runs it no more until EnableJob. Its runs
 // already going go on.
-func DisableJob(ctx context.Context, n *grpcproc.Node, cron grpcproc.Target, name string) error {
-	return control(ctx, n, cron, &cronv1.Control{Op: &cronv1.Control_Disable{Disable: name}})
+func (c Crontab) DisableJob(ctx context.Context, from grpcproc.Caller, name string) error {
+	return c.control(ctx, from, &cronv1.Control{Op: &cronv1.Control_Disable{Disable: name}})
 }
 
 // requests holds the jobs AddJob hands to cron processes, by id.
@@ -253,10 +273,11 @@ var (
 	requestID atomic.Uint64
 )
 
-// control calls cron with c. Its answer, ErrNoJob or ErrJobExists, comes
-// back as a *grpcproc.RemoteError, which is that sentinel to errors.Is.
-func control(ctx context.Context, n *grpcproc.Node, cron grpcproc.Target, c *cronv1.Control) error {
-	_, err := n.CallTo[*emptypb.Empty](ctx, cron, c)
+// control calls the cron process with op. Its answer, ErrNoJob or
+// ErrJobExists, comes back as a *grpcproc.RemoteError, which is that
+// sentinel to errors.Is.
+func (c Crontab) control(ctx context.Context, from grpcproc.Caller, op *cronv1.Control) error {
+	_, err := c.addr.Call[*emptypb.Empty](ctx, from, op)
 	return err
 }
 

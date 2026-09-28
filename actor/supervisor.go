@@ -294,9 +294,11 @@ var (
 	requestID atomic.Uint64
 )
 
-// StartChild adds spec to the supervisor sup, which must run on n, and
-// starts the child, after the children sup has already: it returns once
-// the child has started. The child is sup's like the others, except that
+// StartChild adds spec to the supervisor sup and starts the child, after
+// the children sup has already: it returns once the child has started. from
+// is who asks, the Node or a Process, as for grpcproc.Addr.Call, and must be
+// on sup's node: a spec holds Go functions, which no message can carry, and
+// sup refuses a caller of another node. The child is sup's like the others, except that
 // once it ends for good (it is temporary, or transient and ended normally,
 // or StopChild stopped it), sup forgets it. Anonymous children, with an
 // empty Name, are how a supervisor keeps a pool of workers, each started
@@ -310,14 +312,11 @@ var (
 // From a process, pass p.Context(): a supervisor that is stopping the
 // caller answers no call until it is done, and a caller that waits with a
 // ctx of its own cannot exit meanwhile.
-func StartChild(ctx context.Context, n *grpcproc.Node, sup grpcproc.PID, spec ChildSpec) (grpcproc.PID, error) {
-	if sup.Node != n.Name() {
-		return grpcproc.PID{}, fmt.Errorf("actor: StartChild: supervisor %v is not on node %s", sup, n.Name())
-	}
+func StartChild(ctx context.Context, from grpcproc.Caller, sup grpcproc.Target, spec ChildSpec) (grpcproc.PID, error) {
 	id := requestID.Add(1)
 	requests.Store(id, spec)
 	defer requests.Delete(id)
-	pid, err := n.CallTo[*grpcprocv1.PID](ctx, sup, &actorv1.Control{Op: &actorv1.Control_Start{Start: id}})
+	pid, err := grpcproc.AddrOf[proto.Message](sup).Call[*grpcprocv1.PID](ctx, from, &actorv1.Control{Op: &actorv1.Control_Start{Start: id}})
 	if err != nil {
 		return grpcproc.PID{}, err
 	}
@@ -328,9 +327,10 @@ func StartChild(ctx context.Context, n *grpcproc.Node, sup grpcproc.PID, spec Ch
 // sup forget it: it is not restarted, whatever its Restart, and a strategy
 // no longer counts it, until sup itself is started again from its Spec. A
 // significant child stopped this way does not end sup. sup may run on
-// another node. As for StartChild, pass p.Context() from a process.
-func StopChild(ctx context.Context, n *grpcproc.Node, sup, child grpcproc.PID) error {
-	_, err := n.CallTo[*emptypb.Empty](ctx, sup, &actorv1.Control{Op: &actorv1.Control_Stop{Stop: child.Proto()}})
+// another node. from is who asks, as for StartChild; from a process, pass
+// p.Context() as StartChild says.
+func StopChild(ctx context.Context, from grpcproc.Caller, sup grpcproc.Target, child grpcproc.PID) error {
+	_, err := grpcproc.AddrOf[proto.Message](sup).Call[*emptypb.Empty](ctx, from, &actorv1.Control{Op: &actorv1.Control_Stop{Stop: child.Proto()}})
 	return err
 }
 
