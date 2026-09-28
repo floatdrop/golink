@@ -1,0 +1,62 @@
+name: Nightly
+
+# What is too slow for every push. The tests many times over under the race
+# detector, on 1 to 8 CPUs: the core's flakes have shown up in about 2% of
+# race runs, which a single CI run misses and a hundred do not. And each
+# fuzz target for longer than its seed corpus, which CI already runs.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stress:
+    name: stress (${{ matrix.module == '.' && 'grpcproc' || matrix.module }})
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [., cron, leader]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27"
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      - name: Test, 25 times on each of 1, 2, 4 and 8 CPUs
+        run: go test -race -count=25 -cpu=1,2,4,8 -timeout=80m ./...
+
+  fuzz:
+    name: fuzz (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { module: ., target: FuzzDispatch }
+          - { module: ., target: FuzzServeLink }
+          - { module: cron, target: FuzzParse }
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27"
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      - name: Fuzz for 15 minutes
+        run: go test -run '^$' -fuzz '^${{ matrix.target }}$' -fuzztime 15m .
+      # The input that failed, to add under testdata/fuzz, where every CI
+      # run replays it.
+      - name: Print the failing input
+        if: failure()
+        run: find testdata/fuzz -type f -newer go.mod -print -exec cat {} \;
