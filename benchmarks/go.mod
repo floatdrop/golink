@@ -11,7 +11,7 @@ require (
 	ergo.services/ergo v1.999.330
 	github.com/anthdm/hollywood v1.0.5
 	github.com/asynkron/protoactor-go v0.0.0-20260118094027-288962e52f3f
-	github.com/floatdrop/grpcproc v0.0.4
+	github.com/floatdrop/grpcproc v0.0.5
 	github.com/tochemey/goakt/v4 v4.5.6
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12

@@ -1,7 +1,7 @@
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
-github.com/floatdrop/grpcproc v0.0.4 h1:mGzvf8Zi7wwKegfgvEsGPK4MZabU7u8AglETGCHQbAI=
-github.com/floatdrop/grpcproc v0.0.4/go.mod h1:lUNiPLRR97lqydfE+CturNB9EZHd0lJuVktmF408bc0=
+github.com/floatdrop/grpcproc v0.0.5 h1:4UF5OEZyeF/pB6oUMcWqYUK9h1ua04Pz+OsqOu5dGXY=
+github.com/floatdrop/grpcproc v0.0.5/go.mod h1:lUNiPLRR97lqydfE+CturNB9EZHd0lJuVktmF408bc0=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
 github.com/go-logr/logr v1.4.4 h1:tG4xh9yMsRCAiodLVTxyrkzSZ9+o0L1Kg/+cPVcbP/8=
 github.com/go-logr/logr v1.4.4/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=
