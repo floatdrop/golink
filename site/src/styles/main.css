@@ -420,6 +420,13 @@ body {
 		grid-template-columns: auto minmax(0, 1fr) 12rem;
 	}
 
+	/* The topbar is the same page box as the layout, so the controls, as
+	   wide as the outline's column and packed to its start, stand over it. */
+	.gp-controls {
+		flex: none;
+		width: 12rem;
+	}
+
 	.gp-outline {
 		display: block;
 		position: sticky;
