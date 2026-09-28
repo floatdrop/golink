@@ -173,6 +173,11 @@ state, err := node.Inspect(ctx, pid)`}</Code>
 						closes when <C>ctx</C> ends or the node stops.
 					</p>
 					<p>
+						These are the node's own events, for tools and tests. An application's events, published
+						by one process for others on any node, are what <A to="guides/pubsub/">Pub/sub</A> is
+						for.
+					</p>
+					<p>
 						The supervisor example crashes an actor and follows what the supervisor does through the
 						events:
 					</p>
