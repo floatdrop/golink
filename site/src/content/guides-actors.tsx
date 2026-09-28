@@ -237,13 +237,16 @@ addr, err := node.Spawn(actor.Run(&Pricer{table: table}))`}</Code>
 					</p>
 					<Code caption="examples/actors/main.go">{region(actors, /^\/\/ Terminate runs however/, /^}/)}</Code>
 					<p>
-						The program spawns the actor under a name, parks a reservation until a restock, gets a
-						refusal back as an error, then breaks the protocol on purpose:
+						The program spawns the actor under a name and calls it through a{' '}
+						<C>shoppb.StockAddr</C>, whose methods are its protocol, as{' '}
+						<A to="concepts/addressing/#protocol">an address with its protocol</A> describes. It parks
+						a reservation until a restock, gets a refusal back as an error, then breaks the protocol
+						on purpose, with a raw <C>Stock</C> that the address's methods would not send:
 					</p>
-					<Code caption="examples/actors/main.go">{region(actors, /Nothing is in stock, so this call/, /fmt.Println\("then:", err\)/)}</Code>
+					<Code caption="examples/actors/main.go">{region(actors, /addr, err := node.Spawn\(actor.Run/, /fmt.Println\("then:", err\)/)}</Code>
 					<Output>{actorsOutput}</Output>
 					<p>
-						The last line is the reservation queued behind the bad restock: the actor had exited by
+						The last line is the reservation queued behind the one that was sent: the actor had exited by
 						the time it was next in the mailbox, so the call failed with <C>ErrNoProc</C>. Under a
 						supervisor, a new actor would be running by then, under the same name, with a fresh
 						state; <A to="guides/supervisors/">Supervisors</A> shows that.
@@ -290,13 +293,14 @@ addr, err := node.Spawn(actor.Run(&Pricer{table: table}))`}</Code>
 	}
 	t.Cleanup(func() { _ = node.Stop(context.Background()) })
 
-	inv, err := node.Spawn(actor.Run(&Inventory{ledger: &Ledger{}}))
+	addr, err := node.Spawn(actor.Run(&Inventory{ledger: &Ledger{}}))
 	if err != nil {
 		t.Fatal(err)
 	}
+	inv := shoppb.StockAddr{Addr: addr}
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
-	if _, err := node.Call[*shoppb.Reserved](ctx, inv, reserve("apple", 1)); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := inv.Reserve(ctx, node, &shoppb.Reserve{Sku: "apple", Qty: 1}); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("a reservation with no stock should wait, got %v", err)
 	}
 }`}</Code>

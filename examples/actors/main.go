@@ -95,49 +95,45 @@ func main() {
 	}
 	defer func() { _ = node.Stop(ctx) }()
 
-	inventory, err := node.Spawn(actor.Run(&Inventory{ledger: &Ledger{}}), grpcproc.WithName("inventory"))
+	addr, err := node.Spawn(actor.Run(&Inventory{ledger: &Ledger{}}), grpcproc.WithName("inventory"))
 	if err != nil {
 		log.Fatal(err)
 	}
+	// The address with the protocol as methods.
+	inventory := shoppb.StockAddr{Addr: addr}
 
 	// Nothing is in stock, so this call is parked in the actor until the
 	// restock below arrives.
 	reserved := make(chan *shoppb.Reserved)
 	go func() {
-		r, err := node.Call[*shoppb.Reserved](ctx, inventory, reserve("apple", 2))
+		r, err := inventory.Reserve(ctx, node, &shoppb.Reserve{Sku: "apple", Qty: 2})
 		if err != nil {
 			log.Fatal(err)
 		}
 		reserved <- r
 	}()
-	if err := node.Send(ctx, inventory, restock("apple", 5)); err != nil {
+	if err := inventory.Restock(ctx, node, &shoppb.Restock{Sku: "apple", Qty: 5}); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("reserved, left:", (<-reserved).Left)
 
 	// A handler's error goes back to the caller; the actor carries on.
-	_, err = node.Call[*shoppb.Reserved](ctx, inventory, reserve("apple", -1))
+	_, err = inventory.Reserve(ctx, node, &shoppb.Reserve{Sku: "apple", Qty: -1})
 	fmt.Println("reserve failed:", err)
-	r, err := node.Call[*shoppb.Reserved](ctx, inventory, reserve("apple", 1))
+	r, err := inventory.Reserve(ctx, node, &shoppb.Reserve{Sku: "apple", Qty: 1})
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("reserved, left:", r.Left)
 
 	// A reservation sent without waiting for the answer breaks the
-	// protocol: HandleMessage fails, and the actor exits. The call behind
+	// protocol. The address's methods keep to it, so this one is sent as a
+	// raw Stock: HandleMessage fails, and the actor exits. The call behind
 	// it in the mailbox is never handled.
-	if err := node.Send(ctx, inventory, reserve("apple", 1)); err != nil {
+	sent := &shoppb.Stock{Op: &shoppb.Stock_Reserve{Reserve: &shoppb.Reserve{Sku: "apple", Qty: 1}}}
+	if err := inventory.Send(ctx, node, sent); err != nil {
 		log.Fatal(err)
 	}
-	_, err = node.Call[*shoppb.Reserved](ctx, inventory, reserve("apple", 1))
+	_, err = inventory.Reserve(ctx, node, &shoppb.Reserve{Sku: "apple", Qty: 1})
 	fmt.Println("then:", err)
-}
-
-func reserve(sku string, qty int64) *shoppb.Stock {
-	return &shoppb.Stock{Op: &shoppb.Stock_Reserve{Reserve: &shoppb.Reserve{Sku: sku, Qty: qty}}}
-}
-
-func restock(sku string, qty int64) *shoppb.Stock {
-	return &shoppb.Stock{Op: &shoppb.Stock_Restock{Restock: &shoppb.Restock{Sku: sku, Qty: qty}}}
 }

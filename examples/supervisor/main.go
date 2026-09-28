@@ -98,11 +98,11 @@ func main() {
 	}
 
 	// The name reaches whichever process currently runs the child.
-	inventory := grpcproc.Named[*shoppb.Stock]("shop", "inventory")
-	if err := node.Send(ctx, inventory, restock("apple", 5)); err != nil {
+	inventory := shoppb.StockAddr{Addr: grpcproc.Named[*shoppb.Stock]("shop", "inventory")}
+	if err := inventory.Restock(ctx, node, &shoppb.Restock{Sku: "apple", Qty: 5}); err != nil {
 		log.Fatal(err)
 	}
-	r, err := node.Call[*shoppb.Reserved](ctx, inventory, reserve("apple", 2))
+	r, err := inventory.Reserve(ctx, node, &shoppb.Reserve{Sku: "apple", Qty: 2})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func main() {
 
 	// Crash it, and follow what the supervisor does through node events.
 	events := node.Subscribe(ctx, 16)
-	if err := node.Send(ctx, inventory, restock("apple", 0)); err != nil {
+	if err := inventory.Restock(ctx, node, &shoppb.Restock{Sku: "apple", Qty: 0}); err != nil {
 		log.Fatal(err)
 	}
 	for e := range events {
@@ -127,7 +127,7 @@ func main() {
 	}
 
 	// Same name, new process, state loaded back from the ledger.
-	r, err = node.Call[*shoppb.Reserved](ctx, inventory, reserve("apple", 1))
+	r, err = inventory.Reserve(ctx, node, &shoppb.Reserve{Sku: "apple", Qty: 1})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -140,12 +140,4 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Println("supervisor restarts:", state["restarts"])
-}
-
-func reserve(sku string, qty int64) *shoppb.Stock {
-	return &shoppb.Stock{Op: &shoppb.Stock_Reserve{Reserve: &shoppb.Reserve{Sku: sku, Qty: qty}}}
-}
-
-func restock(sku string, qty int64) *shoppb.Stock {
-	return &shoppb.Stock{Op: &shoppb.Stock_Restock{Restock: &shoppb.Restock{Sku: sku, Qty: qty}}}
 }
