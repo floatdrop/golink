@@ -7,6 +7,7 @@ import (
 	"io"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"google.golang.org/grpc/metadata"
@@ -81,10 +82,12 @@ func (e settleEnv) stream(t *testing.T, inc string) (*fakeStream, chan error) {
 }
 
 // serveStream serves a new stream from b's incarnation inc on n. A panic is
-// recovered, as a recovery interceptor would.
+// recovered, as a recovery interceptor would. The stream ends with the test,
+// as a real one does when its server stops.
 func serveStream(t *testing.T, n *Node, inc string) (*fakeStream, chan error) {
 	ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(mdNode, "b", mdIncarnation, inc, mdVersion, "1"))
 	fs := &fakeStream{ctx: ctx, recvErr: io.EOF, recv: make(chan *grpcprocv1.Frame)}
+	t.Cleanup(fs.end)
 	served := make(chan error, 1)
 	go func() {
 		defer func() {
@@ -133,24 +136,26 @@ func TestNewSessionWaitsForTheOldOnesDown(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			e := newSettleEnv(t)
-			old := e.links(t, 2)
-			ended := make(chan struct{})
-			go func() { tc.end(e, old); close(ended) }()
-			<-e.h.entered
-			fs, _ := e.stream(t, "3")
-			r, dispatched := e.monitor(fs, 3)
-			select {
-			case <-dispatched:
-				t.Error("the new session was dispatched while the old one was being torn down")
-			case <-time.After(50 * time.Millisecond):
-			}
-			close(e.h.release)
-			<-ended
-			<-dispatched
-			if !e.watched(r) {
-				t.Error("declaring the old session down dropped a monitor set over the new one")
-			}
+			synctest.Test(t, func(t *testing.T) {
+				e := newSettleEnv(t)
+				old := e.links(t, 2)
+				ended := make(chan struct{})
+				go func() { tc.end(e, old); close(ended) }()
+				<-e.h.entered
+				fs, _ := e.stream(t, "3")
+				r, dispatched := e.monitor(fs, 3)
+				select {
+				case <-dispatched:
+					t.Error("the new session was dispatched while the old one was being torn down")
+				case <-time.After(50 * time.Millisecond):
+				}
+				close(e.h.release)
+				<-ended
+				<-dispatched
+				if !e.watched(r) {
+					t.Error("declaring the old session down dropped a monitor set over the new one")
+				}
+			})
 		})
 	}
 }
@@ -158,163 +163,175 @@ func TestNewSessionWaitsForTheOldOnesDown(t *testing.T) {
 // Two new streams at once: one replaces the old link, the other replaces
 // that one, each in turn, and the link events say so in order.
 func TestNewStreamsReplaceInTurn(t *testing.T) {
-	e := newSettleEnv(t)
-	events := e.n.Subscribe(t.Context(), 32)
-	e.links(t, 2)
-	_, served1 := e.stream(t, "3")
-	<-e.h.entered
-	_, served2 := e.stream(t, "3")
-	close(e.h.release)
-	var got []string
-	for len(got) < 4 {
-		select {
-		case ev := <-events:
-			if ev.Kind == EventLinkUp || ev.Kind == EventLinkDown {
-				got = append(got, ev.Kind.String()+" "+ev.Peer.String())
+	synctest.Test(t, func(t *testing.T) {
+		e := newSettleEnv(t)
+		events := e.n.Subscribe(t.Context(), 32)
+		e.links(t, 2)
+		_, served1 := e.stream(t, "3")
+		<-e.h.entered
+		_, served2 := e.stream(t, "3")
+		close(e.h.release)
+		var got []string
+		for len(got) < 4 {
+			select {
+			case ev := <-events:
+				if ev.Kind == EventLinkUp || ev.Kind == EventLinkDown {
+					got = append(got, ev.Kind.String()+" "+ev.Peer.String())
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatalf("link events %q", got)
 			}
+		}
+		want := []string{"link-down b#2", "link-up b#3", "link-down b#3", "link-up b#3"}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("link events %q, want %q", got, want)
+			}
+		}
+		select { // the one replaced returns; the other is up
+		case <-served1:
+		case <-served2:
 		case <-time.After(5 * time.Second):
-			t.Fatalf("link events %q", got)
+			t.Fatal("neither stream was replaced")
 		}
-	}
-	want := []string{"link-down b#2", "link-up b#3", "link-down b#3", "link-up b#3"}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("link events %q, want %q", got, want)
+		e.n.mu.Lock()
+		up := e.n.in["b"]
+		e.n.mu.Unlock()
+		if up == nil {
+			t.Fatal("no link from b")
 		}
-	}
-	select { // the one replaced returns; the other is up
-	case <-served1:
-	case <-served2:
-	case <-time.After(5 * time.Second):
-		t.Fatal("neither stream was replaced")
-	}
-	e.n.mu.Lock()
-	up := e.n.in["b"]
-	e.n.mu.Unlock()
-	if up == nil {
-		t.Fatal("no link from b")
-	}
+	})
 }
 
 // A frame the old link is still dispatching, whose answer cannot be routed
 // back (dials to b back off), cuts that link, not the new one.
 func TestOldDispatchDoesNotCutTheNewLink(t *testing.T) {
-	e := newSettleEnv(t)
-	e.n.mu.Lock()
-	e.n.backoff["b"] = &redial{at: time.Now().Add(time.Hour), wait: time.Second, err: errors.New("boom"), why: "boom"}
-	e.n.dialing["b"] = &dialOp{done: make(chan struct{})}
-	e.n.mu.Unlock()
-	fs1, served1 := e.stream(t, "2")
-	// A call to a process that does not exist: dispatch dead-letters it (the
-	// hook holds it, under the old link's mu), then answers noproc.
-	call := wire(grpcprocv1.Kind_KIND_CALL, PID{Node: "b", Incarnation: 2, ID: 7}, PID{Node: "a", Incarnation: 1, ID: 99}, "")
-	call.Ref = 1
-	if err := encodeBody(call, &grpcprocv1.Hello{}); err != nil {
-		t.Fatal(err)
-	}
-	fs1.recv <- &grpcprocv1.Frame{Envelopes: []*grpcprocv1.Envelope{call}}
-	<-e.h.entered
-	e.n.mu.Lock()
-	first := e.n.in["b"]
-	e.n.mu.Unlock()
-	_, served2 := e.stream(t, "2")
-	for { // the new stream has taken the old link
+	// On real time, not in a synctest bubble: the new stream waits on the
+	// old link's lock, which the held hook keeps, and a goroutine waiting on
+	// a lock does not count as waiting in a bubble, whose clock would never
+	// move for the polls below.
+	func() {
+		e := newSettleEnv(t)
 		e.n.mu.Lock()
-		cur := e.n.in["b"]
+		e.n.backoff["b"] = &redial{at: time.Now().Add(time.Hour), wait: time.Second, err: errors.New("boom"), why: "boom"}
+		e.n.dialing["b"] = &dialOp{done: make(chan struct{})}
 		e.n.mu.Unlock()
-		if cur != first {
-			break
+		fs1, served1 := e.stream(t, "2")
+		// A call to a process that does not exist: dispatch dead-letters it (the
+		// hook holds it, under the old link's mu), then answers noproc.
+		call := wire(grpcprocv1.Kind_KIND_CALL, PID{Node: "b", Incarnation: 2, ID: 7}, PID{Node: "a", Incarnation: 1, ID: 99}, "")
+		call.Ref = 1
+		if err := encodeBody(call, &grpcprocv1.Hello{}); err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(time.Millisecond)
-	}
-	close(e.h.release)
-	<-served1 // the old link closed: its dispatch, and any cut, are done
-	var second *inLink
-	for deadline := time.Now().Add(5 * time.Second); second == nil || second == first; time.Sleep(time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatal("the new link never went in")
-		}
+		fs1.recv <- &grpcprocv1.Frame{Envelopes: []*grpcprocv1.Envelope{call}}
+		<-e.h.entered
 		e.n.mu.Lock()
-		second = e.n.in["b"]
+		first := e.n.in["b"]
 		e.n.mu.Unlock()
-	}
-	select {
-	case <-second.done:
-		t.Fatalf("the new link was cut by the old one's answer: %v", <-served2)
-	default:
-	}
+		_, served2 := e.stream(t, "2")
+		for { // the new stream has taken the old link
+			e.n.mu.Lock()
+			cur := e.n.in["b"]
+			e.n.mu.Unlock()
+			if cur != first {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+		close(e.h.release)
+		<-served1 // the old link closed: its dispatch, and any cut, are done
+		var second *inLink
+		for deadline := time.Now().Add(5 * time.Second); second == nil || second == first; time.Sleep(time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("the new link never went in")
+			}
+			e.n.mu.Lock()
+			second = e.n.in["b"]
+			e.n.mu.Unlock()
+		}
+		select {
+		case <-second.done:
+			t.Fatalf("the new link was cut by the old one's answer: %v", <-served2)
+		default:
+		}
+	}()
 }
 
 // A new stream from b ends the old session first: process 5's Down for b's
 // process is queued before anything the new stream carries.
 func TestReplacedLinkDownsFirst(t *testing.T) {
-	e := newSettleEnv(t)
-	close(e.h.release)
-	r := PID{Node: "b", Incarnation: 2, ID: 7}
-	e.p.accept = func(proto.Message) bool { return true }
-	e.p.mu.Lock()
-	e.p.monitors = map[Ref]monitorTarget{{Node: "a", ID: 1}: {pid: r}}
-	e.p.mu.Unlock()
-	e.n.mu.Lock()
-	e.n.in["b"] = &inLink{peer: NodeID{Name: "b", Incarnation: 2}, done: make(chan struct{})}
-	e.n.mu.Unlock()
-	fs, _ := e.stream(t, "2")
-	send := wire(grpcprocv1.Kind_KIND_SEND, r, e.p.pid, "")
-	if err := encodeBody(send, &grpcprocv1.Hello{}); err != nil {
-		t.Fatal(err)
-	}
-	fs.recv <- &grpcprocv1.Frame{Envelopes: []*grpcprocv1.Envelope{send}}
-	fs.recv <- &grpcprocv1.Frame{}
-	if first, ok := e.p.mbox.tryPop(); !ok || first.down == nil {
-		t.Fatalf("first item %+v", first)
-	}
-	if second, ok := e.p.mbox.tryPop(); !ok || second.body == nil {
-		t.Fatalf("second item %+v", second)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		e := newSettleEnv(t)
+		close(e.h.release)
+		r := PID{Node: "b", Incarnation: 2, ID: 7}
+		e.p.accept = func(proto.Message) bool { return true }
+		e.p.mu.Lock()
+		e.p.monitors = map[Ref]monitorTarget{{Node: "a", ID: 1}: {pid: r}}
+		e.p.mu.Unlock()
+		e.n.mu.Lock()
+		e.n.in["b"] = &inLink{peer: NodeID{Name: "b", Incarnation: 2}, done: make(chan struct{})}
+		e.n.mu.Unlock()
+		fs, _ := e.stream(t, "2")
+		send := wire(grpcprocv1.Kind_KIND_SEND, r, e.p.pid, "")
+		if err := encodeBody(send, &grpcprocv1.Hello{}); err != nil {
+			t.Fatal(err)
+		}
+		fs.recv <- &grpcprocv1.Frame{Envelopes: []*grpcprocv1.Envelope{send}}
+		fs.recv <- &grpcprocv1.Frame{}
+		if first, ok := e.p.mbox.tryPop(); !ok || first.down == nil {
+			t.Fatalf("first item %+v", first)
+		}
+		if second, ok := e.p.mbox.tryPop(); !ok || second.body == nil {
+			t.Fatalf("second item %+v", second)
+		}
+	})
 }
 
 // A dial that fails with answers queued cuts the links they answer, not a
 // link that has replaced them since: b restarted, and its new session is
 // owed nothing.
 func TestFailedDialCutsOnlyTheLinksItAnswers(t *testing.T) {
-	entered, release := make(chan struct{}), make(chan struct{})
-	n, err := NewNode(Config{Name: "a", Incarnation: 1, Resolver: ResolverFunc(func(context.Context, string) (string, error) {
-		close(entered)
-		<-release
-		return "", errors.New("unreachable")
-	})})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = n.Stop(context.Background()) })
-	fs1, served1 := serveStream(t, n, "2")
-	call := wire(grpcprocv1.Kind_KIND_CALL, PID{Node: "b", Incarnation: 2, ID: 7}, PID{Node: "a", Incarnation: 1, ID: 99}, "")
-	call.Ref = 1
-	if err := encodeBody(call, &grpcprocv1.Hello{}); err != nil {
-		t.Fatal(err)
-	}
-	fs1.recv <- &grpcprocv1.Frame{Envelopes: []*grpcprocv1.Envelope{call}}
-	fs1.recv <- &grpcprocv1.Frame{} // dispatched: its noproc waits on a dial
-	<-entered
-	n.mu.Lock()
-	old, d := n.in["b"], n.dialing["b"]
-	n.mu.Unlock()
-	serveStream(t, n, "3") // b restarted
-	<-served1
-	var cur *inLink
-	for cur == nil || cur == old {
-		time.Sleep(time.Millisecond)
+	synctest.Test(t, func(t *testing.T) {
+		entered, release := make(chan struct{}), make(chan struct{})
+		n, err := NewNode(Config{Name: "a", Incarnation: 1, Resolver: ResolverFunc(func(context.Context, string) (string, error) {
+			close(entered)
+			<-release
+			return "", errors.New("unreachable")
+		})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = n.Stop(context.Background()) })
+		fs1, served1 := serveStream(t, n, "2")
+		call := wire(grpcprocv1.Kind_KIND_CALL, PID{Node: "b", Incarnation: 2, ID: 7}, PID{Node: "a", Incarnation: 1, ID: 99}, "")
+		call.Ref = 1
+		if err := encodeBody(call, &grpcprocv1.Hello{}); err != nil {
+			t.Fatal(err)
+		}
+		fs1.recv <- &grpcprocv1.Frame{Envelopes: []*grpcprocv1.Envelope{call}}
+		fs1.recv <- &grpcprocv1.Frame{} // dispatched: its noproc waits on a dial
+		<-entered
 		n.mu.Lock()
-		cur = n.in["b"]
+		old, d := n.in["b"], n.dialing["b"]
 		n.mu.Unlock()
-	}
-	close(release)
-	<-d.done
-	select {
-	case <-cur.done:
-		t.Fatal("the failed dial cut b's new link")
-	default:
-	}
+		serveStream(t, n, "3") // b restarted
+		<-served1
+		var cur *inLink
+		for cur == nil || cur == old {
+			time.Sleep(time.Millisecond)
+			n.mu.Lock()
+			cur = n.in["b"]
+			n.mu.Unlock()
+		}
+		close(release)
+		<-d.done
+		select {
+		case <-cur.done:
+			t.Fatal("the failed dial cut b's new link")
+		default:
+		}
+	})
 }
 
 type panicUp struct{ NopHooks }
@@ -324,18 +341,20 @@ func (panicUp) OnLinkUp(NodeID) { panic("hook") }
 // A panic in OnLinkUp, recovered by an interceptor, leaves no change to b's
 // links under way: later streams from b are not held up for ever.
 func TestLinkUpPanicSettles(t *testing.T) {
-	n, err := NewNode(Config{Name: "a", Incarnation: 1, Resolver: StaticResolver{}, Hooks: panicUp{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = n.Stop(context.Background()) })
-	_, served := serveStream(t, n, "2")
-	if err := <-served; err == nil {
-		t.Fatal("the hook did not panic")
-	}
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	if s := n.settling["b"]; s != 0 {
-		t.Fatalf("b's links still settling: %d", s)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		n, err := NewNode(Config{Name: "a", Incarnation: 1, Resolver: StaticResolver{}, Hooks: panicUp{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = n.Stop(context.Background()) })
+		_, served := serveStream(t, n, "2")
+		if err := <-served; err == nil {
+			t.Fatal("the hook did not panic")
+		}
+		n.mu.Lock()
+		defer n.mu.Unlock()
+		if s := n.settling["b"]; s != 0 {
+			t.Fatalf("b's links still settling: %d", s)
+		}
+	})
 }

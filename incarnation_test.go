@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"google.golang.org/grpc"
@@ -148,75 +149,79 @@ func noMore[M proto.Message](t *testing.T, ch <-chan grpcproc.Msg[M]) {
 // one's links are refused: it cannot cut a off from the current b, and its
 // messages do not arrive.
 func TestOldIncarnationIsRefused(t *testing.T) {
-	w := newTwins(t)
-	a := w.start("a", 1)
-	old := w.start("b", 1)
-	b := w.start("b", 2)
-	svc := mustEcho(t, b)
-	watch, downs := watcher(t, a)
-	watch.Monitor(svc)
-	sink, got := collector(t, a)
-	// a and the current b are linked both ways.
-	if err := b.SendTo(t.Context(), sink, &testpb.Ping{N: 2}); err != nil {
-		t.Fatal(err)
-	}
-	recv(t, got)
-	if _, err := svc.Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 1}); err != nil {
-		t.Fatal(err)
-	}
-	sameLinks(t, a, ">b#2", "b#2")
+	synctest.Test(t, func(t *testing.T) {
+		w := newTwins(t)
+		a := w.start("a", 1)
+		old := w.start("b", 1)
+		b := w.start("b", 2)
+		svc := mustEcho(t, b)
+		watch, downs := watcher(t, a)
+		watch.Monitor(svc)
+		sink, got := collector(t, a)
+		// a and the current b are linked both ways.
+		if err := b.SendTo(t.Context(), sink, &testpb.Ping{N: 2}); err != nil {
+			t.Fatal(err)
+		}
+		recv(t, got)
+		if _, err := svc.Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 1}); err != nil {
+			t.Fatal(err)
+		}
+		sameLinks(t, a, ">b#2", "b#2")
 
-	events := a.Subscribe(t.Context(), 16)
-	err := old.SendTo(t.Context(), sink, &testpb.Ping{N: 1})
-	if !isStale(err, "b#1", "b#2") {
-		t.Fatalf("the old b's send: %v", err)
-	}
-	var le *grpcproc.LinkError
-	if !errors.As(err, &le) || !le.Unsent {
-		t.Fatalf("not reported unsent: %v", err)
-	}
-	if _, err := svc.Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 1}); err != nil {
-		t.Fatalf("a calls the current b: %v", err)
-	}
-	noMore(t, got)
-	noMore(t, downs)
-	select {
-	case e := <-events:
-		t.Fatalf("a's links changed: %+v", e)
-	default:
-	}
-	sameLinks(t, a, ">b#2", "b#2")
+		events := a.Subscribe(t.Context(), 16)
+		err := old.SendTo(t.Context(), sink, &testpb.Ping{N: 1})
+		if !isStale(err, "b#1", "b#2") {
+			t.Fatalf("the old b's send: %v", err)
+		}
+		var le *grpcproc.LinkError
+		if !errors.As(err, &le) || !le.Unsent {
+			t.Fatalf("not reported unsent: %v", err)
+		}
+		if _, err := svc.Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 1}); err != nil {
+			t.Fatalf("a calls the current b: %v", err)
+		}
+		noMore(t, got)
+		noMore(t, downs)
+		select {
+		case e := <-events:
+			t.Fatalf("a's links changed: %+v", e)
+		default:
+		}
+		sameLinks(t, a, ">b#2", "b#2")
+	})
 }
 
 // A dial that reaches an old incarnation, through an address that still
 // points at it, fails, and the links with the current one stay.
 func TestDialReachingAnOldIncarnationFails(t *testing.T) {
-	w := newTwins(t)
-	a := w.start("a", 1)
-	old := w.start("b", 1)
-	b := w.start("b", 2)
-	sink, got := collector(t, a)
-	if err := b.SendTo(t.Context(), sink, &testpb.Ping{}); err != nil {
-		t.Fatal(err)
-	}
-	recv(t, got)
-	w.route(old)
-	err := a.SendTo(t.Context(), grpcproc.Named[*testpb.Ping]("b", "x"), &testpb.Ping{})
-	if !isStale(err, "b#1", "b#2") {
-		t.Fatalf("got %v", err)
-	}
-	sameLinks(t, a, "b#2")
-	// The refused dial made no link: the first one a makes is not a
-	// reconnect.
-	w.route(b)
-	if err := a.SendTo(t.Context(), grpcproc.Named[*testpb.Ping]("b", "x"), &testpb.Ping{}); err != nil {
-		t.Fatal(err)
-	}
-	for _, l := range a.Info().Links {
-		if l.Outbound && l.Reconnects != 0 {
-			t.Fatalf("%+v", l)
+	synctest.Test(t, func(t *testing.T) {
+		w := newTwins(t)
+		a := w.start("a", 1)
+		old := w.start("b", 1)
+		b := w.start("b", 2)
+		sink, got := collector(t, a)
+		if err := b.SendTo(t.Context(), sink, &testpb.Ping{}); err != nil {
+			t.Fatal(err)
 		}
-	}
+		recv(t, got)
+		w.route(old)
+		err := a.SendTo(t.Context(), grpcproc.Named[*testpb.Ping]("b", "x"), &testpb.Ping{})
+		if !isStale(err, "b#1", "b#2") {
+			t.Fatalf("got %v", err)
+		}
+		sameLinks(t, a, "b#2")
+		// The refused dial made no link: the first one a makes is not a
+		// reconnect.
+		w.route(b)
+		if err := a.SendTo(t.Context(), grpcproc.Named[*testpb.Ping]("b", "x"), &testpb.Ping{}); err != nil {
+			t.Fatal(err)
+		}
+		for _, l := range a.Info().Links {
+			if l.Outbound && l.Reconnects != 0 {
+				t.Fatalf("%+v", l)
+			}
+		}
+	})
 }
 
 // flush returns once a has handled the events sent to m before it: the
@@ -241,34 +246,36 @@ func TestFenceLiftsWhenTheNewestIsGone(t *testing.T) {
 		{"Disconnect", func(a *grpcproc.Node, _ *fakeMembership) { a.Disconnect("b") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			w := newTwins(t)
-			m := &fakeMembership{events: make(chan grpcproc.MemberEvent)}
-			a := w.start("a", 1, func(cfg *grpcproc.Config) { cfg.Membership = m })
-			old := w.start("b", 1)
-			b := w.start("b", 2)
-			sink, got := collector(t, a)
-			if err := b.SendTo(t.Context(), sink, &testpb.Ping{}); err != nil {
-				t.Fatal(err)
-			}
-			recv(t, got)
-			if err := b.Stop(ctx(t)); err != nil {
-				t.Fatal(err)
-			}
-			waitNoPeer(t, a, "b")
-			// The old b leaving lifts nothing.
-			m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: 1}}
-			flush(m)
-			if err := old.SendTo(t.Context(), sink, &testpb.Ping{}); !isStale(err, "b#1", "b#2") {
-				t.Fatalf("got %v", err)
-			}
-			tc.lift(a, m)
-			flush(m)
-			if err := old.SendTo(t.Context(), sink, &testpb.Ping{}); err != nil {
-				t.Fatal(err)
-			}
-			if msg := recv(t, got); msg.From.Incarnation != 1 {
-				t.Fatalf("from %v", msg.From)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				w := newTwins(t)
+				m := &fakeMembership{events: make(chan grpcproc.MemberEvent)}
+				a := w.start("a", 1, func(cfg *grpcproc.Config) { cfg.Membership = m })
+				old := w.start("b", 1)
+				b := w.start("b", 2)
+				sink, got := collector(t, a)
+				if err := b.SendTo(t.Context(), sink, &testpb.Ping{}); err != nil {
+					t.Fatal(err)
+				}
+				recv(t, got)
+				if err := b.Stop(ctx(t)); err != nil {
+					t.Fatal(err)
+				}
+				waitNoPeer(t, a, "b")
+				// The old b leaving lifts nothing.
+				m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: 1}}
+				flush(m)
+				if err := old.SendTo(t.Context(), sink, &testpb.Ping{}); !isStale(err, "b#1", "b#2") {
+					t.Fatalf("got %v", err)
+				}
+				tc.lift(a, m)
+				flush(m)
+				if err := old.SendTo(t.Context(), sink, &testpb.Ping{}); err != nil {
+					t.Fatal(err)
+				}
+				if msg := recv(t, got); msg.From.Incarnation != 1 {
+					t.Fatalf("from %v", msg.From)
+				}
+			})
 		})
 	}
 }
@@ -322,35 +329,37 @@ func TestNewIncarnationDropsTheOldOnesLinks(t *testing.T) {
 		want: ">b#2",
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
-			w := newTwins(t)
-			e := oldB{w: w, a: w.start("a", 1), old: w.start("b", 1)}
-			e.svc = mustEcho(t, e.old)
-			e.sink, e.got = collector(t, e.a)
-			watch, downs := watcher(t, e.a)
-			tc.linked(e, t)
-			outbound := slices.Contains(linksOf(e.a), ">b#1")
-			if outbound {
-				watch.Monitor(e.svc)
-				waitWatchers(t, e.old, e.svc.PID(), 1)
-			}
-			events := e.a.Subscribe(t.Context(), 16)
-			tc.meet(e, t, w.start("b", 2))
-			if ev := nextLinkEvent(t, events); ev.Kind != grpcproc.EventLinkDown || ev.Peer.Incarnation != 1 || ev.Err != "restarted as incarnation 2" {
-				t.Fatalf("got %+v", ev)
-			}
-			if ev := nextLinkEvent(t, events); ev.Kind != grpcproc.EventLinkUp || ev.Peer.Incarnation != 2 {
-				t.Fatalf("got %+v", ev)
-			}
-			if outbound {
-				if d := recv(t, downs).Down; d == nil || d.Reason != grpcproc.ReasonNoConnection {
-					t.Fatalf("got %+v", d)
+			synctest.Test(t, func(t *testing.T) {
+				w := newTwins(t)
+				e := oldB{w: w, a: w.start("a", 1), old: w.start("b", 1)}
+				e.svc = mustEcho(t, e.old)
+				e.sink, e.got = collector(t, e.a)
+				watch, downs := watcher(t, e.a)
+				tc.linked(e, t)
+				outbound := slices.Contains(linksOf(e.a), ">b#1")
+				if outbound {
+					watch.Monitor(e.svc)
+					waitWatchers(t, e.old, e.svc.PID(), 1)
 				}
-			}
-			sameLinks(t, e.a, tc.want)
-			waitNoPeer(t, e.old, "a")
-			if err := e.old.SendTo(t.Context(), e.sink, &testpb.Ping{}); !isStale(err, "b#1", "b#2") {
-				t.Fatalf("the old b's send: %v", err)
-			}
+				events := e.a.Subscribe(t.Context(), 16)
+				tc.meet(e, t, w.start("b", 2))
+				if ev := nextLinkEvent(t, events); ev.Kind != grpcproc.EventLinkDown || ev.Peer.Incarnation != 1 || ev.Err != "restarted as incarnation 2" {
+					t.Fatalf("got %+v", ev)
+				}
+				if ev := nextLinkEvent(t, events); ev.Kind != grpcproc.EventLinkUp || ev.Peer.Incarnation != 2 {
+					t.Fatalf("got %+v", ev)
+				}
+				if outbound {
+					if d := recv(t, downs).Down; d == nil || d.Reason != grpcproc.ReasonNoConnection {
+						t.Fatalf("got %+v", d)
+					}
+				}
+				sameLinks(t, e.a, tc.want)
+				waitNoPeer(t, e.old, "a")
+				if err := e.old.SendTo(t.Context(), e.sink, &testpb.Ping{}); !isStale(err, "b#1", "b#2") {
+					t.Fatalf("the old b's send: %v", err)
+				}
+			})
 		})
 	}
 }

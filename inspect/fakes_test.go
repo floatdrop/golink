@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"google.golang.org/grpc"
@@ -62,65 +63,69 @@ func (o *oneEvent) Recv() (*inspectv1.WatchResponse, error) {
 }
 
 func TestWatchSendFailures(t *testing.T) {
-	c := grpcproctest.New(t, "a")
-	n := c.Node("a")
-	stream := &fakeWatch{ctx: t.Context()}
+	synctest.Test(t, func(t *testing.T) {
+		c := grpcproctest.New(t, "a")
+		n := c.Node("a")
+		stream := &fakeWatch{ctx: t.Context()}
 
-	// Local: the first event cannot be sent to the client.
-	srv := inspect.New(n)
-	done := make(chan error, 1)
-	go func() { done <- srv.Watch(&inspectv1.WatchRequest{}, stream) }()
-	for {
-		_, _ = n.Spawn(func(p *grpcproc.Process[*testpb.Ping]) error { return nil })
-		select {
-		case err := <-done:
-			if err == nil || err.Error() != "client gone" {
-				t.Fatalf("local: %v", err)
+		// Local: the first event cannot be sent to the client.
+		srv := inspect.New(n)
+		done := make(chan error, 1)
+		go func() { done <- srv.Watch(&inspectv1.WatchRequest{}, stream) }()
+		for {
+			_, _ = n.Spawn(func(p *grpcproc.Process[*testpb.Ping]) error { return nil })
+			select {
+			case err := <-done:
+				if err == nil || err.Error() != "client gone" {
+					t.Fatalf("local: %v", err)
+				}
+				goto forwarded
+			default:
 			}
-			goto forwarded
-		default:
 		}
-	}
-forwarded:
-	// Forwarded: the peer's stream cannot be opened, or its event cannot be relayed.
-	upstreamErr := errors.New("peer refused")
-	srv = inspect.New(n, inspect.WithPeers(func(context.Context, string) (inspectv1.InspectorClient, error) {
-		return &fakePeer{err: upstreamErr}, nil
-	}))
-	if err := srv.Watch(&inspectv1.WatchRequest{Node: "b"}, stream); err == nil || !strings.Contains(err.Error(), "node b: peer refused") {
-		t.Fatalf("upstream: %v", err)
-	}
-	srv = inspect.New(n, inspect.WithPeers(func(context.Context, string) (inspectv1.InspectorClient, error) {
-		return &fakePeer{}, nil
-	}))
-	if err := srv.Watch(&inspectv1.WatchRequest{Node: "b"}, stream); err == nil || err.Error() != "client gone" {
-		t.Fatalf("relay: %v", err)
-	}
-	// The peer's stream ends: its error is returned as is.
-	recvErr := errors.New("peer stream ended")
-	srv = inspect.New(n, inspect.WithPeers(func(context.Context, string) (inspectv1.InspectorClient, error) {
-		return &fakePeer{recvErr: recvErr}, nil
-	}))
-	if err := srv.Watch(&inspectv1.WatchRequest{Node: "b"}, stream); err == nil || !strings.Contains(err.Error(), "node b: peer stream ended") {
-		t.Fatalf("peer end: %v", err)
-	}
-	// The peer ends it cleanly (EOF): so does the relay.
-	srv = inspect.New(n, inspect.WithPeers(func(context.Context, string) (inspectv1.InspectorClient, error) {
-		return &fakePeer{recvErr: io.EOF}, nil
-	}))
-	if err := srv.Watch(&inspectv1.WatchRequest{Node: "b"}, stream); err != nil {
-		t.Fatalf("clean peer end: %v", err)
-	}
+	forwarded:
+		// Forwarded: the peer's stream cannot be opened, or its event cannot be relayed.
+		upstreamErr := errors.New("peer refused")
+		srv = inspect.New(n, inspect.WithPeers(func(context.Context, string) (inspectv1.InspectorClient, error) {
+			return &fakePeer{err: upstreamErr}, nil
+		}))
+		if err := srv.Watch(&inspectv1.WatchRequest{Node: "b"}, stream); err == nil || !strings.Contains(err.Error(), "node b: peer refused") {
+			t.Fatalf("upstream: %v", err)
+		}
+		srv = inspect.New(n, inspect.WithPeers(func(context.Context, string) (inspectv1.InspectorClient, error) {
+			return &fakePeer{}, nil
+		}))
+		if err := srv.Watch(&inspectv1.WatchRequest{Node: "b"}, stream); err == nil || err.Error() != "client gone" {
+			t.Fatalf("relay: %v", err)
+		}
+		// The peer's stream ends: its error is returned as is.
+		recvErr := errors.New("peer stream ended")
+		srv = inspect.New(n, inspect.WithPeers(func(context.Context, string) (inspectv1.InspectorClient, error) {
+			return &fakePeer{recvErr: recvErr}, nil
+		}))
+		if err := srv.Watch(&inspectv1.WatchRequest{Node: "b"}, stream); err == nil || !strings.Contains(err.Error(), "node b: peer stream ended") {
+			t.Fatalf("peer end: %v", err)
+		}
+		// The peer ends it cleanly (EOF): so does the relay.
+		srv = inspect.New(n, inspect.WithPeers(func(context.Context, string) (inspectv1.InspectorClient, error) {
+			return &fakePeer{recvErr: io.EOF}, nil
+		}))
+		if err := srv.Watch(&inspectv1.WatchRequest{Node: "b"}, stream); err != nil {
+			t.Fatalf("clean peer end: %v", err)
+		}
+	})
 }
 
 func TestWatchEndsWhenClientCancels(t *testing.T) {
-	c := grpcproctest.New(t, "a")
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	// A cancelled client is a clean end, not an error.
-	if err := inspect.New(c.Node("a")).Watch(&inspectv1.WatchRequest{}, &fakeWatch{ctx: ctx}); err != nil {
-		t.Fatalf("got %v", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		c := grpcproctest.New(t, "a")
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		// A cancelled client is a clean end, not an error.
+		if err := inspect.New(c.Node("a")).Watch(&inspectv1.WatchRequest{}, &fakeWatch{ctx: ctx}); err != nil {
+			t.Fatalf("got %v", err)
+		}
+	})
 }
 
 // connCounter counts the transport connections a client opens.
@@ -159,41 +164,45 @@ func getB(ctx context.Context, srv *inspect.Server) error {
 }
 
 func TestWithResolver(t *testing.T) {
-	var resolves atomic.Int32
-	srv, _ := resolverCluster(t, func(ctx context.Context, node string, cluster grpcproc.Resolver) (string, error) {
-		resolves.Add(1)
-		return cluster.Resolve(ctx, node)
-	})
-	for range 2 {
-		if err := getB(t.Context(), srv); err != nil {
+	synctest.Test(t, func(t *testing.T) {
+		var resolves atomic.Int32
+		srv, _ := resolverCluster(t, func(ctx context.Context, node string, cluster grpcproc.Resolver) (string, error) {
+			resolves.Add(1)
+			return cluster.Resolve(ctx, node)
+		})
+		for range 2 {
+			if err := getB(t.Context(), srv); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if n := resolves.Load(); n != 1 {
+			t.Fatalf("%d resolves: the connection was not kept", n)
+		}
+		// Close releases it, twice is fine, and forwarding fails from then on.
+		if err := errors.Join(srv.Close(), srv.Close()); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if n := resolves.Load(); n != 1 {
-		t.Fatalf("%d resolves: the connection was not kept", n)
-	}
-	// Close releases it, twice is fine, and forwarding fails from then on.
-	if err := errors.Join(srv.Close(), srv.Close()); err != nil {
-		t.Fatal(err)
-	}
-	if err := getB(t.Context(), srv); status.Code(err) != codes.Unavailable {
-		t.Fatalf("after Close: %v", err)
-	}
-	if err := inspect.New(grpcproctest.New(t, "c").Node("c")).Close(); err != nil {
-		t.Fatal("a server that opened nothing closes cleanly:", err)
-	}
+		if err := getB(t.Context(), srv); status.Code(err) != codes.Unavailable {
+			t.Fatalf("after Close: %v", err)
+		}
+		if err := inspect.New(grpcproctest.New(t, "c").Node("c")).Close(); err != nil {
+			t.Fatal("a server that opened nothing closes cleanly:", err)
+		}
+	})
 }
 
 func TestWithResolverErrors(t *testing.T) {
-	// A node the resolver does not know, and a target gRPC cannot dial.
-	a := grpcproctest.New(t, "a").Node("a")
-	srv := inspect.New(a, inspect.WithResolver(grpcproc.StaticResolver{"bad": "\x7f://not a target"}))
-	defer func() { _ = srv.Close() }()
-	for _, node := range []string{"unknown", "bad"} {
-		if _, err := srv.GetNode(t.Context(), &inspectv1.GetNodeRequest{Node: node}); status.Code(err) != codes.Unavailable {
-			t.Fatalf("%s: %v", node, err)
+	synctest.Test(t, func(t *testing.T) {
+		// A node the resolver does not know, and a target gRPC cannot dial.
+		a := grpcproctest.New(t, "a").Node("a")
+		srv := inspect.New(a, inspect.WithResolver(grpcproc.StaticResolver{"bad": "\x7f://not a target"}))
+		defer func() { _ = srv.Close() }()
+		for _, node := range []string{"unknown", "bad"} {
+			if _, err := srv.GetNode(t.Context(), &inspectv1.GetNodeRequest{Node: node}); status.Code(err) != codes.Unavailable {
+				t.Fatalf("%s: %v", node, err)
+			}
 		}
-	}
+	})
 }
 
 func TestWithResolverRaces(t *testing.T) {
@@ -211,47 +220,53 @@ func TestWithResolverRaces(t *testing.T) {
 		}
 	}
 	t.Run("two first requests share one connection", func(t *testing.T) {
-		entered, release, resolve := gate()
-		srv, conns := resolverCluster(t, resolve)
-		errs := make(chan error, 2)
-		for range 2 {
-			go func() { errs <- getB(t.Context(), srv) }()
-		}
-		<-entered
-		<-entered
-		close(release)
-		for range 2 {
-			if err := <-errs; err != nil {
-				t.Fatal(err)
+		synctest.Test(t, func(t *testing.T) {
+			entered, release, resolve := gate()
+			srv, conns := resolverCluster(t, resolve)
+			errs := make(chan error, 2)
+			for range 2 {
+				go func() { errs <- getB(t.Context(), srv) }()
 			}
-		}
-		if n := conns.n.Load(); n != 1 {
-			t.Fatalf("%d connections, want one shared", n)
-		}
+			<-entered
+			<-entered
+			close(release)
+			for range 2 {
+				if err := <-errs; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if n := conns.n.Load(); n != 1 {
+				t.Fatalf("%d connections, want one shared", n)
+			}
+		})
 	})
 	t.Run("Close while dialing", func(t *testing.T) {
-		entered, release, resolve := gate()
-		srv, _ := resolverCluster(t, resolve)
-		errs := make(chan error, 1)
-		go func() { errs <- getB(t.Context(), srv) }()
-		<-entered
-		if err := srv.Close(); err != nil {
-			t.Fatal(err)
-		}
-		close(release)
-		if err := <-errs; status.Code(err) != codes.Unavailable {
-			t.Fatalf("got %v", err)
-		}
+		synctest.Test(t, func(t *testing.T) {
+			entered, release, resolve := gate()
+			srv, _ := resolverCluster(t, resolve)
+			errs := make(chan error, 1)
+			go func() { errs <- getB(t.Context(), srv) }()
+			<-entered
+			if err := srv.Close(); err != nil {
+				t.Fatal(err)
+			}
+			close(release)
+			if err := <-errs; status.Code(err) != codes.Unavailable {
+				t.Fatalf("got %v", err)
+			}
+		})
 	})
 }
 
 func TestListProcessesForwarded(t *testing.T) {
-	c := cluster(t, nil, "a", "b")
-	_, _ = c.Node("b").Spawn(func(p *grpcproc.Process[*testpb.Ping]) error { _, err := p.Receive(); return err }, grpcproc.WithLabel("remote"))
-	resp, err := client(c, "a").ListProcesses(t.Context(), &inspectv1.ListProcessesRequest{Node: "b", Label: "remote"})
-	if err != nil || len(resp.GetProcesses()) != 1 || resp.GetProcesses()[0].GetPid().GetNode() != "b" {
-		t.Fatalf("%v %v", resp, err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		c := cluster(t, nil, "a", "b")
+		_, _ = c.Node("b").Spawn(func(p *grpcproc.Process[*testpb.Ping]) error { _, err := p.Receive(); return err }, grpcproc.WithLabel("remote"))
+		resp, err := client(c, "a").ListProcesses(t.Context(), &inspectv1.ListProcessesRequest{Node: "b", Label: "remote"})
+		if err != nil || len(resp.GetProcesses()) != 1 || resp.GetProcesses()[0].GetPid().GetNode() != "b" {
+			t.Fatalf("%v %v", resp, err)
+		}
+	})
 }
 
 // okWatch is a server stream that accepts every event.
@@ -260,17 +275,19 @@ type okWatch struct{ fakeWatch }
 func (*okWatch) Send(*inspectv1.WatchResponse) error { return nil }
 
 func TestWatchEndsWithUnavailableWhenNodeStops(t *testing.T) {
-	// A node on its own, not behind a gRPC server that would cancel the
-	// stream first: only the node stopping can end this Watch.
-	n, err := grpcproc.NewNode(grpcproc.Config{Name: "solo", Resolver: grpcproc.StaticResolver{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- inspect.New(n).Watch(&inspectv1.WatchRequest{}, &okWatch{fakeWatch{ctx: t.Context()}}) }()
-	time.Sleep(20 * time.Millisecond)
-	_ = n.Stop(t.Context())
-	if err := <-done; status.Code(err) != codes.Unavailable {
-		t.Fatalf("got %v", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		// A node on its own, not behind a gRPC server that would cancel the
+		// stream first: only the node stopping can end this Watch.
+		n, err := grpcproc.NewNode(grpcproc.Config{Name: "solo", Resolver: grpcproc.StaticResolver{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() { done <- inspect.New(n).Watch(&inspectv1.WatchRequest{}, &okWatch{fakeWatch{ctx: t.Context()}}) }()
+		time.Sleep(20 * time.Millisecond)
+		_ = n.Stop(t.Context())
+		if err := <-done; status.Code(err) != codes.Unavailable {
+			t.Fatalf("got %v", err)
+		}
+	})
 }
