@@ -1,3 +1,4 @@
+import idsExample from '../../../examples/singleton/ids_test.go?raw';
 import singleton from '../../../examples/singleton/singleton_test.go?raw';
 
 import { Code, Output, region } from '../code.tsx';
@@ -51,7 +52,8 @@ export const guidesLeader: Doc = {
 sched := grpcproc.Named[*schedpb.Msg](info.Leader, "scheduler")`}</Code>
 					<p>
 						A call to a node that no longer leads fails with <C>grpcproc.ErrNoProc</C>, and while no
-						leader is known <C>info.Leader</C> is empty: ask again.
+						leader is known <C>info.Leader</C> is empty: ask again. <C>leader.Call</C> does both, as{' '}
+						<A to="guides/leader/#calling">Calling the leader</A> shows.
 					</p>
 				</>
 			)
@@ -213,6 +215,52 @@ lease.Save(state)                   // the same, without the wait`}</Code>
 						The state lives in memory, as do the terms: a cluster that loses a majority of its nodes
 						at once loses them. Keep it to what the next leader needs to carry on, the jobs a
 						scheduler ran last, not the data they worked on.
+					</p>
+				</>
+			)
+		},
+		{
+			id: 'calling',
+			title: 'Calling the leader',
+			body: (
+				<>
+					<p>
+						<C>leader.Call</C> calls the process registered under a name on whichever node leads,
+						from a node or from inside a process, and follows leadership as it moves. This
+						singleton, from <Ext href={file('examples/singleton/ids_test.go')}>examples/singleton</Ext>,
+						hands out numbers that never repeat: each is checkpointed to a majority before it is
+						handed out, so whichever node leads next starts past it.
+					</p>
+					<Code caption="examples/singleton/ids_test.go">{region(idsExample, /^func ids/, /^}/)}</Code>
+					<p>Any node that takes part asks for one the same way:</p>
+					<Code caption="examples/singleton/ids_test.go">{region(idsExample, /^func nextID/, /^}/)}</Code>
+					<p>
+						The example's test asks from every node, kills the leader, and asks again: the numbers
+						run on from where they were. <C>Call</C> asks again, for as long as its context allows,
+						only when the call cannot have reached the singleton:
+					</p>
+					<Table
+						head={['The call', 'Asked again?']}
+						rows={[
+							['No leader is known yet.', 'Yes.'],
+							[
+								'The node named has no such process: it no longer leads, or has not started its singleton yet.',
+								'Yes.'
+							],
+							[
+								<>
+									It never left this node: a <C>*grpcproc.LinkError</C> whose <C>Unsent</C> is set.
+								</>,
+								'Yes.'
+							],
+							['It left, and its link broke, or its context ended, while it waited.', 'No: it may have been handled.'],
+							['It was answered with an error.', 'No: that is the answer.']
+						]}
+					/>
+					<p>
+						Delivery is at most once, so repeating a call that may have been handled is the
+						caller's choice: fine for a read, or for a request the singleton de-duplicates. For the
+						numbers, a repeat can only skip one, never hand one out twice.
 					</p>
 				</>
 			)
