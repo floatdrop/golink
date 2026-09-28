@@ -64,15 +64,12 @@ func TestRemoteByPIDAndName(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		col, ch := collector(t, a)
 
 		// Same API as local: the address points at another node.
 		w, _ := watcher(t, a)
 		if err := e.Send(w.Context(), w, &testpb.Ping{N: 1}); err != nil {
 			t.Fatal(err)
 		}
-		_ = col
-		_ = ch
 		r, err := a.CallTo[*testpb.Pong](ctx(t), grpcproc.Named[*testpb.Ping]("b", "echo"), &testpb.Ping{N: 9})
 		if err != nil || r.N != 10 {
 			t.Fatalf("call by name: %v %v", r, err)
@@ -128,7 +125,7 @@ func TestAddrCallAndSend(t *testing.T) {
 		}
 		e := echoAddr{addr}
 
-		// From a node, as Node.Call.
+		// A call from a node.
 		if r, err := e.Bump(ctx(t), a, 9); err != nil || r.N != 10 {
 			t.Fatalf("bump: %v %v", r, err)
 		}
@@ -139,26 +136,10 @@ func TestAddrCallAndSend(t *testing.T) {
 			t.Fatalf("reply typed wrongly should be ErrType, got %v", err)
 		}
 
-		// probe passes on what it gets and answers calls.
-		got := make(chan grpcproc.Msg[*testpb.Ping], 4)
-		probe, err := b.Spawn(func(p *grpcproc.Process[*testpb.Ping]) error {
-			for {
-				m, err := p.Receive()
-				if err != nil {
-					return err
-				}
-				got <- m
-				if m.IsCall() {
-					_ = m.Reply(&testpb.Pong{}, nil)
-				}
-			}
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
+		probe, got := answering(t, b)
 		tenant := grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"tenant": "acme"})
 
-		// From a node, as Node.Send.
+		// A send from a node.
 		if err := probe.Send(tenant, a, &testpb.Ping{N: 1}); err != nil {
 			t.Fatal(err)
 		}
@@ -166,8 +147,8 @@ func TestAddrCallAndSend(t *testing.T) {
 			t.Fatalf("send from node: %+v", m)
 		}
 
-		// From a process, as Process.Call: what it inherited from the message
-		// it handles, and what ctx adds.
+		// From a process: what it inherited from the message it handles, and
+		// what ctx adds.
 		bumped := make(chan int64, 1)
 		caller, err := a.Spawn(func(p *grpcproc.Process[*testpb.Ping]) error {
 			if _, err := p.Receive(); err != nil {
@@ -218,7 +199,7 @@ func TestAddrForms(t *testing.T) {
 			t.Fatalf("%v %v", byPID, byPID.PID())
 		}
 		byName := grpcproc.AddrOf[*testpb.Ping](grpcproc.Name{Node: "n", Name: "svc"})
-		if byName.Name() != "svc" || byName.Node() != "n" || byName.String() != "{svc@n}" || !byName.PID().IsZero() == false && byName.PID().Node != "n" {
+		if byName.Name() != "svc" || byName.Node() != "n" || byName.String() != "{svc@n}" || byName.PID() != (grpcproc.PID{Node: "n"}) {
 			t.Fatalf("%v", byName)
 		}
 		if !(grpcproc.PID{}).IsZero() || pid.IsZero() {
@@ -272,10 +253,7 @@ func TestTypeMismatchIsDeadLetter(t *testing.T) {
 		if err := b.SendTo(t.Context(), e.PID(), &testpb.Pong{}); err != nil {
 			t.Fatal(err)
 		}
-		deadline := time.Now().Add(2 * time.Second)
-		for h.deadLetters.Load() < 3 && time.Now().Before(deadline) {
-			time.Sleep(5 * time.Millisecond)
-		}
+		eventually(t, "3 dead letters", func() bool { return h.deadLetters.Load() >= 3 })
 		if got := h.deadLetters.Load(); got != 3 {
 			t.Fatalf("dead letters = %d, want 3", got)
 		}

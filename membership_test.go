@@ -43,6 +43,14 @@ func (f *fakeMembership) Watch(ctx context.Context) (<-chan grpcproc.MemberEvent
 	return out, nil
 }
 
+// flush returns once a has handled the events sent to m before it: the
+// second of two events is taken only once the one before them is handled.
+func flush(m *fakeMembership) {
+	for range 2 {
+		m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "zzz"}}
+	}
+}
+
 type fakeRegistrar struct {
 	mu          sync.Mutex
 	members     []grpcproc.Member
@@ -92,7 +100,7 @@ func TestMembershipDropsLinks(t *testing.T) {
 			}
 		})
 		w.Monitor(silent)
-		if _, err := mustEcho(t, b).Call[*testpb.Pong](ctx(t), w, &testpb.Ping{N: 1}); err != nil {
+		if _, err := spawnEcho(t, b).Call[*testpb.Pong](ctx(t), w, &testpb.Ping{N: 1}); err != nil {
 			t.Fatal(err)
 		}
 		inc := b.ID().Incarnation
@@ -123,13 +131,13 @@ func TestMembershipDropsLinks(t *testing.T) {
 		}
 
 		// b is seen again as a new incarnation while a still links to the old one.
-		if _, err := mustEcho(t, b).Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 1}); err != nil {
+		if _, err := spawnEcho(t, b).Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 1}); err != nil {
 			t.Fatal(err)
 		}
 		m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: inc + 1}, Up: true}
 		waitNoPeer(t, a, "b")
 		// The b a linked with is now an old incarnation.
-		if _, err := mustEcho(t, b).Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 1}); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("b#%d is an old incarnation", inc)) {
+		if _, err := spawnEcho(t, b).Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 1}); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("b#%d is an old incarnation", inc)) {
 			t.Fatalf("a calls the old b: %v", err)
 		}
 
@@ -142,15 +150,6 @@ func TestMembershipDropsLinks(t *testing.T) {
 		m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "c"}}
 		waitNoPeer(t, a, "c")
 	})
-}
-
-func mustEcho(t *testing.T, n *grpcproc.Node) grpcproc.Addr[*testpb.Ping] {
-	t.Helper()
-	e, err := n.Spawn(echo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return e
 }
 
 func TestRegistrarLifecycle(t *testing.T) {
@@ -294,14 +293,6 @@ func TestStartBoundsTheWatch(t *testing.T) {
 			t.Fatalf("got %v", err)
 		}
 	})
-}
-
-// flush returns once a has handled the events sent to m before it: the
-// second of two events is taken only once the one before them is handled.
-func flush(m *fakeMembership) {
-	for range 2 {
-		m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "zzz"}}
-	}
 }
 
 func TestMembershipIsTheConfigs(t *testing.T) {

@@ -194,16 +194,7 @@ func TestProcessSendReplyAndMonitorVariants(t *testing.T) {
 		}
 		<-done
 		// The echo was told to exit.
-		deadline := time.Now().Add(time.Second)
-		for {
-			if _, ok := b.Process(e.PID()); !ok {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatal("echo still alive")
-			}
-			time.Sleep(5 * time.Millisecond)
-		}
+		eventually(t, "the echo to exit", func() bool { _, alive := b.Process(e.PID()); return !alive })
 		// A process exiting while it monitors others (by name and by pid) cleans up.
 		e2, _ := b.Spawn(echo, grpcproc.WithName("echo2"))
 		exit := make(chan struct{})

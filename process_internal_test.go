@@ -97,17 +97,7 @@ func TestWatchPlacedAsTheWatcherExits(t *testing.T) {
 func TestDemonitorSendsOneEnvelope(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		n := newTestNode(t, "a")
-		l := &outLink{node: n, peer: NodeID{Name: "b"}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
-			cancel: func() {}}
-		n.mu.Lock()
-		n.out["b"] = l // no writer: what is sent stays queued
-		n.mu.Unlock()
-		t.Cleanup(func() { // before Stop, which would wait for it to drain
-			n.mu.Lock()
-			delete(n.out, "b")
-			n.mu.Unlock()
-			l.close(nil)
-		})
+		l := queuedLink(t, n, NodeID{Name: "b"})
 		targets := []Target{PID{Node: "b", Incarnation: 1, ID: 5}, Name{Node: "b", Name: "x"}}
 		done := make(chan struct{})
 		if _, err := n.Spawn(func(p *Process[*grpcprocv1.Hello]) error {

@@ -3,6 +3,7 @@ package grpcproc_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"sync/atomic"
@@ -19,8 +20,8 @@ import (
 var errNegativeTwo = errors.New("negative two")
 
 // echo replies Pong{N+1} to Ping messages and calls, errors on N < 0
-// (errNegativeTwo on N == -2), stops on N == 0 with "normal", and crashes
-// with "boom" on N == -100.
+// (errNegativeTwo on N == -2), stops on N == 0 with "normal", crashes with
+// "boom" on N == -100, and panics with "kaboom" on N == -200.
 func echo(p *grpcproc.Process[*testpb.Ping]) error {
 	for {
 		m, err := p.Receive()
@@ -49,6 +50,7 @@ func echo(p *grpcproc.Process[*testpb.Ping]) error {
 	}
 }
 
+// spawnEcho spawns echo on n.
 func spawnEcho(t *testing.T, n *grpcproc.Node, opts ...grpcproc.SpawnOption) grpcproc.Addr[*testpb.Ping] {
 	t.Helper()
 	a, err := n.Spawn(echo, opts...)
@@ -120,18 +122,14 @@ func answering(t *testing.T, n *grpcproc.Node) (grpcproc.Addr[*testpb.Ping], <-c
 	return addr, got
 }
 
+// recv returns the next message on ch.
 func recv[M proto.Message](t testing.TB, ch <-chan grpcproc.Msg[M]) grpcproc.Msg[M] {
 	t.Helper()
-	select {
-	case m := <-ch:
-		return m
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for message")
-		return grpcproc.Msg[M]{}
-	}
+	return within(t, ch, "message")
 }
 
-func within[T any](t *testing.T, ch <-chan T, what string) T {
+// within returns the next value on ch, what it is named in the failure.
+func within[T any](t testing.TB, ch <-chan T, what string) T {
 	t.Helper()
 	select {
 	case v := <-ch:
@@ -142,6 +140,7 @@ func within[T any](t *testing.T, ch <-chan T, what string) T {
 	}
 }
 
+// noMore fails if a message arrives on ch soon.
 func noMore[M proto.Message](t *testing.T, ch <-chan grpcproc.Msg[M]) {
 	t.Helper()
 	select {
@@ -151,24 +150,26 @@ func noMore[M proto.Message](t *testing.T, ch <-chan grpcproc.Msg[M]) {
 	}
 }
 
-func nextEvent(t *testing.T, ch <-chan grpcproc.Event, kind grpcproc.EventKind) grpcproc.Event {
+// nextEvent returns the next event on ch of one of kinds, skipping the rest.
+func nextEvent(t *testing.T, ch <-chan grpcproc.Event, kinds ...grpcproc.EventKind) grpcproc.Event {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
 	for {
 		select {
 		case ev, ok := <-ch:
 			if !ok {
-				t.Fatalf("channel closed waiting for %v", kind)
+				t.Fatalf("channel closed waiting for %v", kinds)
 			}
-			if ev.Kind == kind {
+			if slices.Contains(kinds, ev.Kind) {
 				return ev
 			}
 		case <-deadline:
-			t.Fatalf("timeout waiting for %v", kind)
+			t.Fatalf("timeout waiting for %v", kinds)
 		}
 	}
 }
 
+// ctx is t's context, ended after 5s at the latest.
 func ctx(t testing.TB) context.Context {
 	c, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	t.Cleanup(cancel)
@@ -189,27 +190,19 @@ func eventually(t *testing.T, what string, cond func() bool) {
 // waitWatchers waits until pid on n has want watchers.
 func waitWatchers(t *testing.T, n *grpcproc.Node, pid grpcproc.PID, want int) {
 	t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(2 * time.Millisecond) {
-		if info, ok := n.Process(pid); ok && info.Watchers == want {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%v never had %d watchers", pid, want)
-		}
-	}
+	eventually(t, fmt.Sprintf("%v to have %d watchers", pid, want), func() bool {
+		info, ok := n.Process(pid)
+		return ok && info.Watchers == want
+	})
 }
 
+// waitNoPeer waits until n has no link with peer.
 func waitNoPeer(t *testing.T, n *grpcproc.Node, peer string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for slices.Contains(n.Peers(), peer) {
-		if time.Now().After(deadline) {
-			t.Fatalf("links to %s kept: %+v", peer, n.Info().Links)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	eventually(t, n.Name()+"'s links to "+peer+" to go", func() bool { return !slices.Contains(n.Peers(), peer) })
 }
 
+// countingHooks counts what each hook is called for.
 type countingHooks struct {
 	grpcproc.NopHooks
 	spawns, exits, sends, receives, deadLetters, linkUps, linkDowns atomic.Int64

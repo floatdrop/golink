@@ -265,14 +265,10 @@ func TestExitCountsQueuedCallBeforeAnswering(t *testing.T) {
 			close(h.answered)
 			errs <- err
 		}()
-		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
-			if info, _ := n.Process(pid.PID()); info.Mailbox.Depth == 1 {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatal("the call was never queued")
-			}
-		}
+		eventually(t, "the call to be queued", func() bool {
+			info, _ := n.Process(pid.PID())
+			return info.Mailbox.Depth == 1
+		})
 		close(release)
 		if err := <-errs; !errors.Is(err, grpcproc.ErrNoProc) {
 			t.Fatalf("got %v", err)

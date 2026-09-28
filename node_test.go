@@ -220,14 +220,10 @@ func TestStopFailsLocalCallsStillWaiting(t *testing.T) {
 		go call()
 		<-called
 		go call() // stays queued
-		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
-			if info, _ := n.Process(stuck.PID()); info.Mailbox.Depth == 1 {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatal("the second call was never queued")
-			}
-		}
+		eventually(t, "the second call to be queued", func() bool {
+			info, _ := n.Process(stuck.PID())
+			return info.Mailbox.Depth == 1
+		})
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
 		if err := n.Stop(ctx); !errors.Is(err, context.DeadlineExceeded) {

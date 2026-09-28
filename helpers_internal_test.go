@@ -11,6 +11,7 @@ import (
 	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
+// newTestNode is node name of incarnation 1, stopped when the test ends.
 func newTestNode(t *testing.T, name string) *Node {
 	t.Helper()
 	n, err := NewNode(Config{Name: name, Resolver: StaticResolver{}, Incarnation: 1})
@@ -30,6 +31,30 @@ func testConn(t *testing.T) *grpc.ClientConn {
 		t.Fatal(err)
 	}
 	return cc
+}
+
+// testOutLink is an outbound link from n to peer built by hand, with no
+// stream and no writer until the test gives it them.
+func testOutLink(t *testing.T, n *Node, peer NodeID) *outLink {
+	return &outLink{node: n, peer: peer, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
+		cancel: func() {}}
+}
+
+// queuedLink registers a link from n to peer that nothing writes, so that
+// what n sends to peer stays in its queue. It is taken away before n stops,
+// which would wait for it to drain.
+func queuedLink(t *testing.T, n *Node, peer NodeID) *outLink {
+	l := testOutLink(t, n, peer)
+	n.mu.Lock()
+	n.out[peer.Name] = l
+	n.mu.Unlock()
+	t.Cleanup(func() {
+		n.mu.Lock()
+		delete(n.out, peer.Name)
+		n.mu.Unlock()
+		l.close(nil)
+	})
+	return l
 }
 
 // fakeStream is a server stream whose Send fails or whose Recv ends at will.

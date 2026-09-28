@@ -312,17 +312,10 @@ func TestInboundRejections(t *testing.T) {
 		if err := open("grpcproc-version", "1", "grpcproc-node", "z", "grpcproc-incarnation", "6"); err != nil {
 			t.Fatalf("replacement: %v", err)
 		}
-		deadline := time.Now().Add(time.Second)
-		for {
+		eventually(t, "the replacement link", func() bool {
 			links := c.Node("a").Info().Links
-			if len(links) == 1 && links[0].Peer.Incarnation == 6 {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("links %+v", links)
-			}
-			time.Sleep(5 * time.Millisecond)
-		}
+			return len(links) == 1 && links[0].Peer.Incarnation == 6
+		})
 	})
 }
 
@@ -486,7 +479,7 @@ func TestKillAndRestart(t *testing.T) {
 		if b2.ID().Incarnation == b.ID().Incarnation {
 			t.Fatal("incarnation did not change")
 		}
-		e, _ := b2.Spawn(echo, grpcproc.WithName("echo"))
+		spawnEcho(t, b2, grpcproc.WithName("echo"))
 		if r, err := a.CallTo[*testpb.Pong](ctx(t), grpcproc.Named[*testpb.Ping]("b", "echo"), &testpb.Ping{N: 5}); err != nil || r.N != 6 {
 			t.Fatalf("after restart: %v %v", r, err)
 		}
@@ -496,7 +489,6 @@ func TestKillAndRestart(t *testing.T) {
 		if m := recv(t, ch); m.Down == nil || m.Down.Reason != grpcproc.ReasonNoProc {
 			t.Fatalf("stale pid: %+v", m.Down)
 		}
-		_ = e
 		if h.linkDowns.Load() == 0 {
 			t.Fatal("OnLinkDown not called")
 		}

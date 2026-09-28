@@ -226,9 +226,7 @@ func TestReplyThroughAnotherProcess(t *testing.T) {
 				}); err != nil {
 					t.Fatal(err)
 				}
-				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-				resp, err := front.Call[*testpb.Ping](ctx, c.Node(caller), &testpb.Ping{N: 1})
-				cancel()
+				resp, err := front.Call[*testpb.Ping](ctx(t), c.Node(caller), &testpb.Ping{N: 1})
 				if err != nil || resp.GetN() != 7 {
 					t.Fatalf("taken on a, answered on %s, called from %s: %v, %v", answerer, caller, resp, err)
 				}

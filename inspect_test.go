@@ -189,9 +189,7 @@ func TestInspectOfAProcessThatPanicsAnswering(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-		defer cancel()
-		if _, err := a.Inspect(ctx, addr.PID()); !errors.Is(err, grpcproc.ErrNoProc) || !strings.Contains(err.Error(), "inspect function panicked") {
+		if _, err := a.Inspect(ctx(t), addr.PID()); !errors.Is(err, grpcproc.ErrNoProc) || !strings.Contains(err.Error(), "inspect function panicked") {
 			t.Fatalf("got %v", err)
 		}
 		for e := range events {

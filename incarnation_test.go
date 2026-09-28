@@ -120,22 +120,6 @@ func isStale(err error, old, seen string) bool {
 	return errors.Is(err, grpcproc.ErrNoConnection) && strings.Contains(err.Error(), old+" is an old incarnation: a has seen "+seen)
 }
 
-// nextLinkEvent returns the next link event on ch.
-func nextLinkEvent(t *testing.T, ch <-chan grpcproc.Event) grpcproc.Event {
-	t.Helper()
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case ev := <-ch:
-			if ev.Kind == grpcproc.EventLinkUp || ev.Kind == grpcproc.EventLinkDown {
-				return ev
-			}
-		case <-deadline:
-			t.Fatal("no link event")
-		}
-	}
-}
-
 // b was replaced by incarnation 2 while incarnation 1 still runs. The old
 // one's links are refused: it cannot cut a off from the current b, and its
 // messages do not arrive.
@@ -145,7 +129,7 @@ func TestOldIncarnationIsRefused(t *testing.T) {
 		a := w.start("a", 1)
 		old := w.start("b", 1)
 		b := w.start("b", 2)
-		svc := mustEcho(t, b)
+		svc := spawnEcho(t, b)
 		watch, downs := watcher(t, a)
 		watch.Monitor(svc)
 		sink, got := collector(t, a)
@@ -315,7 +299,7 @@ func TestNewIncarnationDropsTheOldOnesLinks(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				w := newTwins(t)
 				e := oldB{w: w, a: w.start("a", 1), old: w.start("b", 1)}
-				e.svc = mustEcho(t, e.old)
+				e.svc = spawnEcho(t, e.old)
 				e.sink, e.got = collector(t, e.a)
 				watch, downs := watcher(t, e.a)
 				tc.linked(e, t)
@@ -326,10 +310,10 @@ func TestNewIncarnationDropsTheOldOnesLinks(t *testing.T) {
 				}
 				events := e.a.Subscribe(t.Context(), 16)
 				tc.meet(e, t, w.start("b", 2))
-				if ev := nextLinkEvent(t, events); ev.Kind != grpcproc.EventLinkDown || ev.Peer.Incarnation != 1 || ev.Err != "restarted as incarnation 2" {
+				if ev := nextEvent(t, events, grpcproc.EventLinkUp, grpcproc.EventLinkDown); ev.Kind != grpcproc.EventLinkDown || ev.Peer.Incarnation != 1 || ev.Err != "restarted as incarnation 2" {
 					t.Fatalf("got %+v", ev)
 				}
-				if ev := nextLinkEvent(t, events); ev.Kind != grpcproc.EventLinkUp || ev.Peer.Incarnation != 2 {
+				if ev := nextEvent(t, events, grpcproc.EventLinkUp, grpcproc.EventLinkDown); ev.Kind != grpcproc.EventLinkUp || ev.Peer.Incarnation != 2 {
 					t.Fatalf("got %+v", ev)
 				}
 				if outbound {

@@ -62,8 +62,7 @@ func newSettleEnv(t *testing.T) settleEnv {
 // message queued, whose dead letter the hook holds, and an inbound one.
 func (e settleEnv) links(t *testing.T, inc uint64) *inLink {
 	t.Helper()
-	out := &outLink{node: e.n, peer: NodeID{Name: "b", Incarnation: inc}, cc: testConn(t),
-		q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}), cancel: func() {}}
+	out := testOutLink(t, e.n, NodeID{Name: "b", Incarnation: inc})
 	env := wire(grpcprocv1.Kind_KIND_SEND, e.p.pid, PID{Node: "b", Incarnation: inc, ID: 9}, "")
 	if err := encodeBody(env, &grpcprocv1.Hello{}); err != nil {
 		t.Fatal(err)

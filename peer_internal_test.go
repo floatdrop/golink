@@ -24,7 +24,7 @@ func TestLostStaleAndSendClosed(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		n := newTestNode(t, "a")
 		// Links no longer registered are just closed.
-		out := &outLink{node: n, peer: NodeID{Name: "b"}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}), cancel: func() {}}
+		out := testOutLink(t, n, NodeID{Name: "b"})
 		in := &inLink{peer: NodeID{Name: "b"}, done: make(chan struct{})}
 		pc := &pendingCall{node: "b", ch: make(chan callResult, 1)}
 		n.pendingMu.Lock()
@@ -120,10 +120,7 @@ func TestOutboundWriteFailure(t *testing.T) {
 		for _, closedFirst := range []bool{false, true} {
 			n := newTestNode(t, "a")
 			entered, release := make(chan struct{}), make(chan struct{})
-			l := &outLink{
-				node: n, peer: NodeID{Name: "b"}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
-				cancel: func() {},
-			}
+			l := testOutLink(t, n, NodeID{Name: "b"})
 			l.stream = &fakeClientStream{sendErr: io.ErrClosedPipe, onSend: func() {
 				close(entered)
 				<-release
@@ -241,8 +238,7 @@ func TestLostEnvelopes(t *testing.T) {
 		n.pending[7] = pc
 		n.pendingMu.Unlock()
 		events := n.Subscribe(t.Context(), 8)
-		l := &outLink{node: n, peer: NodeID{Name: "b"}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
-			cancel: func() {}}
+		l := testOutLink(t, n, NodeID{Name: "b"})
 		send := wire(grpcprocv1.Kind_KIND_SEND, PID{Node: "a", Incarnation: 1, ID: 3}, PID{Node: "b", Incarnation: 2, ID: 4}, "")
 		if err := encodeBody(send, &grpcprocv1.Hello{Node: "x"}); err != nil {
 			t.Fatal(err)
@@ -494,8 +490,7 @@ func TestStopFlushesEveryLinkAtOnce(t *testing.T) {
 		closedSend := map[string]time.Duration{}
 		var links []*outLink
 		for _, peer := range []string{"b", "c", "d"} {
-			l := &outLink{node: n, peer: NodeID{Name: peer}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
-				cancel: func() {}}
+			l := testOutLink(t, n, NodeID{Name: peer})
 			l.stream = &fakeClientStream{onCloseSend: func() {
 				mu.Lock()
 				closedSend[peer] = time.Since(start)
@@ -548,8 +543,8 @@ func TestStopWithdrawsAfterALongFlush(t *testing.T) {
 		if err := n.Start(t.Context()); err != nil {
 			t.Fatal(err)
 		}
-		l := &outLink{node: n, peer: NodeID{Name: "b"}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
-			cancel: func() {}, stream: &fakeClientStream{}}
+		l := testOutLink(t, n, NodeID{Name: "b"})
+		l.stream = &fakeClientStream{}
 		n.mu.Lock()
 		n.out["b"] = l // its peer never ends the stream
 		n.mu.Unlock()

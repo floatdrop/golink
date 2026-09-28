@@ -81,15 +81,7 @@ func TestCallMergesContextMetadata(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c := grpcproctest.New(t, "a")
 		a := c.Node("a")
-		seen := make(chan grpcproc.Metadata, 1)
-		probe, _ := a.Spawn[*testpb.Ping](func(p *grpcproc.Process[*testpb.Ping]) error {
-			m, err := p.Receive()
-			if err != nil {
-				return err
-			}
-			seen <- m.Metadata
-			return m.Reply(&testpb.Pong{}, nil)
-		})
+		probe, got := answering(t, a)
 		// A call from a process carries what it inherited and what ctx adds.
 		p, _ := a.Spawn[*testpb.Ping](func(p *grpcproc.Process[*testpb.Ping]) error {
 			if _, err := p.Receive(); err != nil {
@@ -100,13 +92,8 @@ func TestCallMergesContextMetadata(t *testing.T) {
 			return err
 		})
 		_ = p.Send(grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"tenant": "acme"}), a, &testpb.Ping{})
-		select {
-		case md := <-seen:
-			if md["tenant"] != "acme" || md["extra"] != "1" {
-				t.Fatalf("got %v", md)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatal("timeout")
+		if md := recv(t, got).Metadata; md["tenant"] != "acme" || md["extra"] != "1" {
+			t.Fatalf("got %v", md)
 		}
 	})
 }

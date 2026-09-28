@@ -16,17 +16,7 @@ import (
 func TestCallsLeaveNothingPending(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		n := newTestNode(t, "a")
-		l := &outLink{node: n, peer: NodeID{Name: "b", Incarnation: 2}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false),
-			done: make(chan struct{}), cancel: func() {}}
-		n.mu.Lock()
-		n.out["b"] = l // no writer: calls stay queued
-		n.mu.Unlock()
-		t.Cleanup(func() { // before Stop, which would flush it
-			n.mu.Lock()
-			delete(n.out, "b")
-			n.mu.Unlock()
-			l.close(nil)
-		})
+		l := queuedLink(t, n, NodeID{Name: "b", Incarnation: 2})
 		type ping = grpcprocv1.Hello
 		peer := Addr[*ping]{pid: PID{Node: "b", Incarnation: 2, ID: 1}}
 		queued := func() *grpcprocv1.Envelope {
