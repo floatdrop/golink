@@ -42,20 +42,16 @@ func worker(p *grpcproc.Process[*testpb.Ping]) error {
 // dials fail (Config.DialBackoff), so a test can show it a down link.
 func Start(t *testing.T, more ...string) *Fixture {
 	t.Helper()
-	// Each Inspector reaches the others as a node would, with its node's own
-	// resolver and dial options (so a Partition cuts it off too). Nodes
-	// start one at a time, config before services.
-	cfgs := map[string]grpcproc.Config{}
+	// Each Inspector reaches the others as its node does, through the node's
+	// Dial (so a Partition cuts it off too).
 	c := grpcproctest.NewWith(t, []grpcproctest.Option{
 		grpcproctest.WithConfig(func(name string, cfg *grpcproc.Config) {
 			if name == "a" {
 				cfg.DialBackoff = time.Hour
 			}
-			cfgs[name] = *cfg
 		}),
 		grpcproctest.WithServices(func(n *grpcproc.Node, s *grpc.Server) {
-			cfg := cfgs[n.Name()]
-			insp := inspect.New(n, inspect.WithResolver(cfg.Resolver, cfg.DialOptions...))
+			insp := inspect.New(n)
 			insp.Register(s)
 			t.Cleanup(func() { _ = insp.Close() })
 		}),

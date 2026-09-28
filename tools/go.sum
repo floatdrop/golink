@@ -1,9 +1,9 @@
-github.com/floatdrop/grpcproc v0.0.6-0.20260928112146-54c99477f664 h1:m5RzXY7hO721dc1a3I4xpnxyhU49lxsy40eS1uFlTL0=
-github.com/floatdrop/grpcproc v0.0.6-0.20260928112146-54c99477f664/go.mod h1:lUNiPLRR97lqydfE+CturNB9EZHd0lJuVktmF408bc0=
-github.com/floatdrop/grpcproc/cron v0.0.0-20260928112146-54c99477f664 h1:iBtNZBlmNiIJDc8TwaO405sRS1mHzT0bMJ5yWuozMnY=
-github.com/floatdrop/grpcproc/cron v0.0.0-20260928112146-54c99477f664/go.mod h1:n1gJKUcl70hYGQUvbdNYfeFW25UZRDMU/7g02QhXMgM=
-github.com/floatdrop/grpcproc/leader v0.0.0-20260928112146-54c99477f664 h1:/JYZ14KUkE1iAOeaEKNZucYP5vKDS4V+4/0yq2Pbh6I=
-github.com/floatdrop/grpcproc/leader v0.0.0-20260928112146-54c99477f664/go.mod h1:zWOqD6wvHBeG1QLfKsrKrosR2eNBoftMyF8cvWxW2rs=
+github.com/floatdrop/grpcproc v0.0.6-0.20260928122334-e8395f778226 h1:B2WUKV1yyRYzZms5YF/m/v5yrPnDURZCNFWIU+7bOJc=
+github.com/floatdrop/grpcproc v0.0.6-0.20260928122334-e8395f778226/go.mod h1:lUNiPLRR97lqydfE+CturNB9EZHd0lJuVktmF408bc0=
+github.com/floatdrop/grpcproc/cron v0.0.0-20260928122334-e8395f778226 h1:D2r+kVm6q0rNRrchKhUyLtVJZJikmI9JTO9x2wvgXJM=
+github.com/floatdrop/grpcproc/cron v0.0.0-20260928122334-e8395f778226/go.mod h1:8eoO+CPFz9h+dsVXCle1mk9ZbGIqcr7Uo7sL4ogvjTo=
+github.com/floatdrop/grpcproc/leader v0.0.0-20260928122334-e8395f778226 h1:VpvjjFEaAFL9D/wLI7cfb0XiimWp2bR4xDTDwJzwpY4=
+github.com/floatdrop/grpcproc/leader v0.0.0-20260928122334-e8395f778226/go.mod h1:i/epRXA0oer0Awn5qCSpI6IGCwcrFOyq0yzyOdxToU4=
 github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=
 github.com/golang-jwt/jwt/v5 v5.3.1/go.mod h1:fxCRLWMO43lRc8nhHWY6LGqRcf+1gQWArsqaEUEa5bE=
 github.com/golang/protobuf v1.5.4 h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=

@@ -8,7 +8,7 @@ module github.com/floatdrop/grpcproc/etcd
 go 1.27.1
 
 require (
-	github.com/floatdrop/grpcproc v0.0.6-0.20260928112146-54c99477f664
+	github.com/floatdrop/grpcproc v0.0.6-0.20260928122334-e8395f778226
 	go.etcd.io/etcd/client/v3 v3.7.2
 	go.etcd.io/etcd/server/v3 v3.7.2
 	google.golang.org/grpc v1.84.0
