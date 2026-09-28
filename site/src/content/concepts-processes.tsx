@@ -146,6 +146,18 @@ child, ref, err := p.SpawnMonitor(worker)`}</Code>
 
 r, err := p.Call[*shoppb.Reserved](ctx, stock, &shoppb.Stock{Op: &shoppb.Stock_Reserve{Reserve: reserve}})`}</Code>
 					<p>
+						The oneof and the reply type are the protocol, and spelling them at every call is the
+						job of the package that owns the process, not of its callers. It writes each operation
+						once, as a method on an address type of its own, which takes the sender, <C>p</C> or
+						the node, as an argument. The examples' <C>shoppb.StockAddr</C> does, and{' '}
+						<A to="concepts/addressing/#protocol">an address with its protocol</A> shows how:
+					</p>
+					<Code>{`inventory := shoppb.StockAddr{Addr: stock}
+
+err := inventory.Restock(ctx, p, restock)
+
+r, err := inventory.Reserve(ctx, p, reserve)`}</Code>
+					<p>
 						A call is answered with the message's <C>Reply</C>: a message, or an error, which the
 						caller gets back as a <C>*RemoteError</C>. The reply does not go through the caller's
 						mailbox. A process that calls another waits on the reply alone, and the messages queued
