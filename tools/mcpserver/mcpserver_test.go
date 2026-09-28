@@ -76,11 +76,11 @@ func toolNames(t *testing.T, cs *mcp.ClientSession) []string {
 
 func TestToolsOnOffer(t *testing.T) {
 	f := testcluster.Start(t)
-	read := []string{"cluster_nodes", "election", "get_process", "list_processes", "node_info", "watch_events"}
+	read := []string{"cluster_nodes", "cron_jobs", "election", "get_process", "list_processes", "node_info", "watch_events"}
 	if got := toolNames(t, connect(t, f, mcpserver.Options{})); !slices.Equal(got, read) {
 		t.Fatalf("read-only: %v", got)
 	}
-	all := append(slices.Clone(read), "cordon_node", "exit_process", "move_leader", "set_log_level", "uncordon_node")
+	all := append(slices.Clone(read), "cordon_node", "disable_cron_job", "enable_cron_job", "exit_process", "move_leader", "remove_cron_job", "set_log_level", "uncordon_node")
 	slices.Sort(all)
 	cs := connect(t, f, mcpserver.Options{AllowWrites: true, Version: "v1"})
 	if got := toolNames(t, cs); !slices.Equal(got, all) {
@@ -244,6 +244,36 @@ func TestLeaderTools(t *testing.T) {
 	}
 	if msg := call(t, cs, "cordon_node", map[string]any{"cluster": "nothing", "node": "a"}, &done); !strings.Contains(msg, "no node runs an election") {
 		t.Fatalf("cordoned in an election nobody runs: %s", msg)
+	}
+}
+
+func TestCronTools(t *testing.T) {
+	f := testcluster.Start(t)
+	f.Cron(t, "a", "cron")
+	pid := f.Cron(t, "b", "billing")
+	cs := connect(t, f, mcpserver.Options{AllowWrites: true})
+	var out struct {
+		Crons []client.CronView `json:"crons"`
+	}
+	if msg := call(t, cs, "cron_jobs", nil, &out); msg != "" || len(out.Crons) != 2 {
+		t.Fatalf("%+v %s", out, msg)
+	}
+	if msg := call(t, cs, "cron_jobs", map[string]any{"node": "b", "process": "billing"}, &out); msg != "" || len(out.Crons) != 1 || out.Crons[0].PID != pid.String() {
+		t.Fatalf("%+v %s", out, msg)
+	}
+	if msg := call(t, cs, "cron_jobs", map[string]any{"process": "nobody"}, &out); !strings.Contains(msg, "no process") {
+		t.Fatalf("a cron nobody runs: %s", msg)
+	}
+	var done struct {
+		Result string `json:"result"`
+	}
+	for _, tc := range [][2]string{{"enable_cron_job", "enabled"}, {"disable_cron_job", "disabled"}, {"remove_cron_job", "removed"}} {
+		if msg := call(t, cs, tc[0], map[string]any{"process": pid.String(), "job": "yearly"}, &done); msg != "" || done.Result != tc[1]+" job yearly of "+pid.String() {
+			t.Errorf("%s: %+v %s", tc[0], done, msg)
+		}
+	}
+	if msg := call(t, cs, "remove_cron_job", map[string]any{"process": pid.String(), "job": "yearly"}, &done); !strings.Contains(msg, "no such job") {
+		t.Errorf("removed twice: %s", msg)
 	}
 }
 

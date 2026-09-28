@@ -85,6 +85,8 @@ Commands:
   leader move <cluster>       hand leadership over (--to a node; by default the most up-to-date follower)
   leader cordon <cluster> <node>    keep a node from leading, to work on its host
   leader uncordon <cluster> <node>  let it lead again
+  cron [list] [<pid|name>]    grpcproc/cron processes and their jobs (--node; every node by default)
+  cron enable|disable|remove <pid|name> <job>   change a job of a cron process (--node)
   dot                         Graphviz of processes and who started whom (--node, --cluster)
   mcp                         serve these as MCP tools over stdio (--allow-writes)
 
@@ -135,7 +137,7 @@ func Main(ctx context.Context, args []string, env Env) int {
 	fs.StringVar(&a.conn.Key, "key", "", "client key file, for mutual TLS")
 	fs.StringVar(&a.conn.ServerName, "servername", "", "server name to verify, when it differs from the address")
 	fs.DurationVar(&a.timeout, "timeout", 5*time.Second, "time limit for each request")
-	fs.BoolVar(&a.json, "json", false, "print JSON: node, nodes, ps, inspect, watch, leader")
+	fs.BoolVar(&a.json, "json", false, "print JSON: node, nodes, ps, inspect, watch, leader, cron")
 	fs.BoolVar(&showVersion, "version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -233,7 +235,7 @@ var commands map[string]command
 func init() {
 	commands = map[string]command{
 		"node": cmdNode, "nodes": cmdNodes, "ps": cmdPS, "inspect": cmdInspect, "watch": cmdWatch,
-		"exit": cmdExit, "loglevel": cmdLogLevel, "dot": cmdDot, "mcp": cmdMCP, "leader": cmdLeader,
+		"exit": cmdExit, "loglevel": cmdLogLevel, "dot": cmdDot, "mcp": cmdMCP, "leader": cmdLeader, "cron": cmdCron,
 	}
 }
 
@@ -614,6 +616,62 @@ func (a *app) printElection(views []client.ElectorView) error {
 			strings.Join(v.Cordoned, ","), strings.Join(v.Unreachable, ","), v.Singleton, v.Backoff, v.Error})
 	}
 	return a.table("NODE\tROLE\tTERM\tLEADER\tVIEW\tSTATE\tCORDONED\tUNREACHABLE\tSINGLETON\tBACKOFF\tERROR", rows)
+}
+
+// cronArgs is how many arguments each cron verb takes, at most.
+var cronArgs = map[string]int{"list": 1, "enable": 2, "disable": 2, "remove": 2}
+
+func cmdCron(ctx context.Context, a *app, args []string) error {
+	verb := "list"
+	if len(args) > 0 {
+		if _, ok := cronArgs[args[0]]; ok {
+			verb, args = args[0], args[1:]
+		}
+	}
+	var node string
+	fs, err := a.flags("cron "+verb, args, func(fs *flag.FlagSet) {
+		fs.StringVar(&node, "node", "", "node the cron process runs on, or its name is registered on")
+	})
+	if err != nil {
+		return err
+	}
+	if fs.NArg() > cronArgs[verb] || verb != "list" && fs.NArg() != cronArgs[verb] {
+		return usageError{"want: cron [list] [<pid|name>] | cron enable|disable|remove <pid|name> <job>"}
+	}
+	ctx, cancel := a.request(ctx)
+	defer cancel()
+	if verb != "list" {
+		if err := a.client.CronJob(ctx, node, fs.Arg(0), verb, fs.Arg(1)); err != nil {
+			return err
+		}
+	}
+	var crons []client.CronView
+	if fs.NArg() > 0 {
+		c, err := a.client.Cron(ctx, node, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		crons = []client.CronView{c}
+	} else if crons, err = a.client.Crons(ctx, node); err != nil {
+		return err
+	}
+	if a.json {
+		return a.printJSON(crons)
+	}
+	var rows [][]string
+	for _, c := range crons {
+		if len(c.Jobs) == 0 {
+			rows = append(rows, []string{c.Node, c.Process, "", "", "", "", "", "", "", c.Error})
+		}
+		for _, j := range c.Jobs {
+			next := j.Next
+			if j.Disabled {
+				next = "disabled"
+			}
+			rows = append(rows, []string{c.Node, c.Process, j.Name, j.Spec, j.Location, next, j.Last, strconv.Itoa(j.Running), j.Failure, c.Error})
+		}
+	}
+	return a.table("NODE\tCRON\tJOB\tSPEC\tZONE\tNEXT\tLAST\tRUNNING\tLAST FAILURE\tERROR", rows)
 }
 
 func cmdDot(ctx context.Context, a *app, args []string) error {
