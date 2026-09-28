@@ -35,9 +35,9 @@ func echo(p *grpcproc.Process[*testpb.Ping]) error {
 		case m.Body.N == -200:
 			panic("kaboom")
 		case m.IsCall() && m.Body.N < 0:
-			_ = p.Reply(m, nil, errors.New("negative: "+strconv.FormatInt(m.Body.N, 10)))
+			_ = m.Reply(nil, errors.New("negative: "+strconv.FormatInt(m.Body.N, 10)))
 		case m.IsCall():
-			_ = p.Reply(m, &testpb.Pong{N: m.Body.N + 1}, nil)
+			_ = m.Reply(&testpb.Pong{N: m.Body.N + 1}, nil)
 		default:
 			_ = p.SendTo(m.From, &testpb.Pong{N: m.Body.N + 1})
 		}
@@ -872,7 +872,7 @@ func TestReplyToAnEarlierIncarnationIsDropped(t *testing.T) {
 		}
 		close(held)
 		<-release
-		replied <- p.Reply(m, &testpb.Ping{}, nil) // to b's first incarnation
+		replied <- m.Reply(&testpb.Ping{}, nil) // to b's first incarnation
 		return nil
 	}, grpcproc.WithName("hold")); err != nil {
 		t.Fatal(err)
@@ -888,7 +888,7 @@ func TestReplyToAnEarlierIncarnationIsDropped(t *testing.T) {
 				received <- struct{}{} // and never answers
 				continue
 			}
-			_ = p.Reply(m, m.Body, nil)
+			_ = m.Reply(m.Body, nil)
 		}
 	}, grpcproc.WithName("x")); err != nil {
 		t.Fatal(err)

@@ -58,7 +58,7 @@ func (CallsOnly[M]) callsOnly() {}
 
 // CallHandler answers calls: the returned message, or error, is the reply,
 // and the actor carries on. Return ErrNoReply to answer later with
-// p.Reply(m, …), from any goroutine; ErrStop to reply and then stop.
+// m.Reply(…), from any goroutine; ErrStop to reply and then stop.
 //
 // Without it, a call is answered with an error.
 type CallHandler[M proto.Message] interface {
@@ -99,7 +99,7 @@ var (
 	// HandleCall, the reply is sent first.
 	ErrStop = errors.New("actor: stop")
 	// ErrNoReply, returned from HandleCall, means the actor will answer
-	// later with p.Reply(m, …).
+	// later with m.Reply(…).
 	ErrNoReply = errors.New("actor: reply later")
 )
 
@@ -163,7 +163,7 @@ func Run[M proto.Message](h Handler[M]) func(*grpcproc.Process[M]) error {
 
 func call[M proto.Message](p *grpcproc.Process[M], calls CallHandler[M], m grpcproc.Msg[M]) error {
 	if calls == nil {
-		_ = p.Reply(m, nil, fmt.Errorf("actor: %s does not handle calls", reflect.TypeFor[M]()))
+		_ = m.Reply(nil, fmt.Errorf("actor: %s does not handle calls", reflect.TypeFor[M]()))
 		return nil
 	}
 	resp, err := calls.HandleCall(p, m)
@@ -171,9 +171,9 @@ func call[M proto.Message](p *grpcproc.Process[M], calls CallHandler[M], m grpcp
 	case errors.Is(err, ErrNoReply):
 		return nil
 	case errors.Is(err, ErrStop):
-		_ = p.Reply(m, resp, nil)
+		_ = m.Reply(resp, nil)
 		return ErrStop
 	}
-	_ = p.Reply(m, resp, err)
+	_ = m.Reply(resp, err)
 	return nil
 }

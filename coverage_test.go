@@ -262,7 +262,7 @@ func TestProcessSendReplyAndMonitorVariants(t *testing.T) {
 			t.Errorf("CallTo: %v %v", r, err)
 		}
 		// Reply to something that is not a call.
-		if err := p.Reply(grpcproc.Msg[proto.Message]{}, nil, nil); !errors.Is(err, grpcproc.ErrNotCall) {
+		if err := (grpcproc.Msg[proto.Message]{}).Reply(nil, nil); !errors.Is(err, grpcproc.ErrNotCall) {
 			t.Errorf("got %v", err)
 		}
 		// Monitor by name and demonitor it: the by-name branch.
@@ -329,7 +329,7 @@ func TestEncodeErrors(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		replyErr <- p.Reply(m, bad, nil)
+		replyErr <- m.Reply(bad, nil)
 		return nil
 	})
 	go func() { _, _ = a.CallTo[*testpb.Pong](ctx(t), svc, &testpb.Ping{}) }()

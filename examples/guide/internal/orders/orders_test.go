@@ -34,7 +34,7 @@ func desk(t *testing.T, cashier func(*grpcproc.Process[*paymentsv1.Charge]) erro
 				return err
 			}
 			if m.IsCall() {
-				_ = p.Reply(m, &inventoryv1.Reserved{Left: 8}, nil)
+				_ = m.Reply(&inventoryv1.Reserved{Left: 8}, nil)
 				continue
 			}
 			released <- m.Body.GetRelease()
@@ -60,7 +60,7 @@ func TestADeclinedCardGivesTheItemsBack(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			_ = p.Reply(m, &paymentsv1.Charged{Declined: "declined"}, nil)
+			_ = m.Reply(&paymentsv1.Charged{Declined: "declined"}, nil)
 		}
 	})
 	if placed, err := place(t, n); err != nil || placed.Refused != "declined" {

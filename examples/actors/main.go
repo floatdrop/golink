@@ -57,7 +57,7 @@ func (i *Inventory) HandleCall(_ *grpcproc.Process[*shoppb.Stock], m grpcproc.Ms
 // HandleMessage gets what was sent with Send; nobody waits for an answer.
 // An error ends the actor, with the error as its exit reason, and
 // actor.ErrStop ends it normally.
-func (i *Inventory) HandleMessage(p *grpcproc.Process[*shoppb.Stock], m grpcproc.Msg[*shoppb.Stock]) error {
+func (i *Inventory) HandleMessage(_ *grpcproc.Process[*shoppb.Stock], m grpcproc.Msg[*shoppb.Stock]) error {
 	r := m.Body.GetRestock()
 	if r == nil {
 		return errors.New("a reservation must be a call")
@@ -67,7 +67,7 @@ func (i *Inventory) HandleMessage(p *grpcproc.Process[*shoppb.Stock], m grpcproc
 	i.waiting = nil
 	for _, c := range parked {
 		if res := c.Body.GetReserve(); i.left[res.Sku] >= res.Qty {
-			_ = p.Reply(c, i.reserve(res), nil)
+			_ = c.Reply(i.reserve(res), nil)
 		} else {
 			i.waiting = append(i.waiting, c)
 		}

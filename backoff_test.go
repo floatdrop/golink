@@ -190,7 +190,7 @@ func TestUnroutableReplyOrDownCutsThePeersLink(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			_ = p.Reply(m, m.Body, nil)
+			_ = m.Reply(m.Body, nil)
 		}
 	}, grpcproc.WithName("echo"))
 	if err != nil {
@@ -339,7 +339,7 @@ func TestDialBackoffInAOneWayPartition(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			_ = p.Reply(m, m.Body, nil)
+			_ = m.Reply(m.Body, nil)
 		}
 	}, grpcproc.WithName("echo")); err != nil {
 		t.Fatal(err)

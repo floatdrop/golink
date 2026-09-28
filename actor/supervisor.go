@@ -426,7 +426,7 @@ func (s *supervisor) drain(busy bool) {
 	if busy {
 		s.saved = slices.DeleteFunc(s.saved, func(m grpcproc.Msg[proto.Message]) bool {
 			if m.IsCall() {
-				_ = s.p.Reply(m, nil, ErrBusy)
+				_ = m.Reply(nil, ErrBusy)
 			}
 			return m.IsCall()
 		})
@@ -466,20 +466,20 @@ func (s *supervisor) control(m grpcproc.Msg[proto.Message]) {
 	switch op := c.GetOp().(type) {
 	case *actorv1.Control_Start:
 		if m.From.Node != s.p.Node().Name() {
-			_ = s.p.Reply(m, nil, errors.New("actor: StartChild: only from the supervisor's node"))
+			_ = m.Reply(nil, errors.New("actor: StartChild: only from the supervisor's node"))
 			return
 		}
 		pid, err := s.startChild(op.Start)
 		if err != nil {
-			_ = s.p.Reply(m, nil, err)
+			_ = m.Reply(nil, err)
 			return
 		}
-		_ = s.p.Reply(m, &grpcprocv1.PID{Node: pid.Node, Incarnation: pid.Incarnation, Id: pid.ID}, nil)
+		_ = m.Reply(&grpcprocv1.PID{Node: pid.Node, Incarnation: pid.Incarnation, Id: pid.ID}, nil)
 	case *actorv1.Control_Stop:
 		pid := grpcproc.PID{Node: op.Stop.GetNode(), Incarnation: op.Stop.GetIncarnation(), ID: op.Stop.GetId()}
-		_ = s.p.Reply(m, &emptypb.Empty{}, s.stopChild(pid))
+		_ = m.Reply(&emptypb.Empty{}, s.stopChild(pid))
 	default:
-		_ = s.p.Reply(m, nil, errors.New("actor: a supervisor takes no calls but StartChild and StopChild"))
+		_ = m.Reply(nil, errors.New("actor: a supervisor takes no calls but StartChild and StopChild"))
 	}
 }
 

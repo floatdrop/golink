@@ -49,7 +49,7 @@ func TestAddrCallAndSend(t *testing.T) {
 			}
 			got <- m
 			if m.IsCall() {
-				_ = p.Reply(m, &testpb.Pong{}, nil)
+				_ = m.Reply(&testpb.Pong{}, nil)
 			}
 		}
 	})

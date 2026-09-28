@@ -164,6 +164,30 @@ func (m Msg[M]) Context(parent context.Context) context.Context {
 	return WithMetadata(parent, m.Metadata)
 }
 
+// Reply answers the message, if IsCall is true. The message holds all it
+// takes, so a reply can wait: m can be kept, or handed to another goroutine
+// or process, and answered from there. A call is answered once: a second
+// Reply is dropped, and so is one after the process that received m exited
+// (which answers ErrNoProc) or its node's Stop gave up on it
+// (ErrNodeStopped).
+func (m Msg[M]) Reply(resp proto.Message, err error) error {
+	if m.ref == 0 {
+		return ErrNotCall
+	}
+	// The call belongs to the process that received it, whoever answers:
+	// whoever takes it from that process's open calls answers it, from that
+	// process's node, the way the call came in.
+	t, c := m.taker, openCall{m.From, m.ref}
+	t.mu.Lock()
+	ch := t.open[c]
+	delete(t.open, c)
+	t.mu.Unlock()
+	if err != nil {
+		return t.n.reply(t.pid, m.From, m.ref, ch, resp, grpcprocv1.Status_STATUS_ERROR, err.Error(), false)
+	}
+	return t.n.reply(t.pid, m.From, m.ref, ch, resp, grpcprocv1.Status_STATUS_OK, "", false)
+}
+
 // Spawn starts fn as a process that accepts messages of type M. The process
 // ends when fn returns; nil means exit reason "normal", otherwise the error
 // text is the reason. A panic is recovered, logged with its stack, and
@@ -428,30 +452,6 @@ func (p *proc) sendAfter(d time.Duration, to dest, m proto.Message) *Timer {
 		}
 	})
 	return tm
-}
-
-// Reply answers a message for which IsCall is true. It may be called later,
-// from any goroutine (a deferred reply), and on another process than the one
-// that received m. A call is answered once: a second Reply is dropped, and
-// so is one after the receiving process exited (which answers ErrNoProc) or
-// its node's Stop gave up on it (ErrNodeStopped).
-func (*Process[M]) Reply(m Msg[M], resp proto.Message, err error) error {
-	if m.ref == 0 {
-		return ErrNotCall
-	}
-	// The call belongs to the process that received it, which may not be p:
-	// m can be handed to another process, even one of another node, to
-	// answer. Whoever takes it from that process's open calls answers it,
-	// from that process's node, the way the call came in.
-	t, c := m.taker, openCall{m.From, m.ref}
-	t.mu.Lock()
-	ch := t.open[c]
-	delete(t.open, c)
-	t.mu.Unlock()
-	if err != nil {
-		return t.n.reply(t.pid, m.From, m.ref, ch, resp, grpcprocv1.Status_STATUS_ERROR, err.Error(), false)
-	}
-	return t.n.reply(t.pid, m.From, m.ref, ch, resp, grpcprocv1.Status_STATUS_OK, "", false)
 }
 
 // Exit asks another process, anywhere, to terminate with reason. A first

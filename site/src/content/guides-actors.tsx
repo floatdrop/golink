@@ -87,7 +87,7 @@ addr, err := node.Spawn(actor.Run(NewOrders(repo)), grpcproc.WithName("orders"))
 								<>
 									A message sent with <C>Call</C>. What it returns, a message or an error, is the
 									reply, and the actor carries on either way. <C>actor.ErrNoReply</C> means the
-									answer comes later, through <C>p.Reply</C>. Without this method, every call is
+									answer comes later, through <C>m.Reply</C>. Without this method, every call is
 									answered with an error.
 								</>
 							],
@@ -165,7 +165,7 @@ addr, err := node.Spawn(actor.Run(NewOrders(repo)), grpcproc.WithName("orders"))
 						actor with reason <C>normal</C>; from <C>HandleCall</C>, the reply is sent first, so a
 						caller that asked the actor to stop gets its answer. <C>actor.ErrNoReply</C> from{' '}
 						<C>HandleCall</C> sends nothing: the actor keeps the message and answers later with{' '}
-						<C>p.Reply(m, resp, err)</C>, from a later handler or from any goroutine. The caller waits
+						<C>m.Reply(resp, err)</C>, from a later handler or from any goroutine. The caller waits
 						until then, or until its context ends.
 					</p>
 				</>
@@ -227,7 +227,7 @@ addr, err := node.Spawn(actor.Run(&Pricer{table: table}))`}</Code>
 					<Code caption="examples/actors/main.go">{region(actors, /^\/\/ HandleCall gets what was sent/, /^}/)}</Code>
 					<p>
 						A restock is a send. <C>HandleMessage</C> adds the stock and answers the parked calls
-						it now can, with <C>p.Reply</C>. A reservation that arrives as a send breaks the
+						it now can, each with its own <C>Reply</C>. A reservation that arrives as a send breaks the
 						protocol, and the returned error ends the actor:
 					</p>
 					<Code caption="examples/actors/main.go">{region(actors, /^\/\/ HandleMessage gets what was sent/, /^}/)}</Code>

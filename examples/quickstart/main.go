@@ -29,11 +29,11 @@ func inventory(p *grpcproc.Process[*shoppb.Reserve]) error {
 			return err // asked to exit, or the node is stopping
 		}
 		if left[m.Body.Sku] < m.Body.Qty {
-			_ = p.Reply(m, nil, fmt.Errorf("only %d %s left", left[m.Body.Sku], m.Body.Sku))
+			_ = m.Reply(nil, fmt.Errorf("only %d %s left", left[m.Body.Sku], m.Body.Sku))
 			continue
 		}
 		left[m.Body.Sku] -= m.Body.Qty
-		_ = p.Reply(m, &shoppb.Reserved{Sku: m.Body.Sku, Left: left[m.Body.Sku]}, nil)
+		_ = m.Reply(&shoppb.Reserved{Sku: m.Body.Sku, Left: left[m.Body.Sku]}, nil)
 	}
 }
 

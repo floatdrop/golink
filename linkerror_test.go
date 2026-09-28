@@ -61,7 +61,7 @@ func TestCallWithADoneContextSendsNothing(t *testing.T) {
 				return err
 			}
 			got <- struct{}{}
-			_ = p.Reply(m, m.Body, nil)
+			_ = m.Reply(m.Body, nil)
 		}
 	})
 	if err != nil {
@@ -149,7 +149,7 @@ func TestStopFailsLocalCallsStillWaiting(t *testing.T) {
 				}
 				continue
 			}
-			_ = p.Reply(m, m.Body, nil)
+			_ = m.Reply(m.Body, nil)
 		}
 	})
 	if err != nil {
@@ -209,7 +209,7 @@ func TestReplyThroughAnotherProcess(t *testing.T) {
 				t.Fatal(err)
 			}
 			if _, err := c.Node(answerer).Spawn(func(p *grpcproc.Process[*testpb.Ping]) error {
-				return p.Reply(<-jobs, &testpb.Ping{N: 7}, nil)
+				return (<-jobs).Reply(&testpb.Ping{N: 7}, nil)
 			}); err != nil {
 				t.Fatal(err)
 			}

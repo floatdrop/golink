@@ -60,7 +60,7 @@ func glEcho(b *testing.B, n *grpcproc.Node) grpcproc.Addr[*shared.Msg] {
 			if err != nil {
 				return err
 			}
-			_ = p.Reply(m, m.Body, nil)
+			_ = m.Reply(m.Body, nil)
 		}
 	})
 	if err != nil {

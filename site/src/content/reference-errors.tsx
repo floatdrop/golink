@@ -82,7 +82,7 @@ export const referenceErrors: Doc = {
 							[
 								<C>actor.ErrNoReply</C>,
 								<>
-									Returned from <C>HandleCall</C>: the actor answers later, with <C>p.Reply</C>, from any
+									Returned from <C>HandleCall</C>: the actor answers later, with <C>m.Reply</C>, from any
 									goroutine.
 								</>
 							],

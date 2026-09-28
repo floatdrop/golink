@@ -45,7 +45,7 @@ addr, _ := node.Spawn[*orderspb.OrderMsg](func(p *grpcproc.Process[*orderspb.Ord
         if err != nil { return err }              // Exit, node stop, …
         if m.Down != nil { /* a monitored process is gone */ continue }
         switch k := m.Body.Kind.(type) {
-        case *orderspb.OrderMsg_Reserve: p.Reply(m, &orderspb.Reserved{}, nil)
+        case *orderspb.OrderMsg_Reserve: m.Reply(&orderspb.Reserved{}, nil)
         }
     }
 }, grpcproc.WithName("reservations"), grpcproc.WithLabel("order"))
@@ -233,7 +233,6 @@ func (p *Process[M]) SendTo(to Target, m proto.Message) error
 // Node has the same Send / SendTo / Call / CallTo / Exit, with the node as
 // sender; its Send, SendTo and Exit take a ctx too, for the dial (Send and
 // SendTo also carry its metadata).
-func (p *Process[M]) Reply(m Msg[M], resp proto.Message, err error) error   // may be deferred
 func (p *Process[M]) Monitor(to Target) Ref
 func (p *Process[M]) Demonitor(ref Ref)
 func (p *Process[M]) Link(to Target)           // one way: to's exit ends p
@@ -253,6 +252,7 @@ type Msg[M proto.Message] struct {
     Metadata Metadata
 }
 func (m Msg[M]) IsCall() bool
+func (m Msg[M]) Reply(resp proto.Message, err error) error // may be deferred, from any goroutine
 func (m Msg[M]) Context() context.Context      // sender's deadline and metadata
 ```
 

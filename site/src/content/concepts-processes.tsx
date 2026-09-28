@@ -66,7 +66,7 @@ child, ref, err := p.SpawnMonitor(worker)`}</Code>
 	case m.Down != nil:
 		p.Log().Info("watched process gone", "pid", m.Down.PID, "reason", m.Down.Reason)
 	case m.IsCall():
-		_ = p.Reply(m, answer(m.Body), nil)
+		_ = m.Reply(answer(m.Body), nil)
 	default:
 		apply(m.Body)
 	}
@@ -146,11 +146,11 @@ child, ref, err := p.SpawnMonitor(worker)`}</Code>
 
 r, err := p.Call[*shoppb.Reserved](ctx, stock, &shoppb.Stock{Op: &shoppb.Stock_Reserve{Reserve: reserve}})`}</Code>
 					<p>
-						A call is answered with <C>Reply</C>: a message, or an error, which the caller gets back
-						as a <C>*RemoteError</C>. The reply does not go through the caller's mailbox. A process
-						that calls another waits on the reply alone, and the messages queued behind it stay in
-						order; and a process's reply can be made later, from any goroutine, or by another process
-						the message was handed to.
+						A call is answered with the message's <C>Reply</C>: a message, or an error, which the
+						caller gets back as a <C>*RemoteError</C>. The reply does not go through the caller's
+						mailbox. A process that calls another waits on the reply alone, and the messages queued
+						behind it stay in order. The message holds all a reply takes, so it can be kept and
+						answered later, from any goroutine, or by another process it was handed to.
 					</p>
 					<Code caption="examples/actors/main.go">{region(actors, /^\/\/ HandleCall gets what was sent/, /^}/)}</Code>
 					<p>

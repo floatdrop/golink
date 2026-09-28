@@ -69,7 +69,7 @@ func (c *counter) HandleCall(p *P, m M) (proto.Message, error) {
 	case -2:
 		return &testpb.Pong{N: c.count}, actor.ErrStop
 	case -4:
-		go func() { _ = p.Reply(m, &testpb.Pong{N: 42}, nil) }()
+		go func() { _ = m.Reply(&testpb.Pong{N: 42}, nil) }()
 		return nil, actor.ErrNoReply
 	}
 	return &testpb.Pong{N: c.count}, nil

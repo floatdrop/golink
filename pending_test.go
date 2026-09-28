@@ -85,7 +85,7 @@ func TestFailLocalCalls(t *testing.T) {
 		t.Fatalf("open %v", p.open)
 	}
 	m := Msg[*grpcprocv1.Hello]{From: n.PID(), ref: 1, taker: p}
-	if err := (&Process[*grpcprocv1.Hello]{p}).Reply(m, &grpcprocv1.Hello{}, nil); err != nil || len(local) != 0 {
+	if err := m.Reply(&grpcprocv1.Hello{}, nil); err != nil || len(local) != 0 {
 		t.Fatalf("a Reply after Stop failed the call: %v, %d answers", err, len(local))
 	}
 }
@@ -120,7 +120,7 @@ func TestLocalCallGivesUpWithItsCtx(t *testing.T) {
 		}
 		cancel() // the caller gives up once the call is taken
 		<-late
-		replied <- p.Reply(m, &ping{}, nil)
+		replied <- m.Reply(&ping{}, nil)
 		return nil
 	})
 	if err != nil {

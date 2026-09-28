@@ -28,7 +28,7 @@ func TestPartitionWhileANodeStops(t *testing.T) {
 					if err != nil {
 						return err
 					}
-					_ = p.Reply(m, m.Body, nil)
+					_ = m.Reply(m.Body, nil)
 				}
 			})
 			if err != nil {

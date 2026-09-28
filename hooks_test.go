@@ -177,7 +177,7 @@ func TestCallMergesContextMetadata(t *testing.T) {
 			return err
 		}
 		seen <- m.Metadata
-		return p.Reply(m, &testpb.Pong{}, nil)
+		return m.Reply(&testpb.Pong{}, nil)
 	})
 	// A call from a process carries what it inherited and what ctx adds.
 	p, _ := a.Spawn[*testpb.Ping](func(p *grpcproc.Process[*testpb.Ping]) error {

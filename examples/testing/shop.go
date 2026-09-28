@@ -17,11 +17,11 @@ func Stock(left map[string]int64) func(*grpcproc.Process[*shoppb.Reserve]) error
 				return err
 			}
 			if left[m.Body.Sku] < m.Body.Qty {
-				_ = p.Reply(m, nil, fmt.Errorf("only %d %s left", left[m.Body.Sku], m.Body.Sku))
+				_ = m.Reply(nil, fmt.Errorf("only %d %s left", left[m.Body.Sku], m.Body.Sku))
 				continue
 			}
 			left[m.Body.Sku] -= m.Body.Qty
-			_ = p.Reply(m, &shoppb.Reserved{Sku: m.Body.Sku, Left: left[m.Body.Sku]}, nil)
+			_ = m.Reply(&shoppb.Reserved{Sku: m.Body.Sku, Left: left[m.Body.Sku]}, nil)
 		}
 	}
 }
