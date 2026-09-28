@@ -160,3 +160,55 @@ func TestScheduleString(t *testing.T) {
 		t.Errorf("String() = %q", s)
 	}
 }
+
+// A step longer than its field names the first value only, however long:
+// one near the largest int once wrapped around and panicked.
+func TestHugeSteps(t *testing.T) {
+	from := time.Date(2026, 9, 28, 10, 7, 0, 0, time.UTC)
+	for spec, want := range map[string]string{
+		"1/9223372036854775807 * * * *": "Mon 2026-09-28 11:01 UTC; Mon 2026-09-28 12:01 UTC",
+		"0 5/100 * * *":                 "Tue 2026-09-29 05:00 UTC; Wed 2026-09-30 05:00 UTC",
+		"0 0 * * 1/9223372036854775807": "Mon 2026-10-05 00:00 UTC; Mon 2026-10-12 00:00 UTC",
+	} {
+		if got := nexts(t, spec, from, 2); got != want {
+			t.Errorf("%q: %s, want %s", spec, got, want)
+		}
+	}
+}
+
+// A zone whose offset is not whole minutes, like local mean time or a
+// FixedZone, has minutes of its own: Next is on them, not on UTC's.
+func TestNextOffBySeconds(t *testing.T) {
+	loc := time.FixedZone("LMT", 5*3600+41*60+16)
+	from := time.Date(2026, 9, 28, 10, 7, 50, 0, loc)
+	if got, want := nexts(t, "* * * * *", from, 2), "Mon 2026-09-28 10:08 LMT; Mon 2026-09-28 10:09 LMT"; got != want {
+		t.Errorf("every minute: %s, want %s", got, want)
+	}
+	if got, want := nexts(t, "30 11 * * *", from, 1), "Mon 2026-09-28 11:30 LMT"; got != want {
+		t.Errorf("once a day: %s, want %s", got, want)
+	}
+
+	// Kathmandu went from its local mean time, +5:41:16, to +5:30 in 1920:
+	// the offset changed by part of a minute, and every minute Next finds
+	// across it is still one of the wall clock's, each after the last.
+	s, err := cron.Parse("* * * * *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// From an instant, not a wall time: the wall times just before the
+	// change came twice, and time.Date may pick the second.
+	at := time.Date(1919, 12, 31, 18, 10, 0, 0, time.UTC).In(zone(t, "Asia/Kathmandu"))
+	if _, off := at.Zone(); off != 5*3600+41*60+16 {
+		t.Fatalf("starting at offset %d, not in local mean time: %v", off, at)
+	}
+	for range 60 {
+		next := s.Next(at)
+		if next.Second() != 0 || !next.After(at) {
+			t.Fatalf("Next(%v) = %v", at, next)
+		}
+		at = next
+	}
+	if _, off := at.Zone(); off != 5*3600+30*60 {
+		t.Fatalf("an hour on, still at offset %d: %v", off, at)
+	}
+}

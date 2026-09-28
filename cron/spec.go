@@ -196,9 +196,15 @@ func parseItem(item string, lo, hi int, names map[string]int) (uint64, error) {
 			last = first
 		}
 	}
+	// The room left is checked before a step is taken: v += step could wrap
+	// around for a step near the largest int (1/9223372036854775807) and
+	// shift by a negative amount.
 	var mask uint64
-	for v := first; v <= last; v += step {
+	for v := first; ; v += step {
 		mask |= 1 << v
+		if last-v < step {
+			break
+		}
 	}
 	return mask, nil
 }
@@ -229,10 +235,19 @@ const maxYears = 10
 // time only.
 func (s *Schedule) Next(t time.Time) time.Time {
 	loc := t.Location()
-	m := t.Truncate(time.Minute).Add(time.Minute)
+	// The next minute on t's wall clock: Truncate counts minutes from the
+	// zero time, which a zone whose offset is not whole minutes (local mean
+	// time, or a FixedZone of 5:41:16) does not share.
+	m := t.Add(time.Minute - time.Duration(t.Second())*time.Second - time.Duration(t.Nanosecond()))
 	end := m.AddDate(maxYears, 0, 0)
 	for m.Before(end) {
 		w := m.In(loc)
+		if sec := w.Second(); sec != 0 || w.Nanosecond() != 0 {
+			// A change of offset by a part of a minute left m between two
+			// minutes of the wall clock: on to the next one.
+			m = m.Add(time.Minute - time.Duration(sec)*time.Second - time.Duration(w.Nanosecond()))
+			continue
+		}
 		var next time.Time
 		switch {
 		case s.month&(1<<int(w.Month())) == 0:
