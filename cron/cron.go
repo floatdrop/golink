@@ -248,17 +248,10 @@ var (
 	requestID atomic.Uint64
 )
 
-// control calls cron with c, and turns its sentinel errors, which come
-// back as text from another node, into themselves again.
+// control calls cron with c. Its answer, ErrNoJob or ErrJobExists, comes
+// back as a *grpcproc.RemoteError, which is that sentinel to errors.Is.
 func control(ctx context.Context, n *grpcproc.Node, cron grpcproc.Target, c *cronv1.Control) error {
 	_, err := n.CallTo[*emptypb.Empty](ctx, cron, c)
-	if re, ok := errors.AsType[*grpcproc.RemoteError](err); ok {
-		for _, e := range []error{ErrNoJob, ErrJobExists} {
-			if re.Msg == e.Error() {
-				return e
-			}
-		}
-	}
 	return err
 }
 
