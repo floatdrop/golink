@@ -20,6 +20,15 @@ export const TOC_LINK = '.gp-toc a[href^="#"]';
 export const TOC_ACTIVE = 'g-toc-item__section_active';
 
 /**
+ * The button that hides the table of contents, and the class that is on the
+ * root while it is hidden. The root, because the script settles it from the
+ * head before the aside exists, and because what changes is the grid the
+ * aside sits in, not the aside alone.
+ */
+export const TOC_TOGGLE = '#gp-toc-toggle';
+export const TOC_HIDDEN = 'gp-toc-hidden';
+
+/**
  * The GitHub button, and the count the script appends to it. The class is
  * uikit's own text-slot class plus ours, because the element is built at
  * runtime and has to look like the one uikit would have rendered.

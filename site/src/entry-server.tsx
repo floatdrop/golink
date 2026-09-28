@@ -14,7 +14,9 @@ import {
 	STARS_COUNT,
 	THEME_TOGGLE,
 	TOC_ACTIVE,
-	TOC_LINK
+	TOC_HIDDEN,
+	TOC_LINK,
+	TOC_TOGGLE
 } from './selectors.ts';
 
 // Importing the stylesheet here is what puts it in the build: every Gravity UI
@@ -64,12 +66,19 @@ function page(styles: Styles, body: string): string {
 		// margin, and a line at that same height makes it a coin toss whether
 		// the section you just jumped to counts as reached.
 		tocOffset: 88,
+		tocToggle: TOC_TOGGLE,
+		tocHidden: TOC_HIDDEN,
 		githubButton: GITHUB_BUTTON,
 		starsCount: STARS_COUNT,
 		starsClass: STARS_CLASS,
 		starsApi: 'https://api.github.com/repos/floatdrop/grpcproc',
 		copyText: hero.install,
-		labels: { toLight: labels.toLight, toDark: labels.toDark }
+		labels: {
+			toLight: labels.toLight,
+			toDark: labels.toDark,
+			hideToc: labels.hideSteps,
+			showToc: labels.showSteps
+		}
 	})})`;
 
 	const stylesheet =

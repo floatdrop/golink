@@ -13,6 +13,10 @@ export interface InlineConfig {
 	tocActive: string;
 	/** How far below the viewport top a section counts as current. */
 	tocOffset: number;
+	/** Selector for the button that hides and shows the table of contents. */
+	tocToggle: string;
+	/** Class the root wears while the table of contents is hidden. */
+	tocHidden: string;
 	/** Selector for the GitHub button the star count is appended to. */
 	githubButton: string;
 	/** Selector for that count once it exists. */
@@ -28,6 +32,10 @@ export interface InlineConfig {
 		toLight: string;
 		/** Announced while the light theme is on. */
 		toDark: string;
+		/** Announced by the contents button while the contents are shown. */
+		hideToc: string;
+		/** Announced while they are hidden. */
+		showToc: string;
 	};
 }
 
@@ -67,6 +75,31 @@ export function inlineScript(config: InlineConfig) {
 		const button = document.querySelector(config.themeToggle);
 		if (button) {
 			button.setAttribute('aria-label', theme === 'dark' ? config.labels.toLight : config.labels.toDark);
+		}
+	}
+
+	/**
+	 * Hides or shows the table of contents. Hidden is a choice kept across
+	 * visits, like the theme, and settled from the head for the same reason: a
+	 * page that drew its contents and then took them away would jump the prose
+	 * sideways under the reader.
+	 */
+	const TOC_KEY = 'gp-toc';
+
+	function tocShown(): boolean {
+		try {
+			return localStorage.getItem(TOC_KEY) !== 'hidden';
+		} catch {
+			return true;
+		}
+	}
+
+	function showToc(shown: boolean) {
+		root.classList.toggle(config.tocHidden, !shown);
+		const button = document.querySelector(config.tocToggle);
+		if (button) {
+			button.setAttribute('aria-expanded', String(shown));
+			button.setAttribute('aria-label', shown ? config.labels.hideToc : config.labels.showToc);
 		}
 	}
 
@@ -153,13 +186,16 @@ export function inlineScript(config: InlineConfig) {
 	}
 
 	apply(chosen() ?? system());
+	showToc(tocShown());
 
-	// The first call settles the theme before anything paints, which is the
-	// point of running in the head -- but the button it labels is parsed after
-	// it, so the label is set again once there is something to set it on. The
-	// same goes for everything else here: none of it exists yet.
+	// The first calls settle the theme and the contents before anything
+	// paints, which is the point of running in the head -- but the buttons they
+	// label are parsed after them, so the labels are set again once there is
+	// something to set them on. The same goes for everything else here: none of
+	// it exists yet.
 	function ready() {
 		apply(root.classList.contains(DARK) ? 'dark' : 'light');
+		showToc(!root.classList.contains(config.tocHidden));
 
 		stars();
 
@@ -201,6 +237,21 @@ export function inlineScript(config: InlineConfig) {
 				// Storage is denied; the choice holds for this page only.
 			}
 			apply(next);
+			return;
+		}
+
+		if (target.closest(config.tocToggle)) {
+			const show = root.classList.contains(config.tocHidden);
+			try {
+				if (show) {
+					localStorage.removeItem(TOC_KEY);
+				} else {
+					localStorage.setItem(TOC_KEY, 'hidden');
+				}
+			} catch {
+				// Storage is denied; the contents stay as set for this page only.
+			}
+			showToc(show);
 			return;
 		}
 

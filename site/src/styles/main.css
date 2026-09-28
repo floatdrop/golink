@@ -254,6 +254,24 @@ body {
 	line-height: var(--g-text-body-1-line-height);
 }
 
+/* The button that hides the list, and the list's name beside it. */
+.gp-toc__head {
+	display: flex;
+	align-items: center;
+	gap: var(--g-spacing-1);
+	margin-bottom: var(--g-spacing-2);
+	color: var(--g-color-text-secondary);
+}
+
+/* Hidden, the contents are down to that one button, which the root class
+   leaves where it was -- sticky with the aside, so the list is a click away
+   from anywhere on the page. The prose takes the column it gives up; see the
+   two-column block below. */
+.gp-toc-hidden .gp-toc__title,
+.gp-toc-hidden .gp-toc__list {
+	display: none;
+}
+
 /* ---- two columns --------------------------------------------------------- */
 
 /* The one breakpoint on the page. Below it the hero is the words alone and
@@ -287,6 +305,11 @@ body {
 		align-self: start;
 		max-height: calc(100vh - var(--gp-topbar-height) - var(--g-spacing-8));
 		overflow-y: auto;
+	}
+
+	.gp-toc-hidden .gp-layout {
+		grid-template-columns: auto minmax(0, 1fr);
+		gap: var(--g-spacing-5);
 	}
 }
 

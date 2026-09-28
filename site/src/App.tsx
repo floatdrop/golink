@@ -1,5 +1,6 @@
 import Check from '@gravity-ui/icons/Check';
 import Copy from '@gravity-ui/icons/Copy';
+import LayoutSideContentLeft from '@gravity-ui/icons/LayoutSideContentLeft';
 import { Button, Icon, Text, ThemeProvider, Toc } from './uikit.ts';
 
 import type { Code, Highlighted as Source } from './code.ts';
@@ -145,13 +146,34 @@ export function App({ content, code }: AppProps) {
 
 			<div className="gp-page gp-layout">
 				<aside className="gp-toc" aria-label={labels.steps}>
-					<Toc
-						items={steps.map((step) => ({
-							value: step.id,
-							href: `#${step.id}`,
-							content: step.title
-						}))}
-					/>
+					<div className="gp-toc__head">
+						{/* Driven by the inlined script, which keeps its label and
+						    aria-expanded in step with the class it sets on the root.
+						    It leads the row so that hiding the list leaves it where
+						    it was, under the pointer, to bring the list back. */}
+						<Button
+							id="gp-toc-toggle"
+							view="flat-secondary"
+							size="s"
+							aria-label={labels.hideSteps}
+							aria-expanded={true}
+							aria-controls="gp-toc-list"
+						>
+							<Button.Icon>
+								<Icon data={LayoutSideContentLeft} size={16} />
+							</Button.Icon>
+						</Button>
+						<span className="gp-toc__title">{labels.steps}</span>
+					</div>
+					<div id="gp-toc-list" className="gp-toc__list">
+						<Toc
+							items={steps.map((step) => ({
+								value: step.id,
+								href: `#${step.id}`,
+								content: step.title
+							}))}
+						/>
+					</div>
 				</aside>
 
 				<main className="gp-main gp-prose">

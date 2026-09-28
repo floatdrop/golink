@@ -72,6 +72,8 @@ export interface Content {
 
 	labels: {
 		steps: string;
+		hideSteps: string;
+		showSteps: string;
 		copy: string;
 		toLight: string;
 		toDark: string;

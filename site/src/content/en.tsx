@@ -27,6 +27,8 @@ export const content: Content = {
 
 	labels: {
 		steps: 'Steps',
+		hideSteps: 'Hide the steps',
+		showSteps: 'Show the steps',
 		copy: 'Copy the install command',
 		toLight: 'Switch to the light theme',
 		toDark: 'Switch to the dark theme'
