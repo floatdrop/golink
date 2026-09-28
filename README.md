@@ -210,7 +210,8 @@ in the process.
 | `Authorize func(ctx, peer NodeID) error` | Runs for every inbound link, with the peer's transport credentials in `ctx`. |
 | `Hooks`, `Logger` | The observability tap, and the logger (`slog.Default()`). |
 | `DialTimeout`, `DialBackoff` | How long a dial may take (5s). How long, at most, the node waits before dialing a peer again after dials to it failed (5s); meanwhile sends to it fail at once. |
-| `Incarnation`, `CopyLocal` | This start of the node (the time, by default); whether local messages are cloned rather than shared (off). |
+| `Incarnation` | This start of the node: the time, by default. It must grow with each start, since peers refuse an incarnation older than one they have seen; see [Discovery](#discovery). |
+| `CopyLocal` | Whether local messages are cloned rather than shared (off). |
 
 ## Actors and supervisors
 
@@ -406,9 +407,19 @@ It is a plain gRPC service, so `grpcurl` works on it too.
 `Config.Resolver` is all a node needs to reach peers; `grpcproc.StaticResolver`
 is a map. `Config.Registrar` publishes the node on `Start` and withdraws it
 on `Stop`, and `Config.Membership` is the cluster's view of who is alive: a
-peer that leaves, or comes back as a new incarnation, has its links dropped,
+peer that leaves, or comes back as a newer incarnation, has its links dropped,
 so monitors fire and pending calls fail even when its connection never
 closed. [`grpcproc/etcd`](etcd/README.md) implements all three on etcd leases.
+
+A node remembers the newest incarnation it has seen of each peer, over a
+link or from `Membership`, and refuses links from older ones: an instance
+that was replaced and still runs, after a partition heals or when two
+processes are given one name, gets `ErrNoConnection` saying so, and cannot
+cut its replacement's links. A newer incarnation's links replace the older
+one's, whose monitors fire. The fence lifts when `Membership` reports the
+newest gone, or on `Disconnect`. It holds only while incarnations grow: the
+default, the start time, needs hosts whose clocks agree to within the time
+between two starts of a node.
 
 ## Testing a cluster
 

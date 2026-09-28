@@ -55,7 +55,8 @@ type Membership interface {
 }
 
 // MemberEvent is a member joining (Up) or leaving the cluster. A leaving
-// member with Incarnation 0 means whichever incarnation it was.
+// member with Incarnation 0 means whichever incarnation it was; a joining
+// one, an incarnation not known.
 type MemberEvent struct {
 	Member Member
 	Up     bool
@@ -84,17 +85,24 @@ type Config struct {
 	// It is only informational to the core (NodeInfo, Hello); a Registrar
 	// publishes it.
 	Advertise string
-	// Incarnation distinguishes this start of the node from earlier ones.
-	// Zero picks the current Unix time in nanoseconds.
+	// Incarnation distinguishes this start of the node from earlier ones,
+	// and must grow with each start: a peer that has seen an incarnation of
+	// the node refuses links from older ones, so that an instance that was
+	// replaced, and still runs, cannot take the links of its replacement.
+	// The peer refuses them until Membership reports the newer one gone, or
+	// it calls Disconnect: a random or hashed Incarnation would be refused
+	// whenever it came out lower than the last one. Zero picks the current
+	// Unix time in nanoseconds, which grows as long as the clocks of the
+	// hosts the node starts on agree to within the time between two starts.
 	Incarnation uint64
 	// Resolver maps peer names to addresses.
 	Resolver Resolver
 	// Registrar, if set, publishes the node on Start and withdraws it on Stop.
 	Registrar Registrar
 	// Membership, if set, is watched from Start: a peer that leaves the
-	// cluster, or comes back as a new incarnation, has its links dropped,
+	// cluster, or comes back as a newer incarnation, has its links dropped,
 	// which fires Down{noconnection} for monitors across them and fails
-	// pending calls.
+	// pending calls. An older incarnation reported up is ignored.
 	Membership Membership
 	// DialOptions are used for every outbound connection: credentials,
 	// keepalive, interceptors. Keepalive is what turns a silent partition
@@ -126,8 +134,8 @@ type Config struct {
 	// and a dial that succeeds starts over. A link the peer opens lets the
 	// next send dial at once, without starting over, since it shows the peer
 	// is up but not that this node can reach it. Membership reporting the peer
-	// up, or Disconnect, ends the wait. Default 5s; negative dials again at
-	// once.
+	// up (not as an older incarnation than this node has seen), or
+	// Disconnect, ends the wait. Default 5s; negative dials again at once.
 	DialBackoff time.Duration
 }
 
@@ -167,6 +175,7 @@ type Node struct {
 	dialing  map[string]*dialOp
 	backoff  map[string]*redial // peers whose last dial failed
 	dials    map[string]uint64  // per peer, for LinkInfo.Reconnects
+	newest   map[string]uint64  // per peer, the newest incarnation seen (see meet)
 	stopping bool               // Stop began: no new processes
 	stopped  bool               // links closed: no new links
 	// settling counts, per peer, the changes to its links that were decided
@@ -248,6 +257,7 @@ func NewNode(cfg Config) (*Node, error) {
 		dialing:  map[string]*dialOp{},
 		backoff:  map[string]*redial{},
 		dials:    map[string]uint64{},
+		newest:   map[string]uint64{},
 		settling: map[string]int{},
 	}
 	n.settled = sync.NewCond(&n.mu)
@@ -359,37 +369,41 @@ func (n *Node) watchMembers(events <-chan MemberEvent) {
 	}
 }
 
-// memberEvent drops the links to a peer that left, or that came back as
-// another incarnation: either way, whatever crossed those links is gone.
+// memberEvent drops the links to a peer that left, or that came back as a
+// newer incarnation: either way, whatever crossed those links is gone. An
+// older incarnation reported up is ignored, as a link from it is refused.
+// Once the newest incarnation has left, no incarnation is refused.
 func (n *Node) memberEvent(ev MemberEvent) {
-	name, inc := ev.Member.Name, ev.Member.Incarnation
+	peer := NodeID{Name: ev.Member.Name, Incarnation: ev.Member.Incarnation}
 	n.mu.Lock()
-	if ev.Up {
-		n.forget(name) // it is back: dial it at once
-	}
-	var linked uint64
-	if l := n.out[name]; l != nil {
-		linked = l.peer.Incarnation
-	} else if l := n.in[name]; l != nil {
-		linked = l.peer.Incarnation
-	}
 	var cause error
-	switch {
-	case linked == 0: // no link, nothing to settle
-	case !ev.Up && (inc == linked || inc == 0):
-		cause = errors.New("left the cluster")
-	case ev.Up && inc != linked:
-		cause = errors.New("restarted as incarnation " + itoa(inc))
+	switch newest := n.newest[peer.Name]; {
+	case !ev.Up:
+		// The links with a peer are with its newest incarnation.
+		if newest != 0 && (peer.Incarnation == newest || peer.Incarnation == 0) {
+			delete(n.newest, peer.Name)
+			cause = errors.New("left the cluster")
+		}
+	case peer.Incarnation == 0: // up, as whichever incarnation it is
+		n.forget(peer.Name)
+	default:
+		var stale error
+		if cause, stale = n.meet(peer); stale != nil {
+			n.mu.Unlock()
+			n.log.Warn("ignored an old incarnation reported up", "peer", peer, "err", stale)
+			return
+		}
+		n.forget(peer.Name) // it is back: dial it at once
 	}
 	// The links judged are the links dropped: taken in the same critical
 	// section, not one that may have replaced them since.
 	var out *outLink
 	var in *inLink
 	if cause != nil {
-		out, in = n.takeLinks(name)
+		out, in = n.takeLinks(peer.Name)
 	}
 	n.mu.Unlock()
-	if cause != nil {
+	if out != nil || in != nil {
 		n.linksLost(out, in, cause)
 	}
 }
@@ -586,12 +600,15 @@ func (n *Node) Info() NodeInfo {
 }
 
 // Disconnect drops every link with peer, as if the network had, and
-// forgets that dials to it failed (Config.DialBackoff). Monitors across it
-// fire Down{noconnection} and pending calls fail; the next send dials again.
-// It reports whether there was a link to drop.
+// forgets that dials to it failed (Config.DialBackoff) and which
+// incarnation of it this node has seen, so that none is refused (see
+// Config.Incarnation). Monitors across it fire Down{noconnection} and
+// pending calls fail; the next send dials again. It reports whether there
+// was a link to drop.
 func (n *Node) Disconnect(peer string) bool {
 	n.mu.Lock()
 	n.forget(peer)
+	delete(n.newest, peer)
 	out, in := n.takeLinks(peer)
 	n.mu.Unlock()
 	if out == nil && in == nil {

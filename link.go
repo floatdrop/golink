@@ -344,7 +344,15 @@ func (n *Node) finishDial(peer string, d *dialOp) {
 		why = err.Error() // outside n.mu: the Resolver's or an interceptor's error
 	}
 	var discard *outLink
+	refused := false
 	n.mu.Lock()
+	if err == nil {
+		// Judged while the dial still holds the peer's senders back: links
+		// with an older incarnation go before this one comes in.
+		if err = n.admit(l.peer); err != nil {
+			discard, l, why, refused = l, nil, err.Error(), true
+		}
+	}
 	delete(n.dialing, peer)
 	answers, cut := d.answers, d.cut
 	d.answers, d.cut = nil, nil
@@ -363,6 +371,8 @@ func (n *Node) finishDial(peer string, d *dialOp) {
 				l.q.push(env)
 			}
 			answers = nil
+			l.reconnects = n.dials[peer]
+			n.dials[peer]++
 			n.out[peer] = l
 		}
 	}
@@ -377,7 +387,10 @@ func (n *Node) finishDial(peer string, d *dialOp) {
 		in.abort(errors.Unwrap(err))
 	}
 	if discard != nil {
-		discard.close(ErrNodeStopped) // outside n.mu, as every close
+		discard.close(err) // outside n.mu, as every close
+	}
+	if refused {
+		n.log.Warn("dialed an old incarnation", "peer", discard.peer, "err", why)
 	}
 	if err == nil {
 		l.start()
@@ -454,10 +467,6 @@ func (n *Node) dial(peer string) (*outLink, error) {
 		q:           newQueue[*grpcprocv1.Envelope](false),
 		done:        make(chan struct{}),
 	}
-	n.mu.Lock()
-	l.reconnects = n.dials[peer]
-	n.dials[peer]++
-	n.mu.Unlock()
 	return l, nil
 }
 
@@ -584,6 +593,13 @@ func (n *Node) serveLink(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcp
 			return status.Errorf(codes.PermissionDenied, "grpcproc: %v", err)
 		}
 	}
+	// Refused before the Hello, so that the peer's dial fails, and backs off.
+	n.mu.RLock()
+	err := n.stale(peer)
+	n.mu.RUnlock()
+	if err != nil {
+		return n.refuse(peer, err)
+	}
 	if err := stream.Send(&grpcprocv1.Frame{Envelopes: []*grpcprocv1.Envelope{{Kind: grpcprocv1.Kind_KIND_HELLO, Hello: &grpcprocv1.Hello{
 		Node: n.id.Name, Incarnation: n.id.Incarnation, Version: protoVersion,
 	}}}}); err != nil {
@@ -593,9 +609,10 @@ func (n *Node) serveLink(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcp
 	l := &inLink{peer: peer, done: make(chan struct{}), established: time.Now()}
 	// A new stream from a peer we already have one from means the peer lost
 	// its session with us (it restarted, or its side broke): the old one ends
-	// first. The new link goes in only once no change to the peer's links is
-	// under way, so the old session's Downs are queued, and its link events
-	// published, before anything from the new one.
+	// first, as do links with an older incarnation. The new link goes in only
+	// once no change to the peer's links is under way, so the old session's
+	// Downs are queued, and its link events published, before anything from
+	// the new one.
 	n.mu.Lock()
 	for {
 		if n.stopped {
@@ -606,13 +623,14 @@ func (n *Node) serveLink(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcp
 			n.settled.Wait()
 			continue
 		}
-		if n.in[peer.Name] == nil {
+		dropped, err := n.supersede(peer, true)
+		if err != nil { // a newer incarnation came up since the Hello
+			n.mu.Unlock()
+			return n.refuse(peer, err)
+		}
+		if !dropped {
 			break
 		}
-		oldOut, oldIn := n.takeLinks(peer.Name)
-		n.mu.Unlock()
-		n.linksLost(oldOut, oldIn, errors.New("replaced by a new link"))
-		n.mu.Lock()
 	}
 	n.in[peer.Name] = l
 	n.settling[peer.Name]++ // until it is announced
@@ -646,7 +664,6 @@ func (n *Node) serveLink(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcp
 			}
 		}
 	}()
-	var err error
 	select {
 	case err = <-errs:
 	case <-l.done:
@@ -661,6 +678,79 @@ func (n *Node) serveLink(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcp
 	}
 	n.inLost(l, err)
 	return nil
+}
+
+// refuse turns away a link from an old incarnation of a node.
+func (n *Node) refuse(peer NodeID, err error) error {
+	n.log.Warn("refused a link from an old incarnation", "peer", peer, "err", err)
+	return status.Error(codes.FailedPrecondition, err.Error())
+}
+
+// stale refuses peer, an incarnation of a node this node is to link with,
+// if it has seen a newer one of that node: an instance that was replaced and
+// still runs, a partition healed after failover or two processes given one
+// name, would otherwise take the links of the instance that replaced it, and
+// the two would knock each other off them for as long as both ran. The
+// newest is forgotten when Membership reports it gone, or on Disconnect.
+// Called with n.mu held, shared or not.
+func (n *Node) stale(peer NodeID) error {
+	if newest := n.newest[peer.Name]; peer.Incarnation < newest {
+		return fmt.Errorf("grpcproc: %v is an old incarnation: %s has seen %v", peer, n.id.Name, NodeID{Name: peer.Name, Incarnation: newest})
+	}
+	return nil
+}
+
+// meet judges peer, an incarnation of a node that links with this one or
+// that Membership reports up: it refuses a stale one, and records a newer
+// one than it has seen, whose links with an older one must then go, for the
+// reason why. Called with n.mu held.
+func (n *Node) meet(peer NodeID) (why, stale error) {
+	if err := n.stale(peer); err != nil {
+		return nil, err
+	}
+	if peer.Incarnation > n.newest[peer.Name] {
+		n.newest[peer.Name] = peer.Incarnation
+		return errors.New("restarted as incarnation " + itoa(peer.Incarnation)), nil
+	}
+	return nil, nil
+}
+
+// supersede makes way for a link with peer: it refuses a stale incarnation,
+// and drops the links with an older one, and, if replace is set, an inbound
+// link from the same one, which lost its session. It reports whether it
+// dropped any; it lets go of n.mu while it does, so the caller then judges
+// afresh. Called with n.mu held.
+func (n *Node) supersede(peer NodeID, replace bool) (dropped bool, err error) {
+	why, err := n.meet(peer)
+	if err != nil {
+		return false, err
+	}
+	if why == nil && replace && n.in[peer.Name] != nil {
+		why = errors.New("replaced by a new link")
+	}
+	var out *outLink
+	var in *inLink
+	if why != nil {
+		out, in = n.takeLinks(peer.Name)
+	}
+	if out == nil && in == nil {
+		return false, nil
+	}
+	n.mu.Unlock()
+	n.linksLost(out, in, why)
+	n.mu.Lock()
+	return true, nil
+}
+
+// admit judges the incarnation a dial reached, before its link goes in: the
+// links with an older one go first. Called with n.mu held, which it lets go
+// of while it drops links.
+func (n *Node) admit(peer NodeID) error {
+	for {
+		if dropped, err := n.supersede(peer, false); !dropped {
+			return err
+		}
+	}
 }
 
 // outLost handles the outbound link l breaking.

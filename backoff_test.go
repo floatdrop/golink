@@ -110,7 +110,32 @@ func TestDialBackoffEndsWhenMembershipSaysUp(t *testing.T) {
 	if err := send(); !backedOff(err) {
 		t.Fatalf("got %v", err)
 	}
-	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: 7}, Up: true}
+	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: c.Node("b").ID().Incarnation}, Up: true}
+	eventually(t, "a send to b", func() bool { return send() == nil })
+}
+
+// So does Membership reporting it up with no incarnation, after a has seen
+// one.
+func TestDialBackoffEndsWhenMembershipSaysUpAsWhicheverIncarnation(t *testing.T) {
+	m := &fakeMembership{events: make(chan grpcproc.MemberEvent)}
+	c := grpcproctest.NewWith(t, withBackoff(time.Hour, func(name string, cfg *grpcproc.Config) {
+		if name == "a" {
+			cfg.Membership = m
+		}
+	}), "a", "b")
+	a := c.Node("a")
+	send := func() error { return a.SendTo(t.Context(), grpcproc.Named[*testpb.Ping]("b", "x"), &testpb.Ping{}) }
+	c.Partition("a", "b")
+	_ = send()
+	// a hears of b's incarnation, which ends the wait; the next dial fails.
+	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: c.Node("b").ID().Incarnation}, Up: true}
+	flush(m)
+	_ = send()
+	c.Heal("a", "b")
+	if err := send(); !backedOff(err) {
+		t.Fatalf("got %v", err)
+	}
+	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b"}, Up: true}
 	eventually(t, "a send to b", func() bool { return send() == nil })
 }
 

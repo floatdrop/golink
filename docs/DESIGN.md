@@ -82,11 +82,29 @@ type Name struct { Node, Name string }
 type Ref  struct { Node string; ID uint64 }   // monitor reference
 ```
 
-`Incarnation` is a per-start nonce (`Config.Incarnation`, by default the
-start time in nanoseconds). A PID from before a node restart is a different process: it gets
+`Incarnation` is a per-start number that grows with each start
+(`Config.Incarnation`, by default the start time in nanoseconds). A PID from before a node restart is a different process: it gets
 `Down{noproc}`, never a message delivered to a stranger. Erlang has creation
 numbers for the same reason; Proto.Actor and GoAkt do not, and both have issues
 about stale references after restarts.
+
+Incarnations also fence links. Two processes can claim one node name at
+once: an instance that was replaced but still runs, after a partition
+heals, or two deploys given one name. If a link from either replaced the
+other's, each would take its peers down for the other, and the two would
+knock each other off their links for as long as both ran. So a node
+remembers, per peer name, the newest incarnation it has seen, over a link in
+either direction or from `Membership`, and refuses one older than that: an
+inbound link before its `Hello`, so the old instance's dial fails and backs
+off, and a dial that reaches one, through an address that still points at
+it. A newer incarnation's links replace the older one's, which go first,
+with "restarted as incarnation N". The node forgets the newest when
+`Membership` reports it gone, when an older incarnation is the only one
+left, or on `Disconnect`, and then lets an older one in. The rule needs
+incarnations that grow with each start; the default, the start time, does
+as long as clocks agree to within the time between two starts, and a random
+one would be refused whenever it came out lower than the last. It fences grpcproc traffic only: an old instance
+can still write to a database, which needs fencing of its own.
 
 Names are per node. A cluster-wide registry is a later, etcd-backed feature;
 Erlang's `global` is the model and it is deliberately separate from local
@@ -154,12 +172,12 @@ message Envelope {                                   // one flat message, decode
   `DialTimeout` per send. The wait starts at a 32nd of `Config.DialBackoff`
   and doubles to it, with jitter. Then one send dials again while the others
   keep failing, so a hung peer holds one sender at a time: a half-open
-  breaker. `Membership` reporting the peer up ends the wait. A link the peer
-  opens lets the next send dial at once but keeps the doubling: it shows the
-  peer is up, not that this node can reach it, and in a one-way partition
-  every reply would otherwise wait out a dial again. `LinkInfo` shows the peer
-  as a down outbound link with its `RetryAt`. Retries are not part of it,
-  since delivery stays at-most-once.
+  breaker. `Membership` reporting the peer up (not as an older incarnation)
+  ends the wait. A link the peer opens lets the next send dial at once but
+  keeps the doubling: it shows the peer is up, not that this node can reach
+  it, and in a one-way partition every reply would otherwise wait out a dial
+  again. `LinkInfo` shows the peer as a down outbound link with its
+  `RetryAt`. Retries are not part of it, since delivery stays at-most-once.
 - **A reply or a `Down` that cannot be routed cuts the peer's link.** The peer
   waits for those over its own link to this node, which stays up when this
   node cannot reach it back, so it would never learn that one was lost: a
@@ -331,7 +349,8 @@ incarnation a node has links to, or an `up` for a newer incarnation, drops
 those links: monitors across them fire `Down{noconnection}` and pending calls
 fail with the cause ("left the cluster", "restarted as incarnation N"). It
 catches a crashed peer behind a half-open connection even when keepalive is
-not configured.
+not configured. An `up` for an older incarnation than a node has seen is
+ignored, as a link from it would be refused.
 
 ### grpcproctest
 

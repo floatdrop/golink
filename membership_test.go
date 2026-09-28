@@ -3,6 +3,7 @@ package grpcproc_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -96,11 +97,13 @@ func TestMembershipDropsLinks(t *testing.T) {
 	inc := b.ID().Incarnation
 
 	// Events that settle nothing: about this node, about a node a has no
-	// link to, about another incarnation of b going away.
+	// link to, about another incarnation of b going away, about the one a
+	// links with, or an older one, being up.
 	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "a", Incarnation: a.ID().Incarnation}}
 	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "zzz", Incarnation: 9}}
 	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: inc + 100}}
 	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: inc}, Up: true}
+	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: inc - 1}, Up: true}
 	time.Sleep(20 * time.Millisecond)
 	if len(a.Peers()) != 1 {
 		t.Fatalf("links dropped: %v", a.Peers())
@@ -124,6 +127,10 @@ func TestMembershipDropsLinks(t *testing.T) {
 	}
 	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: inc + 1}, Up: true}
 	waitNoPeer(t, a, "b")
+	// The b a linked with is now an old incarnation.
+	if _, err := a.Call[*testpb.Pong](ctx(t), mustEcho(t, b), &testpb.Ping{N: 1}); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("b#%d is an old incarnation", inc)) {
+		t.Fatalf("a calls the old b: %v", err)
+	}
 
 	// A peer a only hears from (an inbound link, no outbound) leaves too.
 	cn := c.Node("c")
