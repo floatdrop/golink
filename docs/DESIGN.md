@@ -44,7 +44,7 @@ addr, _ := node.Spawn[*orderspb.OrderMsg](func(p *grpcproc.Process[*orderspb.Ord
         m, err := p.Receive()
         if err != nil { return err }              // Exit, node stop, …
         if m.Down != nil { /* a monitored process is gone */ continue }
-        switch k := m.Body.Kind.(type) {
+        switch m.Body.Kind.(type) {
         case *orderspb.OrderMsg_Reserve: m.Reply(&orderspb.Reserved{}, nil)
         }
     }
@@ -199,13 +199,13 @@ message Envelope {                                   // one flat message, decode
   process, wrong type) to a peer this node has no link to yet are queued on
   the dial, and written first, in order, once it is up.
 - **Node identity travels in the stream's metadata** (`name`, `incarnation`,
-  protocol version). An `Authorize(peer credentials.AuthInfo, claimed NodeInfo) error`
-  hook lets mTLS deployments refuse a node whose certificate does not match the
-  name it claims.
+  protocol version). `Config.Authorize(ctx, peer NodeID) error`, with the
+  peer's transport credentials in ctx (`grpc/peer`), lets mTLS deployments
+  refuse a node whose certificate does not match the name it claims.
 - **Bodies are `proto.Message`, sent as their type's full name and their
   encoding.** Generated types register themselves, so there is no
   `Register()` step. Local sends pass the pointer
-  without copying (fast; "do not mutate after send"); `WithCopyLocal()` clones
+  without copying (fast; "do not mutate after send"); `Config.CopyLocal` clones
   for teams that want strict isolation.
 - **Calls ride the same link**, matched by a call id, never as separate unary
   RPCs, so they cannot overtake or be overtaken by messages from the same sender.
@@ -503,7 +503,7 @@ frameworks reduces to:
 |---|---|---|---|
 | Metrics | Observer charts | `WithMetrics()` OTel gauges | `grpcproc/otel` on `Hooks` + `Processes()` snapshots, one series per **label** by default (GoAkt's per-actor default is a cardinality trap it later added a switch for) |
 | Dead letters | log | dead-letter actor + event | `OnDeadLetter` + counter in `NodeInfo` |
-| System events | `gen.CoreEvent` | event stream | `OnSpawn/OnExit/OnLinkUp/OnLinkDown`; `Node.Events()` channel is a thin subscriber over the same hooks |
+| System events | `gen.CoreEvent` | event stream | `OnSpawn/OnExit/OnLinkUp/OnLinkDown`; `Node.Subscribe(ctx, buffer)` is a channel of the same events |
 | Tracing | Sent / Delivered / Processed observations, trace id in the message | eBPF sidecar | `Envelope.metadata` carries W3C trace context. `grpcproc/otel` opens a producer (send) or client (call) span in `OnSend` and a consumer/server span covering the handling in `OnReceive`; a process's sends inherit the handling span, so chains form without threading a context. Sampling stays the tracer's job |
 | Logging | loggers as processes, per-process level | — | `p.Log()` is `slog` with pid/name/label; per-process level via a `slog.Handler` wrapper the node owns, settable at runtime |
 
