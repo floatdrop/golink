@@ -41,6 +41,7 @@ jobs:
         include:
           - { module: ., target: FuzzDispatch }
           - { module: ., target: FuzzServeLink }
+          - { module: ., target: FuzzScenario }
           - { module: cron, target: FuzzParse }
     runs-on: ubuntu-latest
     timeout-minutes: 30

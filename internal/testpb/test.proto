@@ -33,3 +33,27 @@ message Cancel {
 message Reserved {
   string id = 1;
 }
+
+// Command tells a process of FuzzScenario what to do next. The process does
+// it on its own goroutine, so that everything it sends is sent by it, in
+// order with the rest of what it does, its exit included.
+message Command {
+  enum Op {
+    OP_UNSPECIFIED = 0;
+    // Send Ping{n} to the target.
+    OP_SEND = 1;
+    // Call the target with Ping{n}, which answers Pong{n+1}.
+    OP_CALL = 2;
+    // Monitor the target.
+    OP_MONITOR = 3;
+    // Link to the target.
+    OP_LINK = 4;
+    // End, with reason.
+    OP_EXIT = 5;
+  }
+  Op op = 1;
+  // The target: a process of the scenario, by its index.
+  int64 target = 2;
+  int64 n = 3;
+  string reason = 4;
+}

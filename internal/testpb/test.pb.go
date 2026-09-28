@@ -23,6 +23,69 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type Command_Op int32
+
+const (
+	Command_OP_UNSPECIFIED Command_Op = 0
+	// Send Ping{n} to the target.
+	Command_OP_SEND Command_Op = 1
+	// Call the target with Ping{n}, which answers Pong{n+1}.
+	Command_OP_CALL Command_Op = 2
+	// Monitor the target.
+	Command_OP_MONITOR Command_Op = 3
+	// Link to the target.
+	Command_OP_LINK Command_Op = 4
+	// End, with reason.
+	Command_OP_EXIT Command_Op = 5
+)
+
+// Enum value maps for Command_Op.
+var (
+	Command_Op_name = map[int32]string{
+		0: "OP_UNSPECIFIED",
+		1: "OP_SEND",
+		2: "OP_CALL",
+		3: "OP_MONITOR",
+		4: "OP_LINK",
+		5: "OP_EXIT",
+	}
+	Command_Op_value = map[string]int32{
+		"OP_UNSPECIFIED": 0,
+		"OP_SEND":        1,
+		"OP_CALL":        2,
+		"OP_MONITOR":     3,
+		"OP_LINK":        4,
+		"OP_EXIT":        5,
+	}
+)
+
+func (x Command_Op) Enum() *Command_Op {
+	p := new(Command_Op)
+	*p = x
+	return p
+}
+
+func (x Command_Op) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Command_Op) Descriptor() protoreflect.EnumDescriptor {
+	return file_testpb_test_proto_enumTypes[0].Descriptor()
+}
+
+func (Command_Op) Type() protoreflect.EnumType {
+	return &file_testpb_test_proto_enumTypes[0]
+}
+
+func (x Command_Op) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Command_Op.Descriptor instead.
+func (Command_Op) EnumDescriptor() ([]byte, []int) {
+	return file_testpb_test_proto_rawDescGZIP(), []int{6, 0}
+}
+
 type Ping struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	N             int64                  `protobuf:"varint,1,opt,name=n,proto3" json:"n,omitempty"`
@@ -327,6 +390,78 @@ func (x *Reserved) GetId() string {
 	return ""
 }
 
+// Command tells a process of FuzzScenario what to do next. The process does
+// it on its own goroutine, so that everything it sends is sent by it, in
+// order with the rest of what it does, its exit included.
+type Command struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Op    Command_Op             `protobuf:"varint,1,opt,name=op,proto3,enum=grpcproc.test.v1.Command_Op" json:"op,omitempty"`
+	// The target: a process of the scenario, by its index.
+	Target        int64  `protobuf:"varint,2,opt,name=target,proto3" json:"target,omitempty"`
+	N             int64  `protobuf:"varint,3,opt,name=n,proto3" json:"n,omitempty"`
+	Reason        string `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Command) Reset() {
+	*x = Command{}
+	mi := &file_testpb_test_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Command) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Command) ProtoMessage() {}
+
+func (x *Command) ProtoReflect() protoreflect.Message {
+	mi := &file_testpb_test_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Command.ProtoReflect.Descriptor instead.
+func (*Command) Descriptor() ([]byte, []int) {
+	return file_testpb_test_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *Command) GetOp() Command_Op {
+	if x != nil {
+		return x.Op
+	}
+	return Command_OP_UNSPECIFIED
+}
+
+func (x *Command) GetTarget() int64 {
+	if x != nil {
+		return x.Target
+	}
+	return 0
+}
+
+func (x *Command) GetN() int64 {
+	if x != nil {
+		return x.N
+	}
+	return 0
+}
+
+func (x *Command) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 var File_testpb_test_proto protoreflect.FileDescriptor
 
 const file_testpb_test_proto_rawDesc = "" +
@@ -345,7 +480,20 @@ const file_testpb_test_proto_rawDesc = "" +
 	"\x06Cancel\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x1a\n" +
 	"\bReserved\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02idB6Z4github.com/floatdrop/grpcproc/internal/testpb;testpbb\x06proto3"
+	"\x02id\x18\x01 \x01(\tR\x02id\"\xd3\x01\n" +
+	"\aCommand\x12,\n" +
+	"\x02op\x18\x01 \x01(\x0e2\x1c.grpcproc.test.v1.Command.OpR\x02op\x12\x16\n" +
+	"\x06target\x18\x02 \x01(\x03R\x06target\x12\f\n" +
+	"\x01n\x18\x03 \x01(\x03R\x01n\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\"\\\n" +
+	"\x02Op\x12\x12\n" +
+	"\x0eOP_UNSPECIFIED\x10\x00\x12\v\n" +
+	"\aOP_SEND\x10\x01\x12\v\n" +
+	"\aOP_CALL\x10\x02\x12\x0e\n" +
+	"\n" +
+	"OP_MONITOR\x10\x03\x12\v\n" +
+	"\aOP_LINK\x10\x04\x12\v\n" +
+	"\aOP_EXIT\x10\x05B6Z4github.com/floatdrop/grpcproc/internal/testpb;testpbb\x06proto3"
 
 var (
 	file_testpb_test_proto_rawDescOnce sync.Once
@@ -359,23 +507,27 @@ func file_testpb_test_proto_rawDescGZIP() []byte {
 	return file_testpb_test_proto_rawDescData
 }
 
-var file_testpb_test_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_testpb_test_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_testpb_test_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_testpb_test_proto_goTypes = []any{
-	(*Ping)(nil),     // 0: grpcproc.test.v1.Ping
-	(*Pong)(nil),     // 1: grpcproc.test.v1.Pong
-	(*Order)(nil),    // 2: grpcproc.test.v1.Order
-	(*Reserve)(nil),  // 3: grpcproc.test.v1.Reserve
-	(*Cancel)(nil),   // 4: grpcproc.test.v1.Cancel
-	(*Reserved)(nil), // 5: grpcproc.test.v1.Reserved
+	(Command_Op)(0),  // 0: grpcproc.test.v1.Command.Op
+	(*Ping)(nil),     // 1: grpcproc.test.v1.Ping
+	(*Pong)(nil),     // 2: grpcproc.test.v1.Pong
+	(*Order)(nil),    // 3: grpcproc.test.v1.Order
+	(*Reserve)(nil),  // 4: grpcproc.test.v1.Reserve
+	(*Cancel)(nil),   // 5: grpcproc.test.v1.Cancel
+	(*Reserved)(nil), // 6: grpcproc.test.v1.Reserved
+	(*Command)(nil),  // 7: grpcproc.test.v1.Command
 }
 var file_testpb_test_proto_depIdxs = []int32{
-	3, // 0: grpcproc.test.v1.Order.reserve:type_name -> grpcproc.test.v1.Reserve
-	4, // 1: grpcproc.test.v1.Order.cancel:type_name -> grpcproc.test.v1.Cancel
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	4, // 0: grpcproc.test.v1.Order.reserve:type_name -> grpcproc.test.v1.Reserve
+	5, // 1: grpcproc.test.v1.Order.cancel:type_name -> grpcproc.test.v1.Cancel
+	0, // 2: grpcproc.test.v1.Command.op:type_name -> grpcproc.test.v1.Command.Op
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_testpb_test_proto_init() }
@@ -392,13 +544,14 @@ func file_testpb_test_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_testpb_test_proto_rawDesc), len(file_testpb_test_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   6,
+			NumEnums:      1,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_testpb_test_proto_goTypes,
 		DependencyIndexes: file_testpb_test_proto_depIdxs,
+		EnumInfos:         file_testpb_test_proto_enumTypes,
 		MessageInfos:      file_testpb_test_proto_msgTypes,
 	}.Build()
 	File_testpb_test_proto = out.File
