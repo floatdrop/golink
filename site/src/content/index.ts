@@ -10,6 +10,7 @@ import { conceptsNodes } from './concepts-nodes.tsx';
 import { conceptsProcesses } from './concepts-processes.tsx';
 import { conceptsSupervision } from './concepts-supervision.tsx';
 import { guidesActors } from './guides-actors.tsx';
+import { guidesBlockingIO } from './guides-blocking-io.tsx';
 import { guidesConfiguration } from './guides-configuration.tsx';
 import { guidesEtcd } from './guides-etcd.tsx';
 import { guidesInspector } from './guides-inspector.tsx';
@@ -39,6 +40,7 @@ const all: Doc[] = [
 	conceptsDiscovery,
 	guidesActors,
 	guidesSupervisors,
+	guidesBlockingIO,
 	guidesConfiguration,
 	guidesTesting,
 	guidesObservability,

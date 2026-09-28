@@ -1,0 +1,6 @@
+< welcome to edge
+> hello
+< HELLO
+> blocking reads
+< BLOCKING READS
+connection open: false

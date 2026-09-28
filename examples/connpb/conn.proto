@@ -1,0 +1,20 @@
+// Messages of the blocking I/O example: what a connection's process takes.
+syntax = "proto3";
+
+package conn.v1;
+
+option go_package = "github.com/floatdrop/grpcproc/examples/connpb;connpb";
+
+// Event is everything a connection's process accepts. A mailbox holds one
+// message type, so a line read from the connection is a message too, though
+// it never leaves the node.
+message Event {
+  oneof kind {
+    // A line the connection's reader read.
+    string received = 1;
+    // A line to write to the connection.
+    string write = 2;
+    // Why the reader stopped: the peer is gone.
+    string closed = 3;
+  }
+}

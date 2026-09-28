@@ -28,6 +28,7 @@ export const groups: NavGroup[] = [
 		paths: [
 			'guides/actors/',
 			'guides/supervisors/',
+			'guides/blocking-io/',
 			'guides/configuration/',
 			'guides/testing/',
 			'guides/observability/',
