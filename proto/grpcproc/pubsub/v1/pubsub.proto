@@ -1,0 +1,40 @@
+// grpcproc.pubsub.v1 is what grpcproc/pubsub's topics are called with, and
+// what they tell the process that asked to be notified.
+syntax = "proto3";
+
+package grpcproc.pubsub.v1;
+
+import "google/protobuf/duration.proto";
+import "grpcproc/v1/grpcproc.proto";
+
+option go_package = "github.com/floatdrop/grpcproc/proto/grpcproc/pubsub/v1;pubsubv1";
+
+// Subscribe, as a call, adds the caller to a topic. The topic sends it the
+// events it keeps first, then answers with Subscribed; every event published
+// after that follows, in order.
+message Subscribe {
+  // The time left to the caller, for a relay that has to subscribe to its
+  // topic first: it gives up when the caller does. Unset: no limit.
+  google.protobuf.Duration timeout = 1;
+}
+
+// Subscribed answers Subscribe.
+message Subscribed {
+  // The process the events come from: the topic, or the relay on the
+  // subscriber's node that stands in for a topic of another node.
+  grpcproc.v1.PID from = 1;
+  // How many of the last events the topic keeps, for a relay to keep as many.
+  uint32 buffer = 2;
+  // The full name of the message type the topic publishes, or empty when
+  // its events are of an interface type, for the subscriber to check.
+  string type = 3;
+}
+
+// Unsubscribe, sent, removes the sender from a topic.
+message Unsubscribe {}
+
+// Demand tells the process a topic notifies whether anyone subscribes: it
+// is sent when the first subscriber comes and when the last one leaves.
+message Demand {
+  bool subscribed = 1;
+}

@@ -13,4 +13,4 @@ bench:
 	go test -run '^$$' -bench . -benchmem ./...
 
 cover:
-	for pkg in . ./inspect ./actor; do go test -count=1 -coverprofile=coverage.out -coverpkg=$$pkg $$pkg && go tool cover -func=coverage.out | tail -1; done
+	for pkg in . ./inspect ./actor ./pubsub; do go test -count=1 -coverprofile=coverage.out -coverpkg=$$pkg $$pkg && go tool cover -func=coverage.out | tail -1; done
