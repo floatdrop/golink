@@ -192,8 +192,12 @@ var (
 	// over, and to Resign on a node that does not lead.
 	ErrNotLeader = errors.New("leader: not the leader")
 	// ErrNoSuccessor is Resign's answer on a leader with no follower to
-	// hand over to: it stepped down, and campaigns again after a backoff.
+	// hand over to (Transfer's, when its follower did not catch up): it
+	// stepped down, and campaigns again after a backoff.
 	ErrNoSuccessor = errors.New("leader: no follower to hand over to")
+	// ErrNoLeader is the answer of Transfer, Cordon and Uncordon while the
+	// node asked knows of no leader.
+	ErrNoLeader = errors.New("leader: no leader is known")
 )
 
 // Info is what a node's elector believes.
@@ -208,6 +212,8 @@ type Info struct {
 	Quorum int
 	// Singleton is the singleton, on the leader, once it runs.
 	Singleton grpcproc.PID
+	// Cordoned is the nodes that may not lead, sorted.
+	Cordoned []string
 }
 
 // Status asks n's elector for cluster what it believes.
@@ -225,6 +231,7 @@ func Status(ctx context.Context, n *grpcproc.Node, cluster string) (Info, error)
 		View:      st.GetView(),
 		Quorum:    int(st.GetQuorum()),
 		Singleton: grpcproc.PID{Node: s.GetNode(), Incarnation: s.GetIncarnation(), ID: s.GetId()},
+		Cordoned:  st.GetCordoned(),
 	}, nil
 }
 
@@ -236,6 +243,43 @@ func Status(ctx context.Context, n *grpcproc.Node, cluster string) (Info, error)
 // start from the singleton's last state.
 func Resign(ctx context.Context, n *grpcproc.Node, cluster string) error {
 	_, err := n.CallTo[*emptypb.Empty](ctx, electorOf(n, cluster), &leaderv1.Resign{})
+	return sentinel(err)
+}
+
+// Transfer moves the leadership of cluster to the node to: the leader, which
+// n's elector names, hands over to it as Resign does, once to holds its
+// state. to must be in the leader's view, and not cordoned.
+func Transfer(ctx context.Context, n *grpcproc.Node, cluster, to string) error {
+	return viaLeader(ctx, n, cluster, &leaderv1.Resign{To: to})
+}
+
+// Cordon keeps node from leading cluster, until Uncordon: it campaigns no
+// more, voters refuse it, and if it leads, it hands over. The leader, which
+// n's elector names, records it in the state it replicates, and Cordon
+// returns once a majority holds it: node stays cordoned across its own
+// restarts, and across leaders. It is for taking a host out of the running,
+// to work on it. A cordon that would leave no node of the view to lead is
+// refused.
+func Cordon(ctx context.Context, n *grpcproc.Node, cluster, node string) error {
+	return viaLeader(ctx, n, cluster, &leaderv1.Cordon{Node: node})
+}
+
+// Uncordon lets node lead cluster again.
+func Uncordon(ctx context.Context, n *grpcproc.Node, cluster, node string) error {
+	return viaLeader(ctx, n, cluster, &leaderv1.Cordon{Node: node, Off: true})
+}
+
+// viaLeader calls the elector of the leader that n's elector knows, with
+// m. A leader that changed meanwhile answers ErrNotLeader: ask again.
+func viaLeader(ctx context.Context, n *grpcproc.Node, cluster string, m proto.Message) error {
+	info, err := Status(ctx, n, cluster)
+	if err != nil {
+		return err
+	}
+	if info.Leader == "" {
+		return ErrNoLeader
+	}
+	_, err = n.CallTo[*emptypb.Empty](ctx, grpcproc.Name{Node: info.Leader, Name: ElectorName(cluster)}, m)
 	return sentinel(err)
 }
 

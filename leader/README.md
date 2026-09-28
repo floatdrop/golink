@@ -113,6 +113,38 @@ once loses them, and a restarted node, which may have voted before, votes only
 once it has had time to hear from a leader. Keep the state to what the next
 leader needs to carry on: the jobs a scheduler ran last, not a database.
 
+## Moving the leader, and taking a node out
+
+```go
+leader.Transfer(ctx, node, "scheduler", "b") // b leads next; "" for the most up-to-date follower
+leader.Cordon(ctx, node, "scheduler", "c")   // c may not lead: for work on its host
+leader.Uncordon(ctx, node, "scheduler", "c")
+```
+
+All three go to whichever node leads, found through `node`'s elector, from
+any node that takes part. `Transfer` hands over as `Resign` does, to the node
+named: the leader stops its singleton, waits for that follower to hold its
+state, and has it campaign. It is refused for a node that leads already, is
+not in the view, or is cordoned, and ends with `ErrNoSuccessor` if the
+follower cannot be reached.
+
+`Cordon` keeps a node from leading until `Uncordon`: it campaigns no more,
+voters refuse it, and if it leads, it hands over. The cordoned nodes are part
+of the state the leader replicates, and `Cordon` returns once a majority holds
+it, so a cordon outlasts the cordoned node's restarts and the leader's too:
+cordon a node, stop it, work on the host, start it again, and it stays a
+follower until you uncordon it. A cordon that would leave no node of the view
+to lead is refused. A cordoned node still votes, so a cluster keeps its
+quorum while one is out.
+
+A node that restarts holds no state, and voters refuse a candidate whose state
+is older than theirs. So a voter that refuses one sends its own state with the
+refusal, and the candidate campaigns again with it: a restarted node catches
+up even when no leader is left to send it anything, as when every other node
+is cordoned.
+
+`Status` and the elector's inspect map list the cordoned nodes.
+
 ## Two leaders
 
 Two nodes can briefly both believe they lead: a leader cut off from the others
@@ -124,9 +156,10 @@ highest term it has seen can refuse a deposed leader's writes.
 
 The elector publishes through its inspect map what `grpcprocctl inspect`
 shows: `role`, `term`, `leader`, `voted_for`, `view`, `quorum`,
-`unreachable`, `state` (the version it holds), `checkpoints_waiting`,
-`singleton` and `backoff`. Its relays, starter and membership watch are its
-children, labelled `leader relay`, `leader starter` and `leader membership`.
+`unreachable`, `state` (the version it holds), `cordoned`,
+`checkpoints_waiting`, `singleton` and `backoff`. Its relays, starter and
+membership watch are its children, labelled `leader relay`, `leader starter`
+and `leader membership`.
 
 ## A job that runs once in a cluster
 

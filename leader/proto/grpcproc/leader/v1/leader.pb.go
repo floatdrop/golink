@@ -290,7 +290,10 @@ type State struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Version *Version               `protobuf:"bytes,1,opt,name=version,proto3" json:"version,omitempty"`
 	// Unset until a leader has checkpointed.
-	Value         *anypb.Any `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	Value *anypb.Any `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	// The nodes that may not lead, sorted: they do not campaign, voters
+	// refuse them, and a leader among them hands over.
+	Cordoned      []string `protobuf:"bytes,3,rep,name=cordoned,proto3" json:"cordoned,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -335,6 +338,13 @@ func (x *State) GetVersion() *Version {
 func (x *State) GetValue() *anypb.Any {
 	if x != nil {
 		return x.Value
+	}
+	return nil
+}
+
+func (x *State) GetCordoned() []string {
+	if x != nil {
+		return x.Cordoned
 	}
 	return nil
 }
@@ -409,9 +419,14 @@ func (x *RequestVote) GetPre() bool {
 
 // Vote answers a RequestVote of the same term, and pre-vote.
 type Vote struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Granted       bool                   `protobuf:"varint,1,opt,name=granted,proto3" json:"granted,omitempty"`
-	Pre           bool                   `protobuf:"varint,2,opt,name=pre,proto3" json:"pre,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Granted bool                   `protobuf:"varint,1,opt,name=granted,proto3" json:"granted,omitempty"`
+	Pre     bool                   `protobuf:"varint,2,opt,name=pre,proto3" json:"pre,omitempty"`
+	// Set when the vote is refused for the candidate's older state: the
+	// voter's, for the candidate to take and campaign again with. A node
+	// that restarted, and holds nothing, catches up this way even while no
+	// leader sends it the state.
+	State         *State `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -458,6 +473,13 @@ func (x *Vote) GetPre() bool {
 		return x.Pre
 	}
 	return false
+}
+
+func (x *Vote) GetState() *State {
+	if x != nil {
+		return x.State
+	}
+	return nil
 }
 
 // Heartbeat asserts the sender's leadership for the term.
@@ -693,7 +715,9 @@ type Status struct {
 	Quorum  uint32   `protobuf:"varint,5,opt,name=quorum,proto3" json:"quorum,omitempty"`
 	Version *Version `protobuf:"bytes,6,opt,name=version,proto3" json:"version,omitempty"`
 	// The singleton, on the leader, once it runs.
-	Singleton     *v1.PID `protobuf:"bytes,7,opt,name=singleton,proto3" json:"singleton,omitempty"`
+	Singleton *v1.PID `protobuf:"bytes,7,opt,name=singleton,proto3" json:"singleton,omitempty"`
+	// The nodes that may not lead.
+	Cordoned      []string `protobuf:"bytes,8,rep,name=cordoned,proto3" json:"cordoned,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -777,10 +801,19 @@ func (x *Status) GetSingleton() *v1.PID {
 	return nil
 }
 
+func (x *Status) GetCordoned() []string {
+	if x != nil {
+		return x.Cordoned
+	}
+	return nil
+}
+
 // Resign asks a leader to hand over to a follower, and answers, with
 // google.protobuf.Empty, once it has.
 type Resign struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The follower to hand over to; empty for the one with the latest state.
+	To            string `protobuf:"bytes,1,opt,name=to,proto3" json:"to,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -815,6 +848,68 @@ func (*Resign) Descriptor() ([]byte, []int) {
 	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{12}
 }
 
+func (x *Resign) GetTo() string {
+	if x != nil {
+		return x.To
+	}
+	return ""
+}
+
+// Cordon asks a leader to keep a node from leading, or, with off, to let
+// it lead again: a call, answered with google.protobuf.Empty once a
+// majority of the cluster holds the change.
+type Cordon struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Node          string                 `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
+	Off           bool                   `protobuf:"varint,2,opt,name=off,proto3" json:"off,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Cordon) Reset() {
+	*x = Cordon{}
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Cordon) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Cordon) ProtoMessage() {}
+
+func (x *Cordon) ProtoReflect() protoreflect.Message {
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Cordon.ProtoReflect.Descriptor instead.
+func (*Cordon) Descriptor() ([]byte, []int) {
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *Cordon) GetNode() string {
+	if x != nil {
+		return x.Node
+	}
+	return ""
+}
+
+func (x *Cordon) GetOff() bool {
+	if x != nil {
+		return x.Off
+	}
+	return false
+}
+
 // PeerDown is a relay telling its elector that the peer's elector it
 // monitors is gone, with the Down's reason.
 type PeerDown struct {
@@ -827,7 +922,7 @@ type PeerDown struct {
 
 func (x *PeerDown) Reset() {
 	*x = PeerDown{}
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[13]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -839,7 +934,7 @@ func (x *PeerDown) String() string {
 func (*PeerDown) ProtoMessage() {}
 
 func (x *PeerDown) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[13]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -852,7 +947,7 @@ func (x *PeerDown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerDown.ProtoReflect.Descriptor instead.
 func (*PeerDown) Descriptor() ([]byte, []int) {
-	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{13}
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *PeerDown) GetNode() string {
@@ -878,7 +973,7 @@ type Watch struct {
 
 func (x *Watch) Reset() {
 	*x = Watch{}
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[14]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -890,7 +985,7 @@ func (x *Watch) String() string {
 func (*Watch) ProtoMessage() {}
 
 func (x *Watch) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[14]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -903,7 +998,7 @@ func (x *Watch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Watch.ProtoReflect.Descriptor instead.
 func (*Watch) Descriptor() ([]byte, []int) {
-	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{14}
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{15}
 }
 
 // MemberEvent is the membership bridge telling its elector of a node
@@ -918,7 +1013,7 @@ type MemberEvent struct {
 
 func (x *MemberEvent) Reset() {
 	*x = MemberEvent{}
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[15]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -930,7 +1025,7 @@ func (x *MemberEvent) String() string {
 func (*MemberEvent) ProtoMessage() {}
 
 func (x *MemberEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[15]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -943,7 +1038,7 @@ func (x *MemberEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemberEvent.ProtoReflect.Descriptor instead.
 func (*MemberEvent) Descriptor() ([]byte, []int) {
-	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{15}
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *MemberEvent) GetNode() string {
@@ -973,7 +1068,7 @@ type Started struct {
 
 func (x *Started) Reset() {
 	*x = Started{}
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[16]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -985,7 +1080,7 @@ func (x *Started) String() string {
 func (*Started) ProtoMessage() {}
 
 func (x *Started) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[16]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -998,7 +1093,7 @@ func (x *Started) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Started.ProtoReflect.Descriptor instead.
 func (*Started) Descriptor() ([]byte, []int) {
-	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{16}
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *Started) GetTerm() uint64 {
@@ -1041,17 +1136,19 @@ const file_grpcproc_leader_v1_leader_proto_rawDesc = "" +
 	"\x05reply\x18\x01 \x01(\bR\x05reply\"/\n" +
 	"\aVersion\x12\x12\n" +
 	"\x04term\x18\x01 \x01(\x04R\x04term\x12\x10\n" +
-	"\x03seq\x18\x02 \x01(\x04R\x03seq\"j\n" +
+	"\x03seq\x18\x02 \x01(\x04R\x03seq\"\x86\x01\n" +
 	"\x05State\x125\n" +
 	"\aversion\x18\x01 \x01(\v2\x1b.grpcproc.leader.v1.VersionR\aversion\x12*\n" +
-	"\x05value\x18\x02 \x01(\v2\x14.google.protobuf.AnyR\x05value\"r\n" +
+	"\x05value\x18\x02 \x01(\v2\x14.google.protobuf.AnyR\x05value\x12\x1a\n" +
+	"\bcordoned\x18\x03 \x03(\tR\bcordoned\"r\n" +
 	"\vRequestVote\x125\n" +
 	"\aversion\x18\x01 \x01(\v2\x1b.grpcproc.leader.v1.VersionR\aversion\x12\x1a\n" +
 	"\btransfer\x18\x02 \x01(\bR\btransfer\x12\x10\n" +
-	"\x03pre\x18\x03 \x01(\bR\x03pre\"2\n" +
+	"\x03pre\x18\x03 \x01(\bR\x03pre\"c\n" +
 	"\x04Vote\x12\x18\n" +
 	"\agranted\x18\x01 \x01(\bR\agranted\x12\x10\n" +
-	"\x03pre\x18\x02 \x01(\bR\x03pre\"<\n" +
+	"\x03pre\x18\x02 \x01(\bR\x03pre\x12/\n" +
+	"\x05state\x18\x03 \x01(\v2\x19.grpcproc.leader.v1.StateR\x05state\"<\n" +
 	"\tHeartbeat\x12/\n" +
 	"\x05state\x18\x01 \x01(\v2\x19.grpcproc.leader.v1.StateR\x05state\"<\n" +
 	"\x03Ack\x125\n" +
@@ -1062,7 +1159,7 @@ const file_grpcproc_leader_v1_leader_proto_rawDesc = "" +
 	"Checkpoint\x12\x12\n" +
 	"\x04term\x18\x01 \x01(\x04R\x04term\x12*\n" +
 	"\x05state\x18\x02 \x01(\v2\x14.google.protobuf.AnyR\x05state\"\x0f\n" +
-	"\rStatusRequest\"\xdb\x01\n" +
+	"\rStatusRequest\"\xf7\x01\n" +
 	"\x06Status\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x12\n" +
 	"\x04term\x18\x02 \x01(\x04R\x04term\x12\x16\n" +
@@ -1070,8 +1167,13 @@ const file_grpcproc_leader_v1_leader_proto_rawDesc = "" +
 	"\x04view\x18\x04 \x03(\tR\x04view\x12\x16\n" +
 	"\x06quorum\x18\x05 \x01(\rR\x06quorum\x125\n" +
 	"\aversion\x18\x06 \x01(\v2\x1b.grpcproc.leader.v1.VersionR\aversion\x12.\n" +
-	"\tsingleton\x18\a \x01(\v2\x10.grpcproc.v1.PIDR\tsingleton\"\b\n" +
-	"\x06Resign\"6\n" +
+	"\tsingleton\x18\a \x01(\v2\x10.grpcproc.v1.PIDR\tsingleton\x12\x1a\n" +
+	"\bcordoned\x18\b \x03(\tR\bcordoned\"\x18\n" +
+	"\x06Resign\x12\x0e\n" +
+	"\x02to\x18\x01 \x01(\tR\x02to\".\n" +
+	"\x06Cordon\x12\x12\n" +
+	"\x04node\x18\x01 \x01(\tR\x04node\x12\x10\n" +
+	"\x03off\x18\x02 \x01(\bR\x03off\"6\n" +
 	"\bPeerDown\x12\x12\n" +
 	"\x04node\x18\x01 \x01(\tR\x04node\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\"\a\n" +
@@ -1096,7 +1198,7 @@ func file_grpcproc_leader_v1_leader_proto_rawDescGZIP() []byte {
 	return file_grpcproc_leader_v1_leader_proto_rawDescData
 }
 
-var file_grpcproc_leader_v1_leader_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_grpcproc_leader_v1_leader_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_grpcproc_leader_v1_leader_proto_goTypes = []any{
 	(*Peer)(nil),          // 0: grpcproc.leader.v1.Peer
 	(*Hello)(nil),         // 1: grpcproc.leader.v1.Hello
@@ -1111,12 +1213,13 @@ var file_grpcproc_leader_v1_leader_proto_goTypes = []any{
 	(*StatusRequest)(nil), // 10: grpcproc.leader.v1.StatusRequest
 	(*Status)(nil),        // 11: grpcproc.leader.v1.Status
 	(*Resign)(nil),        // 12: grpcproc.leader.v1.Resign
-	(*PeerDown)(nil),      // 13: grpcproc.leader.v1.PeerDown
-	(*Watch)(nil),         // 14: grpcproc.leader.v1.Watch
-	(*MemberEvent)(nil),   // 15: grpcproc.leader.v1.MemberEvent
-	(*Started)(nil),       // 16: grpcproc.leader.v1.Started
-	(*anypb.Any)(nil),     // 17: google.protobuf.Any
-	(*v1.PID)(nil),        // 18: grpcproc.v1.PID
+	(*Cordon)(nil),        // 13: grpcproc.leader.v1.Cordon
+	(*PeerDown)(nil),      // 14: grpcproc.leader.v1.PeerDown
+	(*Watch)(nil),         // 15: grpcproc.leader.v1.Watch
+	(*MemberEvent)(nil),   // 16: grpcproc.leader.v1.MemberEvent
+	(*Started)(nil),       // 17: grpcproc.leader.v1.Started
+	(*anypb.Any)(nil),     // 18: google.protobuf.Any
+	(*v1.PID)(nil),        // 19: grpcproc.v1.PID
 }
 var file_grpcproc_leader_v1_leader_proto_depIdxs = []int32{
 	4,  // 0: grpcproc.leader.v1.Peer.request_vote:type_name -> grpcproc.leader.v1.RequestVote
@@ -1126,19 +1229,20 @@ var file_grpcproc_leader_v1_leader_proto_depIdxs = []int32{
 	8,  // 4: grpcproc.leader.v1.Peer.timeout_now:type_name -> grpcproc.leader.v1.TimeoutNow
 	1,  // 5: grpcproc.leader.v1.Peer.hello:type_name -> grpcproc.leader.v1.Hello
 	2,  // 6: grpcproc.leader.v1.State.version:type_name -> grpcproc.leader.v1.Version
-	17, // 7: grpcproc.leader.v1.State.value:type_name -> google.protobuf.Any
+	18, // 7: grpcproc.leader.v1.State.value:type_name -> google.protobuf.Any
 	2,  // 8: grpcproc.leader.v1.RequestVote.version:type_name -> grpcproc.leader.v1.Version
-	3,  // 9: grpcproc.leader.v1.Heartbeat.state:type_name -> grpcproc.leader.v1.State
-	2,  // 10: grpcproc.leader.v1.Ack.version:type_name -> grpcproc.leader.v1.Version
-	17, // 11: grpcproc.leader.v1.Checkpoint.state:type_name -> google.protobuf.Any
-	2,  // 12: grpcproc.leader.v1.Status.version:type_name -> grpcproc.leader.v1.Version
-	18, // 13: grpcproc.leader.v1.Status.singleton:type_name -> grpcproc.v1.PID
-	18, // 14: grpcproc.leader.v1.Started.pid:type_name -> grpcproc.v1.PID
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	3,  // 9: grpcproc.leader.v1.Vote.state:type_name -> grpcproc.leader.v1.State
+	3,  // 10: grpcproc.leader.v1.Heartbeat.state:type_name -> grpcproc.leader.v1.State
+	2,  // 11: grpcproc.leader.v1.Ack.version:type_name -> grpcproc.leader.v1.Version
+	18, // 12: grpcproc.leader.v1.Checkpoint.state:type_name -> google.protobuf.Any
+	2,  // 13: grpcproc.leader.v1.Status.version:type_name -> grpcproc.leader.v1.Version
+	19, // 14: grpcproc.leader.v1.Status.singleton:type_name -> grpcproc.v1.PID
+	19, // 15: grpcproc.leader.v1.Started.pid:type_name -> grpcproc.v1.PID
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_grpcproc_leader_v1_leader_proto_init() }
@@ -1160,7 +1264,7 @@ func file_grpcproc_leader_v1_leader_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_grpcproc_leader_v1_leader_proto_rawDesc), len(file_grpcproc_leader_v1_leader_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   17,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
