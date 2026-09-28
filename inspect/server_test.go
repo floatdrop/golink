@@ -315,12 +315,95 @@ func TestWrites(t *testing.T) {
 	code(t, err, codes.InvalidArgument)
 }
 
+// answering is a process that answers a Ping by its N: a Pong, an error,
+// an answer that cannot be encoded, or no answer at all.
+func answering(p *grpcproc.Process[*testpb.Ping]) error {
+	for {
+		m, err := p.Receive()
+		if err != nil {
+			return err
+		}
+		switch m.Body.GetN() {
+		case 1:
+			_ = m.Reply(&testpb.Pong{N: 1}, nil)
+		case 2:
+			_ = m.Reply(nil, errors.New("refused"))
+		case 4:
+			_ = m.Reply(&testpb.Reserved{Id: "\xff"}, nil)
+		}
+	}
+}
+
+func TestCall(t *testing.T) {
+	c := cluster(t, nil, "a", "b")
+	a := client(c, "a")
+	for _, n := range []string{"a", "b"} {
+		if _, err := c.Node(n).Spawn(answering, grpcproc.WithName("answers")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call := func(ctx context.Context, node string, target *inspectv1.Target, body proto.Message) (*inspectv1.CallResponse, error) {
+		t.Helper()
+		var b *anypb.Any
+		if body != nil {
+			b, _ = anypb.New(body)
+		}
+		return a.Call(ctx, &inspectv1.CallRequest{Node: node, Target: target, Body: b})
+	}
+
+	// Answered here, and on another node through its Inspector.
+	for _, node := range []string{"a", "b"} {
+		resp, err := call(t.Context(), node, byName("answers"), &testpb.Ping{N: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pong := &testpb.Pong{}
+		if err := resp.GetBody().UnmarshalTo(pong); err != nil || pong.GetN() != 1 {
+			t.Fatalf("%s: %v, %v", node, pong, err)
+		}
+	}
+
+	// An answer that is an error keeps its text, as Unknown.
+	_, err := call(t.Context(), "a", byName("answers"), &testpb.Ping{N: 2})
+	code(t, err, codes.Unknown)
+	if msg := status.Convert(err).Message(); msg != "refused" {
+		t.Errorf("message %q", msg)
+	}
+	_, err = call(t.Context(), "b", byName("answers"), &testpb.Ping{N: 2})
+	if msg := status.Convert(err).Message(); msg != "inspect: node b: refused" {
+		t.Errorf("forwarded, message %q", msg)
+	}
+
+	_, err = call(t.Context(), "a", byName("answers"), &testpb.Ping{N: 4})
+	code(t, err, codes.Internal)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	_, err = call(ctx, "a", byName("answers"), &testpb.Ping{N: 5})
+	code(t, err, codes.DeadlineExceeded)
+
+	_, err = call(t.Context(), "a", byName("nobody"), &testpb.Ping{N: 1})
+	code(t, err, codes.NotFound)
+	_, err = call(t.Context(), "a", byName("answers"), &testpb.Pong{N: 1})
+	code(t, err, codes.InvalidArgument)
+	_, err = call(t.Context(), "a", byName("answers"), nil)
+	code(t, err, codes.InvalidArgument)
+	_, err = a.Call(t.Context(), &inspectv1.CallRequest{Target: byName("answers"), Body: &anypb.Any{TypeUrl: "type.googleapis.com/no.Such"}})
+	code(t, err, codes.InvalidArgument)
+	_, err = call(t.Context(), "a", nil, &testpb.Ping{N: 1})
+	code(t, err, codes.InvalidArgument)
+	_, err = call(t.Context(), "a", byPID(grpcproc.PID{Node: "nowhere"}), &testpb.Ping{N: 1})
+	code(t, err, codes.Unavailable)
+}
+
 func TestReadOnly(t *testing.T) {
 	c := cluster(t, []inspect.Option{inspect.ReadOnly()}, "a")
 	a := client(c, "a")
 	_, err := a.SetLogLevel(t.Context(), &inspectv1.SetLogLevelRequest{Target: byName("x")})
 	code(t, err, codes.PermissionDenied)
 	_, err = a.Send(t.Context(), &inspectv1.SendRequest{Target: byName("x")})
+	code(t, err, codes.PermissionDenied)
+	_, err = a.Call(t.Context(), &inspectv1.CallRequest{Target: byName("x")})
 	code(t, err, codes.PermissionDenied)
 	_, err = a.Exit(t.Context(), &inspectv1.ExitRequest{Target: byName("x")})
 	code(t, err, codes.PermissionDenied)
@@ -354,6 +437,7 @@ func TestRoutingErrors(t *testing.T) {
 		func() error { _, err := a.GetProcess(ctx, &inspectv1.GetProcessRequest{Node: "b"}); return err }(),
 		func() error { _, err := a.SetLogLevel(ctx, &inspectv1.SetLogLevelRequest{Node: "b"}); return err }(),
 		func() error { _, err := a.Send(ctx, &inspectv1.SendRequest{Node: "b"}); return err }(),
+		func() error { _, err := a.Call(ctx, &inspectv1.CallRequest{Node: "b"}); return err }(),
 		func() error { _, err := a.Exit(ctx, &inspectv1.ExitRequest{Node: "b"}); return err }(),
 		func() error {
 			s, err := a.Watch(ctx, &inspectv1.WatchRequest{Node: "b"})

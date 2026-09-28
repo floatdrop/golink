@@ -556,6 +556,7 @@ service Inspector {
   rpc GetProcess(GetProcessRequest) returns (GetProcessResponse);          // ProcessInfo + WithInspect map
   rpc SetLogLevel(SetLogLevelRequest) returns (SetLogLevelResponse);
   rpc Send(SendRequest) returns (SendResponse);                            // Any body, from a tool
+  rpc Call(CallRequest) returns (CallResponse);                            // Node.CallTo from a tool; an error answer is Unknown
   rpc Exit(ExitRequest) returns (ExitResponse);
   rpc Watch(WatchRequest) returns (stream WatchResponse);                  // Node.Subscribe over the wire
 }

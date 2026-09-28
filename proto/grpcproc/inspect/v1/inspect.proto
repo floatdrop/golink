@@ -27,6 +27,10 @@ service Inspector {
   rpc GetProcess(GetProcessRequest) returns (GetProcessResponse);
   rpc SetLogLevel(SetLogLevelRequest) returns (SetLogLevelResponse);
   rpc Send(SendRequest) returns (SendResponse);
+  // Call calls a process and returns its answer, as Node.CallTo does from
+  // the node: the request's deadline is the call's. An answer that is an
+  // error is Unknown, with the error's text.
+  rpc Call(CallRequest) returns (CallResponse);
   rpc Exit(ExitRequest) returns (ExitResponse);
   // Watch streams events until the client cancels.
   rpc Watch(WatchRequest) returns (stream WatchResponse);
@@ -177,6 +181,16 @@ message SendRequest {
 }
 
 message SendResponse {}
+
+message CallRequest {
+  string node = 1;
+  Target target = 2;
+  google.protobuf.Any body = 3;
+}
+
+message CallResponse {
+  google.protobuf.Any body = 1;
+}
 
 message ExitRequest {
   string node = 1;

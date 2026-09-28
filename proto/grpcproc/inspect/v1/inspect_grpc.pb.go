@@ -29,6 +29,7 @@ const (
 	Inspector_GetProcess_FullMethodName    = "/grpcproc.inspect.v1.Inspector/GetProcess"
 	Inspector_SetLogLevel_FullMethodName   = "/grpcproc.inspect.v1.Inspector/SetLogLevel"
 	Inspector_Send_FullMethodName          = "/grpcproc.inspect.v1.Inspector/Send"
+	Inspector_Call_FullMethodName          = "/grpcproc.inspect.v1.Inspector/Call"
 	Inspector_Exit_FullMethodName          = "/grpcproc.inspect.v1.Inspector/Exit"
 	Inspector_Watch_FullMethodName         = "/grpcproc.inspect.v1.Inspector/Watch"
 )
@@ -51,6 +52,10 @@ type InspectorClient interface {
 	GetProcess(ctx context.Context, in *GetProcessRequest, opts ...grpc.CallOption) (*GetProcessResponse, error)
 	SetLogLevel(ctx context.Context, in *SetLogLevelRequest, opts ...grpc.CallOption) (*SetLogLevelResponse, error)
 	Send(ctx context.Context, in *SendRequest, opts ...grpc.CallOption) (*SendResponse, error)
+	// Call calls a process and returns its answer, as Node.CallTo does from
+	// the node: the request's deadline is the call's. An answer that is an
+	// error is Unknown, with the error's text.
+	Call(ctx context.Context, in *CallRequest, opts ...grpc.CallOption) (*CallResponse, error)
 	Exit(ctx context.Context, in *ExitRequest, opts ...grpc.CallOption) (*ExitResponse, error)
 	// Watch streams events until the client cancels.
 	Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchResponse], error)
@@ -114,6 +119,16 @@ func (c *inspectorClient) Send(ctx context.Context, in *SendRequest, opts ...grp
 	return out, nil
 }
 
+func (c *inspectorClient) Call(ctx context.Context, in *CallRequest, opts ...grpc.CallOption) (*CallResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CallResponse)
+	err := c.cc.Invoke(ctx, Inspector_Call_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *inspectorClient) Exit(ctx context.Context, in *ExitRequest, opts ...grpc.CallOption) (*ExitResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ExitResponse)
@@ -161,6 +176,10 @@ type InspectorServer interface {
 	GetProcess(context.Context, *GetProcessRequest) (*GetProcessResponse, error)
 	SetLogLevel(context.Context, *SetLogLevelRequest) (*SetLogLevelResponse, error)
 	Send(context.Context, *SendRequest) (*SendResponse, error)
+	// Call calls a process and returns its answer, as Node.CallTo does from
+	// the node: the request's deadline is the call's. An answer that is an
+	// error is Unknown, with the error's text.
+	Call(context.Context, *CallRequest) (*CallResponse, error)
 	Exit(context.Context, *ExitRequest) (*ExitResponse, error)
 	// Watch streams events until the client cancels.
 	Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error
@@ -188,6 +207,9 @@ func (UnimplementedInspectorServer) SetLogLevel(context.Context, *SetLogLevelReq
 }
 func (UnimplementedInspectorServer) Send(context.Context, *SendRequest) (*SendResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Send not implemented")
+}
+func (UnimplementedInspectorServer) Call(context.Context, *CallRequest) (*CallResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Call not implemented")
 }
 func (UnimplementedInspectorServer) Exit(context.Context, *ExitRequest) (*ExitResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Exit not implemented")
@@ -306,6 +328,24 @@ func _Inspector_Send_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Inspector_Call_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CallRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InspectorServer).Call(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Inspector_Call_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InspectorServer).Call(ctx, req.(*CallRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Inspector_Exit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ExitRequest)
 	if err := dec(in); err != nil {
@@ -361,6 +401,10 @@ var Inspector_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Send",
 			Handler:    _Inspector_Send_Handler,
+		},
+		{
+			MethodName: "Call",
+			Handler:    _Inspector_Call_Handler,
 		},
 		{
 			MethodName: "Exit",
