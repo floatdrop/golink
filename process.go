@@ -138,6 +138,16 @@ func parentPID(p *proc) PID {
 }
 
 // Process is a goroutine with a mailbox of M and a cluster-wide PID.
+//
+// Receive and ReceiveTimeout belong to the process's own goroutine. Other
+// goroutines may send and call as the process, ask another process to exit,
+// and use its PID, Addr, Node, Context and Log; a message's Reply works from
+// anywhere. A send from another goroutine inherits the metadata of whatever
+// message the process is handling at that moment, and a Call made there
+// shows the process as waiting on a reply, so a goroutine that feeds a
+// process, one blocked on a read say, sends to it as the node instead:
+//
+//	_ = p.Node().Send(ctx, p.Addr(), m)
 type Process[M proto.Message] struct{ *proc }
 
 // Msg is what Receive returns: a message (Body), a Down or an Exited, one
