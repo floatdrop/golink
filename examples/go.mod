@@ -12,7 +12,7 @@ replace (
 )
 
 require (
-	github.com/floatdrop/grpcproc v0.0.6-0.20260928122334-e8395f778226
+	github.com/floatdrop/grpcproc v0.1.0
 	github.com/floatdrop/grpcproc/cron v0.0.0
 	github.com/floatdrop/grpcproc/leader v0.0.0
 	golang.yandex/di v0.18.0
