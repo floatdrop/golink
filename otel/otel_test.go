@@ -20,6 +20,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/actor"
 	"github.com/floatdrop/grpcproc/grpcproctest"
 	"github.com/floatdrop/grpcproc/internal/testpb"
 	grpcprocotel "github.com/floatdrop/grpcproc/otel"
@@ -60,9 +61,9 @@ func echo(p *grpcproc.Process[*testpb.Ping]) error {
 		case n == -200:
 			panic("kaboom")
 		case n < 0:
-			_ = p.Reply(m, nil, errors.New("negative"))
+			_ = m.Reply(nil, errors.New("negative"))
 		case m.IsCall():
-			_ = p.Reply(m, &testpb.Pong{N: n + 1}, nil)
+			_ = m.Reply(&testpb.Pong{N: n + 1}, nil)
 		}
 	}
 }
@@ -348,6 +349,7 @@ func TestClassification(t *testing.T) {
 	reasons := map[string]string{
 		grpcproc.ReasonNormal: "normal", grpcproc.ReasonKilled: "killed", grpcproc.ReasonShutdown: "shutdown",
 		grpcproc.ReasonNoProc: "noproc", grpcproc.ReasonNoConnection: "noconnection", grpcproc.ReasonType: "type",
+		actor.ReasonMaxRestarts: "max restarts", "timeout": "timeout", "replaced": "replaced", "demoted": "demoted",
 		"panic: x": "panic", "db timeout for user 42": "error",
 	}
 	for in, want := range reasons {

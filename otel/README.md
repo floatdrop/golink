@@ -58,7 +58,7 @@ message type) is the unit, and every other attribute is bounded.
 | `grpcproc.process.duration` | histogram, s | `grpcproc.label` — time from taking a message to the next `Receive` |
 | `grpcproc.call.duration` | histogram, s | `grpcproc.label`, `grpcproc.remote`, `error.type` on failure |
 | `grpcproc.processes.spawned` | counter | `grpcproc.label` |
-| `grpcproc.processes.exited` | counter | `grpcproc.label`, `grpcproc.reason` (`normal`, `shutdown`, `killed`, `noproc`, `noconnection`, `type`, `panic`, `error`) |
+| `grpcproc.processes.exited` | counter | `grpcproc.label`, `grpcproc.reason` (`normal`, `shutdown`, `killed`, `noproc`, `noconnection`, `type`; `max restarts` from actor, `timeout` and `replaced` from cron, `demoted` from leader; `panic`, `error`) |
 | `grpcproc.dead_letters` | counter | `grpcproc.reason`, `grpcproc.message.type` |
 | `grpcproc.links.up`, `grpcproc.links.down` | counter | `grpcproc.peer` |
 | `grpcproc.processes` | gauge (Observe) | `grpcproc.label` |

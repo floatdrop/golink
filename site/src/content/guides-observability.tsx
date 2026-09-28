@@ -340,7 +340,9 @@ defer span.End()`}</Code>
 							[<C>grpcproc.processes.spawned</C>, <>counter; <C>grpcproc.label</C></>],
 							[<C>grpcproc.processes.exited</C>, <>
 								counter; <C>grpcproc.label</C>, <C>grpcproc.reason</C>: <C>normal</C>, <C>shutdown</C>,{' '}
-								<C>killed</C>, <C>noproc</C>, <C>noconnection</C>, <C>type</C>, <C>panic</C> or <C>error</C>
+								<C>killed</C>, <C>noproc</C>, <C>noconnection</C>, <C>type</C>; <C>max restarts</C> from
+								actor, <C>timeout</C> and <C>replaced</C> from cron, <C>demoted</C> from leader;{' '}
+								<C>panic</C> or <C>error</C>
 							</>],
 							[<C>grpcproc.dead_letters</C>, <>counter; <C>grpcproc.reason</C>, <C>grpcproc.message.type</C></>],
 							[<>

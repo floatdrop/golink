@@ -28,6 +28,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/floatdrop/grpcproc"
+	"github.com/floatdrop/grpcproc/actor"
 )
 
 // ScopeName is the instrumentation scope of the meter and tracer.
@@ -249,10 +250,15 @@ func (h *Hooks) OnLinkDown(peer grpcproc.NodeID, _ error) {
 }
 
 // ReasonClass maps an exit reason to a bounded set, for metrics: the
-// well-known reasons, "panic", or "error" for anything a process returned.
+// well-known reasons, grpcproc's packages' own included, "panic", or
+// "error" for anything else a process returned. A leader's singleton
+// demoted, or a cron run replaced, is then no error on a dashboard.
 func ReasonClass(reason string) string {
 	switch reason {
-	case grpcproc.ReasonNormal, grpcproc.ReasonShutdown, grpcproc.ReasonKilled, grpcproc.ReasonNoProc, grpcproc.ReasonNoConnection, grpcproc.ReasonType:
+	case grpcproc.ReasonNormal, grpcproc.ReasonShutdown, grpcproc.ReasonKilled, grpcproc.ReasonNoProc, grpcproc.ReasonNoConnection, grpcproc.ReasonType,
+		actor.ReasonMaxRestarts,
+		"timeout", "replaced", // cron.ReasonTimeout, cron.ReasonReplaced: modules otel does not require
+		"demoted": // leader.ReasonDemoted, likewise
 		return reason
 	}
 	if strings.HasPrefix(reason, "panic:") {

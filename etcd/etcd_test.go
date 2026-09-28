@@ -281,7 +281,7 @@ func TestNodesFindAndLoseEachOther(t *testing.T) {
 				return err
 			}
 			if m.IsCall() {
-				_ = p.Reply(m, &testpb.Pong{N: m.Body.GetN() + 1}, nil)
+				_ = m.Reply(&testpb.Pong{N: m.Body.GetN() + 1}, nil)
 			}
 		}
 	}, grpcproc.WithName("echo"))

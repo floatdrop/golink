@@ -38,7 +38,8 @@ func WithLogger(l *slog.Logger) Option { return func(c *Cluster) { c.logger = l 
 
 // WithConfig adjusts each node's Config before the node is created, each
 // time it starts (including after Restart): a Registrar, a Membership, hooks
-// for one node only.
+// for one node only. It runs after WithHooks and WithLogger have set theirs,
+// so what it sets wins, whatever the order of the options.
 func WithConfig(fn func(name string, cfg *grpcproc.Config)) Option {
 	return func(c *Cluster) { c.configure = append(c.configure, fn) }
 }
