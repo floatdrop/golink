@@ -84,7 +84,16 @@ func (j *journal) singleton(l *leader.Lease[counter], state counter) (actor.Chil
 				}
 				return err
 			}
-			if m.Body.GetValue() < 0 {
+			switch v := m.Body.GetValue(); {
+			case v == refuse:
+				_ = m.Reply(nil, errors.New("refused"))
+				continue
+			case v == noproc:
+				_ = m.Reply(nil, grpcproc.ErrNoProc) // an answer, whatever it says
+				continue
+			case v == ignore:
+				continue // never answered
+			case v < 0:
 				j.add("%s stops: told to fail", node)
 				return errors.New("told to fail")
 			}
@@ -96,6 +105,15 @@ func (j *journal) singleton(l *leader.Lease[counter], state counter) (actor.Chil
 		}
 	}), nil
 }
+
+// What the test singleton does with a call, by its value, besides
+// checkpointing it and answering it: refuse, with an error; ignore,
+// answering nothing; and noproc, answering with ErrNoProc's text.
+const (
+	refuse = 1000
+	ignore = 1001
+	noproc = 1002
+)
 
 func spec(j *journal) leader.Spec[counter] {
 	return leader.Spec[counter]{
