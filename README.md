@@ -4,6 +4,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/floatdrop/grpcproc.svg)](https://pkg.go.dev/github.com/floatdrop/grpcproc)
 [![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](https://github.com/floatdrop/grpcproc/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Awesome Go](https://raw.githubusercontent.com/floatdrop/awesome-go/main/badges/floatdrop--grpcproc.svg)](https://floatdrop.github.io/awesome-go/#floatdrop--grpcproc)
 
 Erlang-style processes for Go, on the gRPC server you already run.
 
