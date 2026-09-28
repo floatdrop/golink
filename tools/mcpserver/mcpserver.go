@@ -18,7 +18,8 @@ import (
 
 // Options configures New.
 type Options struct {
-	// AllowWrites also offers exit_process and set_log_level.
+	// AllowWrites also offers exit_process, set_log_level, move_leader,
+	// cordon_node and uncordon_node.
 	AllowWrites bool
 	// Version is reported to the client.
 	Version string
@@ -33,6 +34,7 @@ const instructions = `These tools inspect a grpcproc cluster: Go processes (goro
 - get_process with inspect returns what the process publishes about itself (its state machine's state, counters); inspect_error "busy" means it is inside a handler right now.
 - Supervisors (label supervisor) restart children; their inspect lists each child and its restarts.
 - watch_events shows spawns, exits with reasons, links going up and down, and dead letters (messages that found no process or the wrong type, or that a broken link never delivered).
+- A grpcproc/leader election (a cluster name) has an elector process on each node that takes part, registered as leader/<cluster>; election shows what each believes: its role, term, the leader it follows, the nodes cordoned (kept from leading) and those it cannot reach. Nodes that name different leaders, or a node with an old term, point at a partition.
 - node_info and cluster_nodes list each node's links. queued on an out link is what waits to be written to that peer: a growing queue means the peer or the network cannot keep up. A down out link with retry_in means dials to that peer failed, and sends to it fail at once until then; such a peer shows incarnation 0, and cluster_nodes lists it with an error if it cannot be reached.
 
 Start with cluster_nodes, then list_processes sorted by mailbox to find backlogs, then get_process on the suspects.`
@@ -60,7 +62,11 @@ func New(c *client.Client, o Options) *mcp.Server {
 	mcp.AddTool(s, &mcp.Tool{Name: "list_processes", Description: "Processes of a node, filtered and sorted. Sort by mailbox to find backlogs.", Annotations: readOnly}, t.listProcesses)
 	mcp.AddTool(s, &mcp.Tool{Name: "get_process", Description: "One process by pid or name, with what it says about itself.", Annotations: readOnly}, t.getProcess)
 	mcp.AddTool(s, &mcp.Tool{Name: "watch_events", Description: "Collect a node's events for a few seconds: spawns, exits with reasons, links up and down, dead letters.", Annotations: readOnly}, t.watchEvents)
+	mcp.AddTool(s, &mcp.Tool{Name: "election", Description: "A grpcproc/leader election, as each node that takes part sees it: role, term, leader, view, cordoned nodes, unreachable nodes.", Annotations: readOnly}, t.election)
 	if o.AllowWrites {
+		mcp.AddTool(s, &mcp.Tool{Name: "move_leader", Description: "Have the leader of an election hand over, to a given node or to the follower with the latest state. Its singleton stops, and starts on the new leader.", Annotations: &mcp.ToolAnnotations{DestructiveHint: new(true)}}, t.moveLeader)
+		mcp.AddTool(s, &mcp.Tool{Name: "cordon_node", Description: "Keep a node from leading an election, until uncordon_node: to work on its host. If it leads, it hands over. It still votes.", Annotations: &mcp.ToolAnnotations{DestructiveHint: new(true)}}, t.cordonNode)
+		mcp.AddTool(s, &mcp.Tool{Name: "uncordon_node", Description: "Let a cordoned node lead an election again."}, t.uncordonNode)
 		mcp.AddTool(s, &mcp.Tool{Name: "exit_process", Description: "Ask a process to exit. Its supervisor, if any, may restart it.", Annotations: &mcp.ToolAnnotations{DestructiveHint: new(true)}}, t.exitProcess)
 		mcp.AddTool(s, &mcp.Tool{Name: "set_log_level", Description: "Set one process's log level, to see more from it without restarting anything."}, t.setLogLevel)
 	}
@@ -216,4 +222,60 @@ func (t tools) setLogLevel(ctx context.Context, _ *mcp.CallToolRequest, in level
 		return nil, done{}, err
 	}
 	return nil, done{Result: fmt.Sprintf("log level of %s set to %s", in.Process, l)}, nil
+}
+
+type electionIn struct {
+	Cluster string `json:"cluster" jsonschema:"the election's name, its Spec.Cluster"`
+}
+
+type electionOut struct {
+	Electors []client.ElectorView `json:"electors"`
+	Leader   string               `json:"leader,omitempty" jsonschema:"the node that says it leads, in the highest term; empty while none does"`
+}
+
+func (t tools) election(ctx context.Context, _ *mcp.CallToolRequest, in electionIn) (*mcp.CallToolResult, electionOut, error) {
+	ctx, cancel := t.ctx(ctx)
+	defer cancel()
+	views, err := t.c.Election(ctx, in.Cluster)
+	return nil, electionOut{Electors: views, Leader: client.Leading(views)}, err
+}
+
+type moveIn struct {
+	Cluster string `json:"cluster" jsonschema:"the election's name"`
+	To      string `json:"to,omitempty" jsonschema:"the node to hand over to; empty for the follower with the latest state"`
+}
+
+func (t tools) moveLeader(ctx context.Context, _ *mcp.CallToolRequest, in moveIn) (*mcp.CallToolResult, done, error) {
+	ctx, cancel := t.ctx(ctx)
+	defer cancel()
+	was, err := t.c.MoveLeader(ctx, in.Cluster, in.To)
+	if err != nil {
+		return nil, done{}, err
+	}
+	return nil, done{Result: fmt.Sprintf("%s handed over to %s; election shows the new leader once it is elected", was, cmp.Or(in.To, "the follower with the latest state"))}, nil
+}
+
+type cordonIn struct {
+	Cluster string `json:"cluster" jsonschema:"the election's name"`
+	Node    string `json:"node" jsonschema:"the node"`
+}
+
+func (t tools) cordonNode(ctx context.Context, _ *mcp.CallToolRequest, in cordonIn) (*mcp.CallToolResult, done, error) {
+	return t.cordon(ctx, in, false)
+}
+
+func (t tools) uncordonNode(ctx context.Context, _ *mcp.CallToolRequest, in cordonIn) (*mcp.CallToolResult, done, error) {
+	return t.cordon(ctx, in, true)
+}
+
+func (t tools) cordon(ctx context.Context, in cordonIn, off bool) (*mcp.CallToolResult, done, error) {
+	ctx, cancel := t.ctx(ctx)
+	defer cancel()
+	if _, err := t.c.Cordon(ctx, in.Cluster, in.Node, off); err != nil {
+		return nil, done{}, err
+	}
+	if off {
+		return nil, done{Result: in.Node + " may lead " + in.Cluster + " again"}, nil
+	}
+	return nil, done{Result: in.Node + " may not lead " + in.Cluster + "; if it led, it is handing over"}, nil
 }

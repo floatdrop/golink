@@ -76,11 +76,11 @@ func toolNames(t *testing.T, cs *mcp.ClientSession) []string {
 
 func TestToolsOnOffer(t *testing.T) {
 	f := testcluster.Start(t)
-	read := []string{"cluster_nodes", "get_process", "list_processes", "node_info", "watch_events"}
+	read := []string{"cluster_nodes", "election", "get_process", "list_processes", "node_info", "watch_events"}
 	if got := toolNames(t, connect(t, f, mcpserver.Options{})); !slices.Equal(got, read) {
 		t.Fatalf("read-only: %v", got)
 	}
-	all := append(slices.Clone(read), "exit_process", "set_log_level")
+	all := append(slices.Clone(read), "cordon_node", "exit_process", "move_leader", "set_log_level", "uncordon_node")
 	slices.Sort(all)
 	cs := connect(t, f, mcpserver.Options{AllowWrites: true, Version: "v1"})
 	if got := toolNames(t, cs); !slices.Equal(got, all) {
@@ -204,6 +204,46 @@ func TestWriteTools(t *testing.T) {
 	}
 	if msg := call(t, cs, "exit_process", map[string]any{"process": "<bad"}, &done); msg == "" {
 		t.Fatal("accepted a bad pid")
+	}
+}
+
+func TestLeaderTools(t *testing.T) {
+	f := testcluster.Start(t, "c")
+	f.Elect(t, "sched", "a", "b", "c")
+	cs := connect(t, f, mcpserver.Options{AllowWrites: true})
+	var election struct {
+		Electors []client.ElectorView `json:"electors"`
+		Leader   string               `json:"leader"`
+	}
+	if msg := call(t, cs, "election", map[string]any{"cluster": "sched"}, &election); msg != "" || len(election.Electors) != 3 || election.Leader == "" {
+		t.Fatalf("%+v %s", election, msg)
+	}
+	if msg := call(t, cs, "election", map[string]any{"cluster": "nothing"}, &election); !strings.Contains(msg, "no node runs an election") {
+		t.Fatalf("an election nobody runs: %s", msg)
+	}
+	lead := election.Leader
+	next := "b"
+	if lead == "b" {
+		next = "c"
+	}
+	var done struct {
+		Result string `json:"result"`
+	}
+	if msg := call(t, cs, "move_leader", map[string]any{"cluster": "sched", "to": next}, &done); msg != "" || !strings.Contains(done.Result, lead+" handed over to "+next) {
+		t.Fatalf("%+v %s", done, msg)
+	}
+	f.Leading(t, "sched", "a", func(l string) bool { return l == next })
+	if msg := call(t, cs, "move_leader", map[string]any{"cluster": "sched", "to": "zzz"}, &done); !strings.Contains(msg, "zzz is not in the view") {
+		t.Fatalf("moved to a stranger: %s", msg)
+	}
+	if msg := call(t, cs, "cordon_node", map[string]any{"cluster": "sched", "node": "a"}, &done); msg != "" || !strings.Contains(done.Result, "a may not lead sched") {
+		t.Fatalf("%+v %s", done, msg)
+	}
+	if msg := call(t, cs, "uncordon_node", map[string]any{"cluster": "sched", "node": "a"}, &done); msg != "" || !strings.Contains(done.Result, "a may lead sched again") {
+		t.Fatalf("%+v %s", done, msg)
+	}
+	if msg := call(t, cs, "cordon_node", map[string]any{"cluster": "nothing", "node": "a"}, &done); !strings.Contains(msg, "no node runs an election") {
+		t.Fatalf("cordoned in an election nobody runs: %s", msg)
 	}
 }
 

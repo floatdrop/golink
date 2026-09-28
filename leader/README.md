@@ -143,7 +143,10 @@ refusal, and the candidate campaigns again with it: a restarted node catches
 up even when no leader is left to send it anything, as when every other node
 is cordoned.
 
-`Status` and the elector's inspect map list the cordoned nodes.
+`Status` and the elector's inspect map list the cordoned nodes, and
+[`grpcprocctl leader`](../tools/README.md#leader-elections) shows the election
+as every node sees it, and moves the leader or cordons a node from a
+terminal.
 
 ## Two leaders
 
