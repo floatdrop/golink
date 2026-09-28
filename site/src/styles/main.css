@@ -379,8 +379,12 @@ body {
    override, since the cascade breaks the tie between equal selectors by
    order. */
 @media (min-width: 64rem) {
+	/* The words take up to their measure and the scene follows them, so it
+	   stays beside the text as the page widens instead of drifting to the
+	   far edge; the room left over is on the right. */
 	.gp-hero {
-		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-columns: minmax(0, max-content) auto;
+		justify-content: start;
 		gap: var(--g-spacing-10);
 	}
 
@@ -418,16 +422,6 @@ body {
 @media (min-width: 84rem) {
 	.g-root {
 		--gp-page: 84rem;
-	}
-
-	/* The words keep their measure and the scene takes the rest, centred in
-	   it, rather than standing off at the far edge of a wide page. */
-	.gp-hero {
-		grid-template-columns: auto minmax(0, 1fr);
-	}
-
-	.gp-hero__art {
-		justify-self: center;
 	}
 
 	.gp-layout {
