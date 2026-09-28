@@ -218,6 +218,38 @@ lease.Save(state)                   // the same, without the wait`}</Code>
 			)
 		},
 		{
+			id: 'maintenance',
+			title: 'Moving the leader, and taking a node out',
+			body: (
+				<>
+					<Code>{`leader.Transfer(ctx, node, "scheduler", "b") // b leads next; "" for the most up-to-date follower
+leader.Cordon(ctx, node, "scheduler", "c")   // c may not lead: for work on its host
+leader.Uncordon(ctx, node, "scheduler", "c")`}</Code>
+					<p>
+						All three go to whichever node leads, found through <C>node</C>'s elector, from any
+						node that takes part. <C>Transfer</C> hands over as <C>Resign</C> does, to the node it
+						names: it is refused for a node that leads already, is not in the view, or is
+						cordoned, and ends with <C>ErrNoSuccessor</C> if that follower cannot be reached.
+					</p>
+					<p>
+						<C>Cordon</C> keeps a node from leading until <C>Uncordon</C>: it campaigns no more,
+						voters refuse it, and if it leads, it hands over. The cordoned nodes are part of the
+						state the leader replicates, and <C>Cordon</C> returns once a majority holds it, so a
+						cordon outlasts the cordoned node's restarts, and the leader's. Cordon a node, stop
+						it, work on its host, start it again: it stays a follower until you uncordon it. It
+						still votes, so the cluster keeps its quorum meanwhile. A cordon that would leave no
+						node of the view to lead is refused.
+					</p>
+					<p>
+						A node that restarts holds no state, and voters refuse a candidate whose state is
+						older than theirs; so a voter that refuses one sends its own with the refusal, and
+						the candidate campaigns again with it. A restarted node catches up even when no
+						leader is left to send it anything, as when every other node is cordoned.
+					</p>
+				</>
+			)
+		},
+		{
 			id: 'two-leaders',
 			title: 'Two leaders, briefly',
 			body: (
@@ -297,6 +329,7 @@ lease.Save(state)                   // the same, without the wait`}</Code>
 								<C>state</C>,
 								'The version of the state this node holds: the term of the leader that made it, and its sequence.'
 							],
+							[<C>cordoned</C>, 'The nodes that may not lead.'],
 							[<C>checkpoints_waiting</C>, 'On the leader: checkpoints a majority does not hold yet.'],
 							[<C>singleton</C>, 'Its PID on the leader, or none, starting, stopping.'],
 							[<C>backoff</C>, 'How long a node whose singleton failed waits before it campaigns again.']

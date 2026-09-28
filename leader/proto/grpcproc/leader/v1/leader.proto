@@ -44,6 +44,9 @@ message State {
   Version version = 1;
   // Unset until a leader has checkpointed.
   google.protobuf.Any value = 2;
+  // The nodes that may not lead, sorted: they do not campaign, voters
+  // refuse them, and a leader among them hands over.
+  repeated string cordoned = 3;
 }
 
 // RequestVote asks for a vote in the term, from a candidate holding the
@@ -64,6 +67,11 @@ message RequestVote {
 message Vote {
   bool granted = 1;
   bool pre = 2;
+  // Set when the vote is refused for the candidate's older state: the
+  // voter's, for the candidate to take and campaign again with. A node
+  // that restarted, and holds nothing, catches up this way even while no
+  // leader sends it the state.
+  State state = 3;
 }
 
 // Heartbeat asserts the sender's leadership for the term.
@@ -104,11 +112,24 @@ message Status {
   Version version = 6;
   // The singleton, on the leader, once it runs.
   grpcproc.v1.PID singleton = 7;
+  // The nodes that may not lead.
+  repeated string cordoned = 8;
 }
 
 // Resign asks a leader to hand over to a follower, and answers, with
 // google.protobuf.Empty, once it has.
-message Resign {}
+message Resign {
+  // The follower to hand over to; empty for the one with the latest state.
+  string to = 1;
+}
+
+// Cordon asks a leader to keep a node from leading, or, with off, to let
+// it lead again: a call, answered with google.protobuf.Empty once a
+// majority of the cluster holds the change.
+message Cordon {
+  string node = 1;
+  bool off = 2;
+}
 
 // PeerDown is a relay telling its elector that the peer's elector it
 // monitors is gone, with the Down's reason.

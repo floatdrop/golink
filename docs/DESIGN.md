@@ -773,6 +773,16 @@ leader's singleton, and its state the singleton's.
   state with its term, as Raft commits a no-op. `Resign` hands over:
   it stops the singleton, whose `Terminate` may still save, waits for the
   most recent follower to hold the leader's state, and sends it `TimeoutNow`.
+- **Maintenance.** `Transfer` moves leadership to a named follower, as
+  `Resign` hands over. `Cordon` keeps a node from leading: the cordoned set
+  is part of the replicated state, so it outlasts the node's restarts and
+  the leader's; a cordoned node does not campaign, voters refuse it, and a
+  cordoned leader hands over. A cordon that would leave no node of the view
+  to lead is refused. Both go to whichever node leads. A voter that refuses
+  a candidate for its older state sends its own with the refusal, and a
+  refused pre-vote carries the voter's term: a restarted node, which holds
+  nothing, catches up without a leader to send it anything, which is what
+  keeps a cluster whose other nodes are all cordoned from deadlocking.
 - **In memory.** Terms, votes and state are not persisted: losing a majority
   at once loses them. A restarted elector does not vote for two election
   timeouts, the time a leader elected with a vote it may have cast before

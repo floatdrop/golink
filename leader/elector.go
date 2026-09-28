@@ -99,9 +99,11 @@ type pending struct {
 	m   grpcproc.Msg[proto.Message]
 }
 
-// resignation is a Resign call being carried out.
+// resignation is a hand-over being carried out: a Resign call, or a
+// cordoned leader's own (whose m is no call, and answers nobody).
 type resignation struct {
 	m        grpcproc.Msg[proto.Message]
+	to       string // the follower to hand over to, or empty for the most recent
 	deadline time.Time
 }
 
@@ -190,12 +192,15 @@ func (e *elector[S]) wake(now time.Time) time.Time {
 func (e *elector[S]) timers(now time.Time) {
 	e.peersNow(now)
 	if e.role == Leader {
+		if e.cordoned(e.self) && e.resign == nil {
+			e.resign = &resignation{deadline: now.Add(4 * e.spec.ElectionTimeout)}
+		}
 		if !now.Before(e.heartbeatAt) {
 			e.tick(now)
 		}
 	} else if !now.Before(e.electionAt) {
 		e.electionAt = now.Add(e.timeout())
-		if !now.Before(e.backoffUntil) && (e.static() || len(e.view()) >= e.spec.MinClusterSize) {
+		if !now.Before(e.backoffUntil) && !e.cordoned(e.self) && (e.static() || len(e.view()) >= e.spec.MinClusterSize) {
 			e.preVote(now)
 		}
 	}
@@ -262,21 +267,85 @@ func (e *elector[S]) handle(m grpcproc.Msg[proto.Message], now time.Time) {
 	case *leaderv1.StatusRequest:
 		_ = m.Reply(e.status(), nil)
 	case *leaderv1.Resign:
-		switch {
-		case e.role != Leader:
-			_ = m.Reply(nil, ErrNotLeader)
-		case e.resign != nil:
-			_ = m.Reply(nil, errors.New("leader: already resigning"))
-		default:
-			// reconcile stops the singleton; handOver goes on once it has.
-			e.resign = &resignation{m: m, deadline: now.Add(4 * e.spec.ElectionTimeout)}
+		if err := e.canResign(b.GetTo()); err != nil {
+			_ = m.Reply(nil, err)
+			return
 		}
+		// reconcile stops the singleton; handOver goes on once it has.
+		e.resign = &resignation{m: m, to: b.GetTo(), deadline: now.Add(4 * e.spec.ElectionTimeout)}
+	case *leaderv1.Cordon:
+		e.cordon(m, b, now)
 	default:
 		if m.IsCall() {
 			_ = m.Reply(nil, fmt.Errorf("leader: an elector does not answer %s", proto.MessageName(m.Body)))
 		}
 		e.p.Log().Warn("leader: dropped a message", "from", m.From, "type", proto.MessageName(m.Body))
 	}
+}
+
+// canResign says why this node cannot hand over to, if it cannot.
+func (e *elector[S]) canResign(to string) error {
+	switch p := e.peers[to]; {
+	case e.role != Leader:
+		return ErrNotLeader
+	case e.resign != nil:
+		return errors.New("leader: already resigning")
+	case to == "":
+		return nil
+	case to == e.self:
+		return fmt.Errorf("leader: %s leads already", to)
+	case p == nil || !p.inView:
+		return fmt.Errorf("leader: %s is not in the view", to)
+	case e.cordoned(to):
+		return fmt.Errorf("leader: %s is cordoned", to)
+	}
+	return nil
+}
+
+// cordoned reports whether node may not lead.
+func (e *elector[S]) cordoned(node string) bool {
+	return slices.Contains(e.state.GetCordoned(), node)
+}
+
+// cordon changes who may lead, as a new version of the state, and answers
+// once a majority holds it.
+func (e *elector[S]) cordon(m grpcproc.Msg[proto.Message], c *leaderv1.Cordon, now time.Time) {
+	node, on := c.GetNode(), !c.GetOff()
+	if e.role != Leader {
+		_ = m.Reply(nil, ErrNotLeader)
+		return
+	}
+	if node != e.self && e.peers[node] == nil {
+		_ = m.Reply(nil, fmt.Errorf("leader: %s takes no part in this election", node))
+		return
+	}
+	if e.cordoned(node) == on {
+		_ = m.Reply(&emptypb.Empty{}, nil)
+		return
+	}
+	cordoned := slices.DeleteFunc(slices.Clone(e.state.GetCordoned()), func(n string) bool { return n == node })
+	if on {
+		cordoned = append(cordoned, node)
+		if !slices.ContainsFunc(e.view(), func(n string) bool { return !slices.Contains(cordoned, n) }) {
+			_ = m.Reply(nil, fmt.Errorf("leader: cordoning %s would leave no node of the view to lead", node))
+			return
+		}
+		slices.Sort(cordoned)
+	}
+	e.change(m, &leaderv1.State{Value: e.state.GetValue(), Cordoned: cordoned}, now)
+}
+
+// change makes st, stamped with a new version, the state, and replicates
+// it. A call is answered once a majority holds it.
+func (e *elector[S]) change(m grpcproc.Msg[proto.Message], st *leaderv1.State, now time.Time) {
+	seq := e.state.GetVersion().GetSeq() + 1
+	st.Version = &leaderv1.Version{Term: e.term, Seq: seq}
+	e.state = st
+	if m.IsCall() {
+		e.pending = append(e.pending, pending{seq: seq, m: m})
+	}
+	e.commit()
+	e.heartbeatAt = now // replicate at once
 }
 
 // add starts knowing node, with a relay to its elector.
@@ -339,7 +408,9 @@ func (e *elector[S]) peer(from string, m *leaderv1.Peer, now time.Time) {
 	if rv := m.GetRequestVote(); rv != nil && !rv.GetTransfer() && e.leading(now) {
 		return
 	}
-	pre := m.GetRequestVote().GetPre() || m.GetVote().GetPre()
+	// A pre-vote request's term, and a granted pre-vote's, is one nobody has
+	// begun; a refused pre-vote carries its voter's term.
+	pre := m.GetRequestVote().GetPre() || m.GetVote().GetPre() && m.GetVote().GetGranted()
 	if m.GetTerm() > e.term && !pre {
 		if e.role == Leader {
 			e.stepDown(now, "a newer term began")
@@ -350,6 +421,9 @@ func (e *elector[S]) peer(from string, m *leaderv1.Peer, now time.Time) {
 	case *leaderv1.Peer_RequestVote:
 		e.vote(p, m.GetTerm(), k.RequestVote, now)
 	case *leaderv1.Peer_Vote:
+		if st := k.Vote.GetState(); st != nil && e.role != Leader && older(e.state.GetVersion(), st.GetVersion()) {
+			e.state = st // refused for holding older state: now it does not
+		}
 		switch {
 		case !k.Vote.GetGranted():
 		case pre && e.preVotes != nil && m.GetTerm() == e.term+1:
@@ -372,7 +446,7 @@ func (e *elector[S]) peer(from string, m *leaderv1.Peer, now time.Time) {
 			e.handOver(now, false)
 		}
 	case *leaderv1.Peer_TimeoutNow:
-		if m.GetTerm() == e.term && from == e.leader && e.role == Follower {
+		if m.GetTerm() == e.term && from == e.leader && e.role == Follower && !e.cordoned(e.self) {
 			e.campaign(now, true)
 		}
 	}
@@ -411,21 +485,29 @@ func (e *elector[S]) leading(now time.Time) bool {
 }
 
 func (e *elector[S]) vote(p *peer, term uint64, rv *leaderv1.RequestVote, now time.Time) {
+	behind := older(rv.GetVersion(), e.state.GetVersion())
+	eligible := !behind && !e.cordoned(p.node)
+	v := &leaderv1.Vote{Pre: rv.GetPre()}
+	if behind {
+		v.State = e.state
+	}
 	if rv.GetPre() {
-		// Would it vote, were the term to begin? Nothing changes here.
-		granted := term > e.term && !older(rv.GetVersion(), e.state.GetVersion())
-		e.send(p, &leaderv1.Peer{Term: term, Kind: &leaderv1.Peer_Vote{Vote: &leaderv1.Vote{Granted: granted, Pre: true}}})
+		// Would it vote, were the term to begin? Nothing changes here. A
+		// yes is for that term; a no carries this node's, which a
+		// candidate that restarted, and knows no term, takes.
+		v.Granted = eligible && term > e.term
+		if !v.Granted {
+			term = e.term
+		}
+		e.send(p, &leaderv1.Peer{Term: term, Kind: &leaderv1.Peer_Vote{Vote: v}})
 		return
 	}
-	granted := term == e.term &&
-		(e.votedFor == "" || e.votedFor == p.node) &&
-		!older(rv.GetVersion(), e.state.GetVersion()) &&
-		!now.Before(e.quietUntil)
-	if granted {
+	v.Granted = eligible && term == e.term && (e.votedFor == "" || e.votedFor == p.node) && !now.Before(e.quietUntil)
+	if v.Granted {
 		e.votedFor = p.node
 		e.electionAt = now.Add(e.timeout())
 	}
-	e.send(p, &leaderv1.Peer{Term: e.term, Kind: &leaderv1.Peer_Vote{Vote: &leaderv1.Vote{Granted: granted}}})
+	e.send(p, &leaderv1.Peer{Term: e.term, Kind: &leaderv1.Peer_Vote{Vote: v}})
 }
 
 func (e *elector[S]) heartbeat(p *peer, term uint64, hb *leaderv1.Heartbeat, now time.Time) {
@@ -489,7 +571,7 @@ func (e *elector[S]) becomeLeader(now time.Time) {
 	e.role, e.leader, e.votes = Leader, e.self, nil
 	// The state is this term's now, newer than any an older leader made
 	// and a follower might still hold: they all take it.
-	e.state = &leaderv1.State{Version: &leaderv1.Version{Term: e.term, Seq: e.state.GetVersion().GetSeq() + 1}, Value: e.state.GetValue()}
+	e.state = &leaderv1.State{Version: &leaderv1.Version{Term: e.term, Seq: e.state.GetVersion().GetSeq() + 1}, Value: e.state.GetValue(), Cordoned: e.state.GetCordoned()}
 	for _, p := range e.peers {
 		p.lastAck, p.acked, p.sentVersion = now, nil, nil
 	}
@@ -581,13 +663,7 @@ func (e *elector[S]) checkpoint(m grpcproc.Msg[proto.Message], c *leaderv1.Check
 		}
 		return
 	}
-	seq := e.state.GetVersion().GetSeq() + 1
-	e.state = &leaderv1.State{Version: &leaderv1.Version{Term: e.term, Seq: seq}, Value: c.GetState()}
-	if m.IsCall() {
-		e.pending = append(e.pending, pending{seq: seq, m: m})
-	}
-	e.commit()
-	e.heartbeatAt = now // replicate at once
+	e.change(m, &leaderv1.State{Value: c.GetState(), Cordoned: e.state.GetCordoned()}, now)
 }
 
 // handOver goes on with a Resign: once the singleton has stopped, and the
@@ -600,7 +676,7 @@ func (e *elector[S]) handOver(now time.Time, force bool) {
 	}
 	var next *peer
 	for _, p := range e.inView() {
-		if now.Sub(p.lastAck) < 2*e.spec.ElectionTimeout && (next == nil || older(next.acked, p.acked)) {
+		if (r.to == "" || p.node == r.to) && !e.cordoned(p.node) && now.Sub(p.lastAck) < 2*e.spec.ElectionTimeout && (next == nil || older(next.acked, p.acked)) {
 			next = p
 		}
 	}
@@ -740,12 +816,13 @@ func (e *elector[S]) shown() Role {
 
 func (e *elector[S]) status() *leaderv1.Status {
 	st := &leaderv1.Status{
-		Role:    e.shown().String(),
-		Term:    e.term,
-		Leader:  e.leader,
-		View:    e.view(),
-		Quorum:  uint32(e.quorum()),
-		Version: e.state.GetVersion(),
+		Role:     e.shown().String(),
+		Term:     e.term,
+		Leader:   e.leader,
+		View:     e.view(),
+		Quorum:   uint32(e.quorum()),
+		Version:  e.state.GetVersion(),
+		Cordoned: e.state.GetCordoned(),
 	}
 	if e.single.phase == running {
 		st.Singleton = &grpcprocv1.PID{Node: e.single.pid.Node, Incarnation: e.single.pid.Incarnation, Id: e.single.pid.ID}
@@ -782,6 +859,9 @@ func (e *elector[S]) inspect() map[string]string {
 	}
 	if len(e.pending) > 0 {
 		out["checkpoints_waiting"] = strconv.Itoa(len(e.pending))
+	}
+	if c := e.state.GetCordoned(); len(c) > 0 {
+		out["cordoned"] = strings.Join(c, ",")
 	}
 	if now := time.Now(); now.Before(e.backoffUntil) {
 		out["backoff"] = e.backoffUntil.Sub(now).Round(time.Millisecond).String()
