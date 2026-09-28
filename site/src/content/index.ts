@@ -12,8 +12,10 @@ import { conceptsSupervision } from './concepts-supervision.tsx';
 import { guidesActors } from './guides-actors.tsx';
 import { guidesBlockingIO } from './guides-blocking-io.tsx';
 import { guidesConfiguration } from './guides-configuration.tsx';
+import { guidesCron } from './guides-cron.tsx';
 import { guidesEtcd } from './guides-etcd.tsx';
 import { guidesInspector } from './guides-inspector.tsx';
+import { guidesLeader } from './guides-leader.tsx';
 import { guidesObservability } from './guides-observability.tsx';
 import { guidesPubsub } from './guides-pubsub.tsx';
 import { guidesSupervisors } from './guides-supervisors.tsx';
@@ -48,6 +50,8 @@ const all: Doc[] = [
 	guidesObservability,
 	guidesInspector,
 	guidesEtcd,
+	guidesCron,
+	guidesLeader,
 	shop,
 	shopServices,
 	shopPlatform,
