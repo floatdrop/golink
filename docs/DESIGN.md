@@ -67,6 +67,8 @@ grpcproc/pubsub              optional: topics with a replay buffer, relayed once
 grpcproc/etcd     (nested module)   Resolver + Registrar + Membership on etcd leases
 grpcproc/otel     (nested module)   Hooks implementation: OTel metrics + trace propagation
 grpcproc/tools    (nested module)   grpcprocctl: CLI, Graphviz and MCP server over the Inspector
+grpcproc/cron     (nested module)   jobs on crontab schedules, every run a process
+grpcproc/leader   (nested module)   leader election, and a singleton that runs on the leader with its state
 ```
 
 `grpcproctest` ships with the first release: the best argument for network
@@ -690,6 +692,81 @@ has:
 - A reply carries an error's text, not the error: the relay answers with
   the sentinel its own call returned, and `Subscribe` maps the text back.
 
+## Cron and leader election (nested modules, done)
+
+Both are built on the public API alone, as `actor` is, and are modules of
+their own so they can be versioned apart from the core; neither imports the
+other. They compose through `actor.ChildSpec`: a cron process is the
+leader's singleton, and its state the singleton's.
+
+### `grpcproc/cron`
+
+- **A process, not a service of the node.** The application starts it
+  (`cron.Start`, or `cron.Child` under a supervisor), so it has a PID, a
+  lifecycle and an inspect map, and the core starts no goroutine of its own.
+- **Every run is a process**, spawned with `SpawnMonitor` and `LinkParent`.
+  Its exit reason is its result (an error, a panic, `timeout`, `replaced`),
+  so failures need no separate channel; the cron process knows which runs
+  still go, so a run due while the last one goes can be allowed, skipped or
+  replaced; a `Timeout` is an `Exit`; and runs end with the cron process.
+- **The wall clock, once a minute.** The process wakes at the start of each
+  minute by the wall clock and starts what is due, in each job's own
+  `Location` (UTC by default, so nodes agree). A minute clocks skip does not
+  exist; one they repeat runs the first time only (`Schedule.Next` finds the
+  first pass even where `time.Date` returns the second). A clock stepped back
+  runs nothing twice.
+- **Missed runs** are skipped, unless a job has a `StartingDeadline`: then
+  the latest one missed within it starts, once. The process reports each
+  job's last run as a `cronv1.State`; one started from it catches up from
+  there, and checks the minute it starts in at once, for the run the process
+  before it did not start.
+- **Standard crontab**, Vixie's day rule, plus `L`, `5L` and `5#2` from
+  Quartz; the standard macros. `AddJob` takes Go functions, so it works on
+  the cron process's own node only, through the registry `actor.StartChild`
+  uses; enable, disable and remove work from any node.
+
+### `grpcproc/leader`
+
+- **Leadership is a process's lifetime.** The user's code is a singleton, an
+  `actor.ChildSpec`, which the elector starts on a win and tells to exit
+  (`demoted`) on a loss. No handler asks whether it leads, and a demoted
+  singleton's context is cancelled, which stops its I/O. Election messages
+  could not reach a typed `Process[M]` anyway: they would be dead letters
+  with reason `type`. The singleton is `Temporary`: one that exits, or cannot
+  start (or `Confirm` refuses), ends its node's leadership with a backoff that
+  doubles each time, so a failing singleton moves on rather than loops.
+- **Raft's election without the log**: terms, votes, heartbeats; a leader
+  steps down after two election timeouts without a majority's acks
+  (check-quorum); followers that heard from a leader lately ignore vote
+  requests (stickiness); and pre-votes, so a node cut off from the others
+  does not raise its term and depose the leader when it is back.
+- **One relay process per peer.** A remote send or monitor waits for the
+  dial (up to `DialTimeout`), and a heartbeat loop cannot. The elector sends
+  locally to relays, which send on and monitor the peer's elector: a hung
+  peer holds its relay only. The monitor's reasons say what happened: a
+  graceful exit or `noproc` removes the peer from a dynamic view at once and
+  lets followers of a leader that left campaign without waiting; a
+  `noconnection` leaves it counted (a ghost). Followers do not talk to each
+  other, so a node greets the peers it lost every `GhostTTL` to hear back.
+- **Static voters or a dynamic view.** A fixed `Voters` set cannot elect two
+  leaders in a partition. Without it the view is `Peers`, `Membership`, and
+  (without `Membership`) whoever talks: available, but two nodes with
+  different views can each count a majority, and `MinClusterSize` bounds how
+  small a view elects.
+- **State from one leader to the next.** `Lease.Checkpoint` replicates the
+  singleton's state with the heartbeats and returns once a majority holds
+  it; a voter refuses a candidate whose state version (term, sequence) is
+  older than its own, Raft's election rule on a one-entry log, so every
+  acknowledged checkpoint reaches the next leader. A new leader stamps the
+  state with its term, as Raft commits a no-op. `Resign` hands over:
+  it stops the singleton, whose `Terminate` may still save, waits for the
+  most recent follower to hold the leader's state, and sends it `TimeoutNow`.
+- **In memory.** Terms, votes and state are not persisted: losing a majority
+  at once loses them. A restarted elector does not vote for two election
+  timeouts, the time a leader elected with a vote it may have cast before
+  needs to be heard from. `Lease.Term` is the fencing token for external
+  resources; `Confirm` makes leadership wait for an external lock.
+
 ## Later
 
 - A **global name registry** (`grpcproc.Global{"ledger"}` resolving through
@@ -721,6 +798,8 @@ has:
 3. ~~`grpcproc/otel` (metrics + trace propagation)~~ (done: see otel/README.md),
    ~~`grpcproc/etcd`~~ (done: see etcd/README.md).
 4. ~~`grpcprocctl`, `DOT`, MCP server~~ (done: `grpcproc/tools`, see tools/README.md).
+5. ~~`grpcproc/cron`, `grpcproc/leader`~~ (done: see cron/README.md and
+   leader/README.md).
 
 Coverage target and style follow `fsm` and `di`: 100 % on the core,
 race-detected, examples compiled in CI, `DESIGN.md` kept current.

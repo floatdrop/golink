@@ -1,0 +1,136 @@
+// grpcproc.leader.v1 is what grpcproc/leader's electors say to each other,
+// what they are called with, and what their own helper processes tell them.
+syntax = "proto3";
+
+package grpcproc.leader.v1;
+
+import "google/protobuf/any.proto";
+import "grpcproc/v1/grpcproc.proto";
+
+option go_package = "github.com/floatdrop/grpcproc/leader/proto/grpcproc/leader/v1;leaderv1";
+
+// Peer is a message from one elector to another of the same cluster. The
+// sender's node is the node of the message's From.
+message Peer {
+  // The sender's term. A receiver that is behind adopts it, and a leader
+  // that is behind steps down.
+  uint64 term = 1;
+  oneof kind {
+    RequestVote request_vote = 2;
+    Vote vote = 3;
+    Heartbeat heartbeat = 4;
+    Ack ack = 5;
+    TimeoutNow timeout_now = 6;
+    Hello hello = 7;
+  }
+}
+
+// Hello makes the sender known to the receiver, which answers with a
+// reply: a node greets the nodes it has not heard from, and hears back from
+// those it can reach.
+message Hello {
+  bool reply = 1;
+}
+
+// Version orders the states electors hold: by the term of the leader that
+// made it, then by the order that leader made them in.
+message Version {
+  uint64 term = 1;
+  uint64 seq = 2;
+}
+
+// State is a leader's state as its electors hold it.
+message State {
+  Version version = 1;
+  // Unset until a leader has checkpointed.
+  google.protobuf.Any value = 2;
+}
+
+// RequestVote asks for a vote in the term, from a candidate holding the
+// state of this version. A voter holding a newer one refuses it.
+message RequestVote {
+  Version version = 1;
+  // Set when the leader handed over to the candidate: voters that heard
+  // from that leader lately vote all the same.
+  bool transfer = 2;
+  // Set for a pre-vote: would the voter vote in the term, which the
+  // candidate has not begun? Nobody's term changes, and nobody votes, so a
+  // node cut off from the others cannot raise its term while it is, and
+  // depose the leader with it when it is back.
+  bool pre = 3;
+}
+
+// Vote answers a RequestVote of the same term, and pre-vote.
+message Vote {
+  bool granted = 1;
+  bool pre = 2;
+}
+
+// Heartbeat asserts the sender's leadership for the term.
+message Heartbeat {
+  // Set while the follower's last Ack showed another version than the
+  // leader's: the follower takes it as its own.
+  State state = 1;
+}
+
+// Ack answers a Heartbeat, with the version the follower now holds.
+message Ack {
+  Version version = 1;
+}
+
+// TimeoutNow is a leader handing over: its receiver campaigns at once.
+message TimeoutNow {}
+
+// Checkpoint is a leader's singleton's state, for its elector to replicate:
+// a call, answered with google.protobuf.Empty once a majority of the
+// cluster holds it, or an error if the term is over.
+message Checkpoint {
+  uint64 term = 1;
+  google.protobuf.Any state = 2;
+}
+
+// StatusRequest asks an elector for its Status.
+message StatusRequest {}
+
+// Status is what an elector believes.
+message Status {
+  string role = 1;
+  uint64 term = 2;
+  // The leader's node, or empty while none is known.
+  string leader = 3;
+  // The nodes whose majority elects a leader, this one included.
+  repeated string view = 4;
+  uint32 quorum = 5;
+  Version version = 6;
+  // The singleton, on the leader, once it runs.
+  grpcproc.v1.PID singleton = 7;
+}
+
+// Resign asks a leader to hand over to a follower, and answers, with
+// google.protobuf.Empty, once it has.
+message Resign {}
+
+// PeerDown is a relay telling its elector that the peer's elector it
+// monitors is gone, with the Down's reason.
+message PeerDown {
+  string node = 1;
+  string reason = 2;
+}
+
+// Watch tells a relay to monitor its peer's elector again.
+message Watch {}
+
+// MemberEvent is the membership bridge telling its elector of a node
+// joining or leaving the grpcproc cluster.
+message MemberEvent {
+  string node = 1;
+  bool up = 2;
+}
+
+// Started is a starter telling its elector how starting the singleton of
+// the term went: its PID, or why it did not start.
+message Started {
+  uint64 term = 1;
+  grpcproc.v1.PID pid = 2;
+  string error = 3;
+}
