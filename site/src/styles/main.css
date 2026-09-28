@@ -420,6 +420,16 @@ body {
 		--gp-page: 84rem;
 	}
 
+	/* The words keep their measure and the scene takes the rest, centred in
+	   it, rather than standing off at the far edge of a wide page. */
+	.gp-hero {
+		grid-template-columns: auto minmax(0, 1fr);
+	}
+
+	.gp-hero__art {
+		justify-self: center;
+	}
+
 	.gp-layout {
 		grid-template-columns: 15rem minmax(0, 1fr) 12rem;
 	}

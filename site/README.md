@@ -29,6 +29,8 @@ npm run preview   # serves build/ under its base path
   embedmd does. `src/components/` has the prose helpers (`C`, `A`, `Ext`,
   `Aside`, `Table`, `Cards`), the figure card, and the drawings, which are
   inline SVG built from a few primitives.
+- `scripts/scene.ts` draws `public/scene.svg`, the hero's scene, and the
+  requests moving through it; after changing it, run `node scripts/scene.ts`.
 - `src/Page.tsx` is the chrome: topbar, navigation, the page, its outline,
   previous and next. `src/entry-server.tsx` renders every page and the 404.
 
