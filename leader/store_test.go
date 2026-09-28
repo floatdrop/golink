@@ -244,6 +244,11 @@ func TestFile(t *testing.T) {
 	if b, err := f.Load(); b != nil || err != nil {
 		t.Errorf("Load before any Save: %q, %v", b, err)
 	}
+	// A crash between the write and the rename leaves the temporary file,
+	// which the next Save overwrites.
+	if err := os.WriteFile(filepath.Join(dir, "state.tmp"), []byte("left by a crash"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	for _, s := range []string{"one", "two"} {
 		if err := f.Save([]byte(s)); err != nil {
 			t.Fatal(err)

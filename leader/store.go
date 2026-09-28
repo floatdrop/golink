@@ -22,9 +22,10 @@ type Store interface {
 	Save(b []byte) error
 }
 
-// File is a Store in the file at path. Save writes a new file beside it,
-// syncs it to disk and renames it over the old one, so a crash leaves the
-// one or the other.
+// File is a Store in the file at path. Save writes path+".tmp", syncs it
+// to disk and renames it over path, so a crash leaves the old state or the
+// new one, and at most the one temporary file beside it, which the next
+// Save overwrites.
 func File(path string) Store { return file(path) }
 
 type file string
@@ -39,7 +40,7 @@ func (f file) Load() ([]byte, error) {
 
 func (f file) Save(b []byte) error {
 	dir := filepath.Dir(string(f))
-	tmp, err := os.CreateTemp(dir, filepath.Base(string(f))+".*")
+	tmp, err := os.OpenFile(string(f)+".tmp", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
