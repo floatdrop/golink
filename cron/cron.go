@@ -84,17 +84,37 @@ type Run struct {
 	// Time is the minute the run was due, in its job's Location. A run
 	// that starts late, within its job's StartingDeadline, keeps it.
 	Time time.Time
+	// Deadline is when the run is told to exit, from its job's Timeout:
+	// zero for a job with none.
+	Deadline time.Time
+}
+
+// context is the run's context: its process's, which is cancelled when the
+// run is told to exit, ending at its Deadline, so that a call made with it
+// carries the time left to the callee.
+func (r Run) context(p *grpcproc.Process[proto.Message]) (context.Context, context.CancelFunc) {
+	if r.Deadline.IsZero() {
+		return p.Context(), func() {}
+	}
+	return context.WithDeadline(p.Context(), r.Deadline)
 }
 
 // Action is what a run does, in a process of its own spawned by the cron
 // process and linked to it: its return is the run's exit reason. A run
 // told to exit (Overlap Replace, Timeout, or the cron process ending) has
-// its context cancelled.
+// its context cancelled. A run that returns context.DeadlineExceeded once
+// its Deadline has passed ends with reason "timeout", as one told to exit
+// at its Deadline does.
 type Action func(p *grpcproc.Process[proto.Message], r Run) error
 
-// Func is an Action that calls fn with the run's context.
+// Func is an Action that calls fn with the run's context, which ends at the
+// run's Deadline.
 func Func(fn func(ctx context.Context, r Run) error) Action {
-	return func(p *grpcproc.Process[proto.Message], r Run) error { return fn(p.Context(), r) }
+	return func(p *grpcproc.Process[proto.Message], r Run) error {
+		ctx, cancel := r.context(p)
+		defer cancel()
+		return fn(ctx, r)
+	}
 }
 
 // Send is an Action that sends what msg builds for the run to to. The run
@@ -106,10 +126,13 @@ func Send[N proto.Message](to grpcproc.Addr[N], msg func(Run) N) Action {
 
 // Call is an Action that calls to with what req builds for the run. The run
 // succeeds when to answers without an error, and fails with the error
-// otherwise; the job's Timeout bounds the wait.
+// otherwise; the job's Timeout bounds the wait, and to sees the run's
+// Deadline as the call's.
 func Call[N proto.Message](to grpcproc.Addr[N], req func(Run) N) Action {
 	return func(p *grpcproc.Process[proto.Message], r Run) error {
-		_, err := p.Call[proto.Message](p.Context(), to, req(r))
+		ctx, cancel := r.context(p)
+		defer cancel()
+		_, err := p.Call[proto.Message](ctx, to, req(r))
 		return err
 	}
 }
@@ -427,6 +450,9 @@ func (c *cron) tick(now time.Time) {
 func (c *cron) start(j *job, due time.Time) {
 	j.last = due
 	r := Run{Job: j.Name, Time: due}
+	if j.Timeout > 0 {
+		r.Deadline = time.Now().Add(j.Timeout)
+	}
 	if len(j.runs) > 0 {
 		switch j.Overlap {
 		case Forbid:
@@ -440,17 +466,19 @@ func (c *cron) start(j *job, due time.Time) {
 	}
 	action := j.Action
 	a, ref, err := c.p.SpawnMonitor[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
-		return action(p, r)
+		err := action(p, r)
+		// The run's context got to its Deadline before the cron process
+		// told it to exit: the same end, for the same reason.
+		if !r.Deadline.IsZero() && errors.Is(err, context.DeadlineExceeded) && !time.Now().Before(r.Deadline) {
+			return &grpcproc.ExitError{Reason: ReasonTimeout}
+		}
+		return err
 	}, grpcproc.LinkParent(), grpcproc.WithLabel("cron:"+j.Name))
 	if err != nil {
 		c.failed(j, r, err.Error())
 		return
 	}
-	var deadline time.Time
-	if j.Timeout > 0 {
-		deadline = time.Now().Add(j.Timeout)
-	}
-	j.runs[ref] = &run{pid: a.PID(), r: r, deadline: deadline}
+	j.runs[ref] = &run{pid: a.PID(), r: r, deadline: r.Deadline}
 }
 
 // expire tells the runs past their Timeout to exit.

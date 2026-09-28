@@ -102,7 +102,7 @@ leader, checkpoints its state, and the next leader resumes from it.
 leader.Start(node, leader.Spec[*cronv1.State]{
     Cluster: "cron",
     Voters:  []string{"a", "b", "c"},
-    Singleton: func(l *leader.Lease, last *cronv1.State) (actor.ChildSpec, error) {
+    Singleton: func(l *leader.Lease[*cronv1.State], last *cronv1.State) (actor.ChildSpec, error) {
         return cron.Child("cron", cron.Spec{Jobs: jobs, Resume: last, OnState: l.Save})
     },
 })

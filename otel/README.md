@@ -33,11 +33,12 @@ message it is handling, and these hooks put the span there. No context has
 to be threaded through handlers for the chain to form.
 
 For a handler's own spans (a database call), take the handling span from the
-message:
+message, in the message's context, which ends when its caller stops waiting:
 
 ```go
-ctx := h.Extract(p.Context(), m.Metadata)
-ctx, span := tracer.Start(ctx, "load order")
+ctx, cancel := m.Context(p.Context())
+defer cancel()
+ctx, span := tracer.Start(h.Extract(ctx, m.Metadata), "load order")
 ```
 
 Spans carry `messaging.system=grpcproc`, `messaging.operation.type`,

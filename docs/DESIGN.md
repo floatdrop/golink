@@ -29,7 +29,7 @@ go-actor, Erlang/OTP).
 node, err := grpcproc.NewNode(grpcproc.Config{
     Name:        "orders-1",
     Advertise:   "10.0.0.5:9000",           // where *your* gRPC server listens
-    Resolver:    grpcprocetcd.New(cli, "/grpcproc"), // optional; static map by default
+    Resolver:    grpcprocetcd.New(cli, "/grpcproc"), // required; grpcproc.StaticResolver for a fixed map
     DialOptions: []grpc.DialOption{grpc.WithTransportCredentials(creds)},
     Logger:      slog.Default(),
     Hooks:       otelHooks, // grpcprocotel.New(): optional, see Observability
@@ -61,8 +61,8 @@ resp, err := node.Call[*orderspb.Reserved](ctx, addr, &orderspb.OrderMsg{}) // r
 grpcproc/                    core: Node, Process, PID, Send/Call/Monitor/Link/Exit, node links, inspection API
 grpcproc/proto/grpcproc/v1       wire protocol (.proto + generated code)
 grpcproc/grpcproctest            in-memory clusters over bufconn: Cluster, Partition, Kill
-grpcproc/inspect             grpcproc.v1.Inspector gRPC service + Go client (optional to register)
-grpcproc/actor               optional helpers: handler loop, supervisor, timers
+grpcproc/inspect             grpcproc.v1.Inspector gRPC service (optional to register); its Go client is tools/client
+grpcproc/actor               optional helpers: handler loop, supervisor
 grpcproc/pubsub              optional: topics with a replay buffer, relayed once per node
 grpcproc/etcd     (nested module)   Resolver + Registrar + Membership on etcd leases
 grpcproc/otel     (nested module)   Hooks implementation: OTel metrics + trace propagation
@@ -571,10 +571,10 @@ PID routes to the PID's node when the request names none. `GetProcess` with
 answer, with `inspect_error` saying so. Access control is the application's
 (interceptors, mTLS), as for any of its other services.
 
-What sits on top, later and outside the core: `grpcprocctl ps / top / inspect /
-send`, a `Node.DOT()` that draws processes and monitor edges across nodes
-(cheap, and consistent with `fsm.DOT`), and an MCP server exposing the same
-methods for an agent — ergo's MCP experience is convincing, and it is a
+What sits on top, outside the core, is `grpcproc/tools`: `grpcprocctl` (`ps`,
+`inspect`, `watch`, `exit`, `loglevel`, and `dot`, which draws processes and
+who started whom across nodes), and an MCP server exposing the same methods
+for an agent — ergo's MCP experience is convincing, and it is a
 half-day of work once the gRPC service exists.
 
 Goroutine dumps and heap profiles are `net/http/pprof`; `grpcproc` does not
@@ -700,8 +700,10 @@ has:
   monitors first, on the same link as its call: a monitor placed after the
   answer could reach a topic that exited meanwhile, and say noproc in place
   of the reason.
-- A reply carries an error's text, not the error: the relay answers with
-  the sentinel its own call returned, and `Subscribe` maps the text back.
+- A reply carries an error's text, not the error, and `errors.Is` matches
+  a `RemoteError` by its text: the relay answers with the sentinel its own
+  call failed with, not the error that wraps it, so that it is that sentinel
+  on the subscriber's side too.
 
 ## Cron and leader election (nested modules, done)
 
@@ -719,7 +721,8 @@ leader's singleton, and its state the singleton's.
   Its exit reason is its result (an error, a panic, `timeout`, `replaced`),
   so failures need no separate channel; the cron process knows which runs
   still go, so a run due while the last one goes can be allowed, skipped or
-  replaced; a `Timeout` is an `Exit`; and runs end with the cron process.
+  replaced; a `Timeout` is an `Exit`, and the run's `Deadline`, which its
+  context ends at and its calls carry; and runs end with the cron process.
 - **The wall clock, once a minute.** The process wakes at the start of each
   minute by the wall clock and starts what is due, in each job's own
   `Location` (UTC by default, so nodes agree). A minute clocks skip does not
@@ -797,14 +800,14 @@ leader's singleton, and its state the singleton's.
 | Bounded mailboxes | GoAkt | A full mailbox would stall the shared link for everyone |
 | Metrics per PID by default | GoAkt | Cardinality; label is the key, PID is available on request |
 | Embedded web UI | ergo Observer | A UI is a client; the core exposes the gRPC surface it would need |
-| gob / custom codec | first prototype | protobuf is already the service's contract; `Any` needs no registration |
+| gob / custom codec | first prototype | protobuf is already the service's contract; a body travels as its full name and bytes, and generated types register themselves |
 
 ## Order of work
 
 1. ~~`proto/grpcproc/v1`, core `Node`/`Process`, links, static resolver, `ProcessInfo`
    counters, `Hooks`, `WithInspect`, `grpcproctest`~~ (done). Tests: ordering, monitors with
    every reason, node down, restart with new incarnation, bad peer identity.
-2. ~~`grpcproc/inspect` service and Go client~~ (done, with `Node.Subscribe`);
+2. ~~`grpcproc/inspect` service~~ (done, with `Node.Subscribe`; its Go client is `tools/client`);
    ~~`grpcproc/actor` helpers~~ (done, with `SendAfter` and `SpawnMonitor`).
 3. ~~`grpcproc/otel` (metrics + trace propagation)~~ (done: see otel/README.md),
    ~~`grpcproc/etcd`~~ (done: see etcd/README.md).

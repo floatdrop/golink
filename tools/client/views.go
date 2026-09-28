@@ -74,9 +74,9 @@ type EventView struct {
 	Type    string       `json:"type,omitempty" jsonschema:"message type of a dead letter"`
 }
 
-// Short renders a duration for people: whole seconds past a minute,
+// short renders a duration for people: whole seconds past a minute,
 // milliseconds below.
-func Short(d time.Duration) string {
+func short(d time.Duration) string {
 	switch {
 	case d <= 0:
 		return ""
@@ -92,7 +92,7 @@ func (c *Client) since(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	return Short(c.now().Sub(t))
+	return short(c.now().Sub(t))
 }
 
 func pidString(p grpcproc.PID) string {
@@ -116,7 +116,7 @@ func (c *Client) nodeView(n grpcproc.NodeInfo) NodeView {
 		v.Links = append(v.Links, LinkView{
 			Peer: l.Peer.Name, Incarnation: l.Peer.Incarnation, Direction: dir, State: l.State.String(),
 			Age: c.since(l.EstablishedAt), Reconnects: l.Reconnects, Messages: l.Messages, Bytes: l.Bytes,
-			Queued: l.Queued, RetryIn: Short(l.RetryAt.Sub(c.now())), LastError: l.LastError,
+			Queued: l.Queued, RetryIn: short(l.RetryAt.Sub(c.now())), LastError: l.LastError,
 		})
 	}
 	return v
@@ -126,7 +126,7 @@ func (c *Client) processView(p grpcproc.ProcessInfo) ProcessView {
 	return ProcessView{
 		PID: p.PID.String(), Name: p.Name, Label: p.Label, Type: p.Type, Parent: pidString(p.Parent),
 		State: p.State.String(), Uptime: c.since(p.StartedAt),
-		Mailbox: p.Mailbox.Depth, MailboxPeak: p.Mailbox.Peak, OldestWait: Short(p.Mailbox.OldestAge),
+		Mailbox: p.Mailbox.Depth, MailboxPeak: p.Mailbox.Peak, OldestWait: short(p.Mailbox.OldestAge),
 		Received: p.Received, Sent: p.Sent, CallsInFlight: p.CallsInFlight, LastMessage: p.LastMessage,
 		Monitors: p.Monitors, Links: p.Links, TrapExit: p.TrapExit, Watchers: p.Watchers, LogLevel: p.LogLevel.String(),
 	}

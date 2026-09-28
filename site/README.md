@@ -36,8 +36,8 @@ After changing an example's code, run its tests with `-update` to refresh
 the pinned output: `cd examples && go test ./quickstart ./actors
 ./supervisor ./blockingio ./pubsub -update` and `go test ./guide -update`.
 
-.github/workflows/pages.yml builds the site on every change to it or to the
-examples, and deploys it from `main`.
+.github/workflows/pages.yml builds the site on every change to it, to the
+examples, or to cron and leader, and deploys it from `main`.
 
 ## Notice
 

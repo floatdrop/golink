@@ -40,9 +40,9 @@ func New(cc grpc.ClientConnInterface) *Client {
 	return &Client{rpc: inspectv1.NewInspectorClient(cc), now: time.Now}
 }
 
-// ParseTarget reads a process reference: a PID as grpcproc prints it,
+// parseTarget reads a process reference: a PID as grpcproc prints it,
 // "<node.incarnation.id>", or a registered name. A name is looked up on node.
-func ParseTarget(s string) (*inspectv1.Target, error) {
+func parseTarget(s string) (*inspectv1.Target, error) {
 	if inner, ok := strings.CutPrefix(s, "<"); ok {
 		inner, ok = strings.CutSuffix(inner, ">")
 		if !ok {
@@ -209,7 +209,7 @@ func parseState(s string) (inspectv1.ProcessState, error) {
 // Process describes one process; with ask, also what it publishes about
 // itself, waiting up to wait for a busy process to answer.
 func (c *Client) Process(ctx context.Context, node, target string, ask bool, wait time.Duration) (ProcessView, error) {
-	t, err := ParseTarget(target)
+	t, err := parseTarget(target)
 	if err != nil {
 		return ProcessView{}, err
 	}
@@ -228,7 +228,7 @@ func (c *Client) Process(ctx context.Context, node, target string, ask bool, wai
 
 // Exit asks a process to exit with reason ("killed" when empty).
 func (c *Client) Exit(ctx context.Context, node, target, reason string) error {
-	t, err := ParseTarget(target)
+	t, err := parseTarget(target)
 	if err != nil {
 		return err
 	}
@@ -238,7 +238,7 @@ func (c *Client) Exit(ctx context.Context, node, target, reason string) error {
 
 // SetLogLevel sets a process's log threshold.
 func (c *Client) SetLogLevel(ctx context.Context, node, target string, level slog.Level) error {
-	t, err := ParseTarget(target)
+	t, err := parseTarget(target)
 	if err != nil {
 		return err
 	}

@@ -144,8 +144,8 @@ type MemberEvent struct {
 							<A to="concepts/nodes/#incarnations">incarnations</A>;
 						</li>
 						<li>
-							a member up, whatever its incarnation, ends any dial backoff for that peer: it is
-							worth dialing again now.
+							a member up, unless it is an older incarnation than the node has seen, ends any dial
+							backoff for that peer: it is worth dialing again now.
 						</li>
 					</ul>
 					<p>

@@ -55,6 +55,14 @@ func TestAddrForms(t *testing.T) {
 	if !errors.Is(le, io.EOF) || !errors.Is(le, grpcproc.ErrNoConnection) || !strings.Contains(le.Error(), "link to b") {
 		t.Fatal("LinkError")
 	}
+	re := &grpcproc.RemoteError{Msg: grpcproc.ErrNoProc.Error()}
+	if !errors.Is(re, grpcproc.ErrNoProc) || errors.Is(re, grpcproc.ErrType) {
+		t.Fatal("RemoteError is the sentinel with its text, and no other")
+	}
+	full := grpcproc.PID{Node: "n", Incarnation: 2, ID: 3}
+	if grpcproc.PIDFromProto(full.Proto()) != full || (grpcproc.PID{}).Proto() != nil || !grpcproc.PIDFromProto(nil).IsZero() {
+		t.Fatal("PID to proto and back")
+	}
 }
 
 func TestMetadataMerge(t *testing.T) {

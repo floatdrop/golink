@@ -16,8 +16,12 @@ import (
 	"github.com/floatdrop/grpcproc/internal/testpb"
 )
 
-// echo replies Pong{N+1} to Ping messages and calls, errors on N < 0, stops
-// on N == 0 with "normal", and crashes with "boom" on N == -100.
+// errNegativeTwo is the sentinel echo answers a call with N == -2 with.
+var errNegativeTwo = errors.New("negative two")
+
+// echo replies Pong{N+1} to Ping messages and calls, errors on N < 0
+// (errNegativeTwo on N == -2), stops on N == 0 with "normal", and crashes
+// with "boom" on N == -100.
 func echo(p *grpcproc.Process[*testpb.Ping]) error {
 	for {
 		m, err := p.Receive()
@@ -34,6 +38,8 @@ func echo(p *grpcproc.Process[*testpb.Ping]) error {
 			return errors.New("boom")
 		case m.Body.N == -200:
 			panic("kaboom")
+		case m.IsCall() && m.Body.N == -2:
+			_ = m.Reply(nil, errNegativeTwo)
 		case m.IsCall() && m.Body.N < 0:
 			_ = m.Reply(nil, errors.New("negative: "+strconv.FormatInt(m.Body.N, 10)))
 		case m.IsCall():
@@ -197,6 +203,10 @@ func TestRemoteByPIDAndName(t *testing.T) {
 	_, err = a.CallTo[*testpb.Pong](ctx(t), e, &testpb.Ping{N: -1})
 	if re, ok := errors.AsType[*grpcproc.RemoteError](err); !ok || re.Msg != "negative: -1" {
 		t.Fatalf("want remote error, got %v", err)
+	}
+	// A sentinel a handler answers with is that sentinel on the caller's side.
+	if _, err = a.CallTo[*testpb.Pong](ctx(t), e, &testpb.Ping{N: -2}); !errors.Is(err, errNegativeTwo) {
+		t.Fatalf("want the handler's sentinel, got %v", err)
 	}
 	// Unknown process, by PID and by name.
 	if _, err = a.CallTo[*testpb.Pong](ctx(t), grpcproc.PID{Node: "b", Incarnation: e.PID().Incarnation, ID: 9999}, &testpb.Ping{}); !errors.Is(err, grpcproc.ErrNoProc) {

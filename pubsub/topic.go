@@ -176,7 +176,7 @@ func (t *topic) subscribe(m grpcproc.Msg[proto.Message]) error {
 			_ = t.p.SendTo(t.cfg.Notify, &pubsubv1.Demand{Subscribed: true})
 		}
 	}
-	_ = m.Reply(&pubsubv1.Subscribed{From: pidTo(t.p.PID()), Buffer: uint32(t.cfg.Buffer), Type: t.typ}, nil)
+	_ = m.Reply(&pubsubv1.Subscribed{From: t.p.PID().Proto(), Buffer: uint32(t.cfg.Buffer), Type: t.typ}, nil)
 	return nil
 }
 

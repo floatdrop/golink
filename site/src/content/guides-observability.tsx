@@ -224,7 +224,7 @@ type Done func(err error)`}</Code>
 					</p>
 					<p>
 						<C>Metadata</C> is a <C>map[string]string</C> carried with every message, untouched:
-						trace context, a tenant, a deadline. <C>WithMetadata(ctx, md)</C> sets it for a node's
+						trace context, a tenant, a request id. <C>WithMetadata(ctx, md)</C> sets it for a node's
 						sends and every call, and <C>MetadataFrom(ctx)</C> reads it back. The hooks must not
 						modify the map they are given, which may be shared; they return a copy to change it.
 					</p>
@@ -305,10 +305,11 @@ defer reg.Unregister()`}</Code>
 						error status if abnormally. Everything the process sends meanwhile is its child, because
 						the process's sends inherit the metadata of the message it is handling and the hooks put
 						the span there. For a handler's own spans, a database call say, take the handling span
-						from the message:
+						from the message, in the message's context, which ends when its caller stops waiting:
 					</p>
-					<Code>{`ctx := h.Extract(p.Context(), m.Metadata)
-ctx, span := tracer.Start(ctx, "load order")
+					<Code>{`ctx, cancel := m.Context(p.Context())
+defer cancel()
+ctx, span := tracer.Start(h.Extract(ctx, m.Metadata), "load order")
 defer span.End()`}</Code>
 					<p>
 						Spans carry <C>messaging.system=grpcproc</C>, <C>messaging.operation.type</C>,{' '}

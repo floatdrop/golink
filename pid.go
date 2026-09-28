@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+
+	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
 // PID identifies a process anywhere in the cluster. It is a plain comparable
@@ -25,6 +27,20 @@ func (p PID) String() string {
 
 // IsZero reports whether p is the zero PID.
 func (p PID) IsZero() bool { return p == PID{} }
+
+// Proto returns p as a grpcproc.v1.PID, for a PID that travels inside an
+// application's own messages; nil for the zero PID.
+func (p PID) Proto() *grpcprocv1.PID {
+	if p.IsZero() {
+		return nil
+	}
+	return &grpcprocv1.PID{Node: p.Node, Incarnation: p.Incarnation, Id: p.ID}
+}
+
+// PIDFromProto returns the PID a grpcproc.v1.PID holds: the zero PID for nil.
+func PIDFromProto(p *grpcprocv1.PID) PID {
+	return PID{Node: p.GetNode(), Incarnation: p.GetIncarnation(), ID: p.GetId()}
+}
 
 func (p PID) target() (PID, string) { return p, "" }
 
@@ -101,10 +117,16 @@ var (
 	ErrType         = errors.New("grpcproc: process does not accept this message type")
 )
 
-// RemoteError is the error a Call handler returned, carried back to the caller.
+// RemoteError is the error a Call handler returned, carried back to the
+// caller. Only its text crosses the wire, so errors.Is matches it by its
+// text: a handler that answers with a sentinel error, one of grpcproc's or
+// its own, gives the caller an error that is that sentinel to errors.Is.
 type RemoteError struct{ Msg string }
 
 func (e *RemoteError) Error() string { return e.Msg }
+
+// Is reports whether target has the error's text; see RemoteError.
+func (e *RemoteError) Is(target error) bool { return e.Msg == target.Error() }
 
 // ExitError is the cause of a process's context when it was asked to exit,
 // or a process it is linked to exited.

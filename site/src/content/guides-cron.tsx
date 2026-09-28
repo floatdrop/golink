@@ -159,7 +159,9 @@ export const guidesCron: Doc = {
 					<p>
 						A job's <C>Timeout</C> bounds its runs: one that outlives it is told to exit, with
 						reason <C>timeout</C>. Telling is all grpcproc can do to a goroutine, so an{' '}
-						<C>Action</C> that does I/O should pass its context on.
+						<C>Action</C> that does I/O should pass its context on. That context ends at the run's{' '}
+						<C>Deadline</C>, so a call made with it, <C>cron.Call</C>'s included, carries the time left
+						to the callee.
 					</p>
 				</>
 			)

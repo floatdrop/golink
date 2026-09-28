@@ -208,7 +208,11 @@ func TestSendAndCall(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				got <- m.Body.GetValue()
+				if d, ok := m.Deadline(); ok {
+					got <- m.Body.GetValue() + " until " + d.UTC().Format("15:04:05")
+				} else {
+					got <- m.Body.GetValue()
+				}
 				if m.IsCall() {
 					var err error
 					if strings.HasPrefix(m.Body.GetValue(), "fail") {
@@ -229,7 +233,7 @@ func TestSendAndCall(t *testing.T) {
 		f := &failures{}
 		_, err = cron.Start(n, cron.Spec{Jobs: []cron.Job{
 			{Name: "send", Spec: "8 * * * *", Action: cron.Send(target, msg("sent"))},
-			{Name: "call", Spec: "9 * * * *", Action: cron.Call(target, msg("called")), OnFailure: f.on},
+			{Name: "call", Spec: "9 * * * *", Timeout: 30 * time.Second, Action: cron.Call(target, msg("called")), OnFailure: f.on},
 			{Name: "fail", Spec: "10 * * * *", Action: cron.Call(target, msg("fail")), OnFailure: f.on},
 		}})
 		if err != nil {
@@ -241,7 +245,7 @@ func TestSendAndCall(t *testing.T) {
 		for s := range got {
 			all = append(all, s)
 		}
-		check(t, "received", strings.Join(all, "; "), "sent 10:08; called 10:09; fail 10:10")
+		check(t, "received", strings.Join(all, "; "), "sent 10:08; called 10:09 until 10:09:30; fail 10:10")
 		check(t, "failures", f.String(), "10:10 refused")
 	})
 }
@@ -324,6 +328,37 @@ func TestTimeout(t *testing.T) {
 		check(t, "at the timeout", f.String(), "10:08 timeout")
 		sleepUntil(t, "2026-09-28T10:08:20Z")
 		check(t, "then", f.String(), "10:08 timeout; 10:08 timeout")
+	})
+}
+
+// A run's context ends at its Deadline. A run that ends by it, with
+// context.DeadlineExceeded, times out as one told to exit then does; one
+// whose DeadlineExceeded comes sooner, from a deadline of its own, fails
+// with it.
+func TestRunDeadline(t *testing.T) {
+	at(t, "2026-09-28T10:07:30Z", func(t *testing.T, n *grpcproc.Node, _ *logBuf) {
+		f := &failures{}
+		deadlines := make(chan string, 1)
+		_, err := cron.Start(n, cron.Spec{Jobs: []cron.Job{
+			{Name: "sees", Spec: "8 * * * *", Timeout: 20 * time.Second, Action: cron.Func(func(ctx context.Context, r cron.Run) error {
+				d, _ := ctx.Deadline()
+				deadlines <- d.UTC().Format("15:04:05") + " " + r.Deadline.UTC().Format("15:04:05")
+				return nil
+			})},
+			{Name: "ends by it", Spec: "9 * * * *", Timeout: 10 * time.Second, OnFailure: f.on, Action: func(_ *grpcproc.Process[proto.Message], r cron.Run) error {
+				time.Sleep(time.Until(r.Deadline))
+				return context.DeadlineExceeded
+			}},
+			{Name: "its own", Spec: "10 * * * *", Timeout: 10 * time.Second, OnFailure: f.on, Action: func(*grpcproc.Process[proto.Message], cron.Run) error {
+				return context.DeadlineExceeded
+			}},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sleepUntil(t, "2026-09-28T10:10:30Z")
+		check(t, "the context's deadline, and the run's", <-deadlines, "10:08:20 10:08:20")
+		check(t, "failures", f.String(), "10:09 timeout; 10:10 context deadline exceeded")
 	})
 }
 

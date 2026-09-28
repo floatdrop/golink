@@ -304,8 +304,8 @@ var (
 //
 // The spec is checked as in Spec, and a child that fails to start is an
 // error, which sup does not count as a restart. sup's errors come back as
-// *grpcproc.RemoteError text, but for ErrBusy. If ctx ends first, the child
-// may still start.
+// *grpcproc.RemoteError, which is ErrBusy to errors.Is when sup was busy. If
+// ctx ends first, the child may still start.
 //
 // From a process, pass p.Context(): a supervisor that is stopping the
 // caller answers no call until it is done, and a caller that waits with a
@@ -319,9 +319,9 @@ func StartChild(ctx context.Context, n *grpcproc.Node, sup grpcproc.PID, spec Ch
 	defer requests.Delete(id)
 	pid, err := n.CallTo[*grpcprocv1.PID](ctx, sup, &actorv1.Control{Op: &actorv1.Control_Start{Start: id}})
 	if err != nil {
-		return grpcproc.PID{}, fromSupervisor(err)
+		return grpcproc.PID{}, err
 	}
-	return grpcproc.PID{Node: pid.GetNode(), Incarnation: pid.GetIncarnation(), ID: pid.GetId()}, nil
+	return grpcproc.PIDFromProto(pid), nil
 }
 
 // StopChild stops child, a running child of the supervisor sup, and makes
@@ -330,9 +330,8 @@ func StartChild(ctx context.Context, n *grpcproc.Node, sup grpcproc.PID, spec Ch
 // significant child stopped this way does not end sup. sup may run on
 // another node. As for StartChild, pass p.Context() from a process.
 func StopChild(ctx context.Context, n *grpcproc.Node, sup, child grpcproc.PID) error {
-	stop := &grpcprocv1.PID{Node: child.Node, Incarnation: child.Incarnation, Id: child.ID}
-	_, err := n.CallTo[*emptypb.Empty](ctx, sup, &actorv1.Control{Op: &actorv1.Control_Stop{Stop: stop}})
-	return fromSupervisor(err)
+	_, err := n.CallTo[*emptypb.Empty](ctx, sup, &actorv1.Control{Op: &actorv1.Control_Stop{Stop: child.Proto()}})
+	return err
 }
 
 type kid struct {
@@ -442,15 +441,6 @@ const busyAfter = 100 * time.Millisecond
 // again.
 var ErrBusy = errors.New("actor: the supervisor is waiting for a child to exit; try again")
 
-// fromSupervisor turns a supervisor's ErrBusy, which comes back as text,
-// into ErrBusy again.
-func fromSupervisor(err error) error {
-	if re, ok := errors.AsType[*grpcproc.RemoteError](err); ok && re.Msg == ErrBusy.Error() {
-		return ErrBusy
-	}
-	return err
-}
-
 func (s *supervisor) start(k *kid) error {
 	pid, ref, err := k.spec.start(s.p)
 	if err != nil {
@@ -474,10 +464,9 @@ func (s *supervisor) control(m grpcproc.Msg[proto.Message]) {
 			_ = m.Reply(nil, err)
 			return
 		}
-		_ = m.Reply(&grpcprocv1.PID{Node: pid.Node, Incarnation: pid.Incarnation, Id: pid.ID}, nil)
+		_ = m.Reply(pid.Proto(), nil)
 	case *actorv1.Control_Stop:
-		pid := grpcproc.PID{Node: op.Stop.GetNode(), Incarnation: op.Stop.GetIncarnation(), ID: op.Stop.GetId()}
-		_ = m.Reply(&emptypb.Empty{}, s.stopChild(pid))
+		_ = m.Reply(&emptypb.Empty{}, s.stopChild(grpcproc.PIDFromProto(op.Stop)))
 	default:
 		_ = m.Reply(nil, errors.New("actor: a supervisor takes no calls but StartChild and StopChild"))
 	}

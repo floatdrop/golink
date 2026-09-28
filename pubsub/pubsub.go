@@ -38,7 +38,6 @@ import (
 
 	"github.com/floatdrop/grpcproc"
 	pubsubv1 "github.com/floatdrop/grpcproc/proto/grpcproc/pubsub/v1"
-	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
 // Config configures a topic.
@@ -114,11 +113,13 @@ func (t Topic[E]) Subscribe[M proto.Message](ctx context.Context, p *grpcproc.Pr
 			to = relay
 		}
 		s, r, err := subscribe(ctx, p, to)
-		if relayed && errors.Is(err, grpcproc.ErrNoProc) && ctx.Err() == nil {
-			continue // the relay ended before it took the call: start another
+		// The relay ended before it took the call: start another. One that
+		// answered ErrNoProc, as a RemoteError, answered for its topic.
+		if _, answered := errors.AsType[*grpcproc.RemoteError](err); relayed && !answered && errors.Is(err, grpcproc.ErrNoProc) && ctx.Err() == nil {
+			continue
 		}
 		if err != nil {
-			return Subscription{}, fmt.Errorf("pubsub: subscribe to %s: %w", t, fromRelay(err))
+			return Subscription{}, fmt.Errorf("pubsub: subscribe to %s: %w", t, err)
 		}
 		if want := typeName[E](); want != "" && r.GetType() != "" && r.GetType() != want {
 			s.Cancel(p)
@@ -161,33 +162,23 @@ func subscribe[M proto.Message](ctx context.Context, p *grpcproc.Process[M], to 
 		}
 		return Subscription{}, nil, err
 	}
-	from := pidFrom(r.GetFrom())
+	from := grpcproc.PIDFromProto(r.GetFrom())
 	if !remote {
 		ref = p.Monitor(from)
 	}
 	return Subscription{From: from, Ref: ref}, r, nil
 }
 
-// A reply carries no sentinel error, only its text: a relay that answers
-// with the error of its own call to the topic answers with its text, and
-// fromRelay turns that back into the error.
+// A reply carries only an error's text, which errors.Is matches with a
+// sentinel's on the caller's side (see grpcproc.RemoteError). So a relay
+// answers with the sentinel its own call to the topic failed with, not the
+// error that wraps it, whose text is another.
 var relayErrs = []error{grpcproc.ErrNoProc, grpcproc.ErrNoConnection, grpcproc.ErrType, context.DeadlineExceeded}
 
 func toRelay(err error) error {
 	for _, e := range relayErrs {
 		if errors.Is(err, e) {
 			return e
-		}
-	}
-	return err
-}
-
-func fromRelay(err error) error {
-	if re, ok := errors.AsType[*grpcproc.RemoteError](err); ok {
-		for _, e := range relayErrs {
-			if re.Msg == e.Error() {
-				return e
-			}
 		}
 	}
 	return err
@@ -200,12 +191,4 @@ func typeName[E proto.Message]() string {
 	}
 	var e E
 	return string(e.ProtoReflect().Descriptor().FullName())
-}
-
-func pidTo(p grpcproc.PID) *grpcprocv1.PID {
-	return &grpcprocv1.PID{Node: p.Node, Incarnation: p.Incarnation, Id: p.ID}
-}
-
-func pidFrom(p *grpcprocv1.PID) grpcproc.PID {
-	return grpcproc.PID{Node: p.GetNode(), Incarnation: p.GetIncarnation(), ID: p.GetId()}
 }

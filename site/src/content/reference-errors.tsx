@@ -49,7 +49,9 @@ export const referenceErrors: Doc = {
 								<C>*RemoteError</C>,
 								<>
 									The error a <C>Call</C> handler returned, carried back as text. The type says where it
-									came from; the text is the handler's.
+									came from; the text is the handler's. <C>errors.Is</C> matches it by that text, so a
+									handler that answers with a sentinel error, <C>actor.ErrBusy</C> or one of your own,
+									gives the caller an error that is the sentinel to <C>errors.Is</C>.
 								</>
 							],
 							[<C>ErrNameTaken</C>, <>A <C>Spawn</C> with <C>WithName</C> while another process holds the name.</>],
