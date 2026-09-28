@@ -39,8 +39,8 @@ defer insp.Close()`}</Code>
 						is what a cluster of three programs on three hosts needs.
 					</p>
 					<p>
-						<C>inspect.ReadOnly()</C> refuses the three writes: <C>Send</C>, <C>Exit</C> and{' '}
-						<C>SetLogLevel</C>. Anything finer is the job of the interceptors and transport
+						<C>inspect.ReadOnly()</C> refuses the four writes: <C>Send</C>, <C>Call</C>,{' '}
+						<C>Exit</C> and <C>SetLogLevel</C>. Anything finer is the job of the interceptors and transport
 						credentials that guard your other services, as for any gRPC service you register. The
 						tutorial's platform serves the Inspector read-only because it shares the node's port and
 						nothing there authenticates.
@@ -71,6 +71,14 @@ defer insp.Close()`}</Code>
 							],
 							[<C>SetLogLevel</C>, "One process's log threshold."],
 							[<C>Send</C>, <>A message, as an <C>Any</C>, from a tool.</>],
+							[
+								<C>Call</C>,
+								<>
+									A call, as <C>Node.CallTo</C> makes it: the answer as an <C>Any</C>, the request's
+									deadline as the call's, and an answer that is an error as <C>Unknown</C> with its
+									text.
+								</>
+							],
 							[<C>Exit</C>, <>A request to exit; the reason defaults to <C>killed</C>.</>],
 							[<C>Watch</C>, <><C>Node.Subscribe</C> over the wire: spawns, exits, links, dead letters.</>]
 						]}

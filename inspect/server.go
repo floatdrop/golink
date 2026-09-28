@@ -19,6 +19,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/floatdrop/grpcproc"
 	inspectv1 "github.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1"
@@ -47,7 +49,7 @@ func WithResolver(r grpcproc.Resolver, opts ...grpc.DialOption) Option {
 // holds.
 func WithPeers(f PeerFunc) Option { return func(s *Server) { s.peers, s.dialer = f, nil } }
 
-// ReadOnly refuses SetLogLevel, Send and Exit with PermissionDenied.
+// ReadOnly refuses SetLogLevel, Send, Call and Exit with PermissionDenied.
 func ReadOnly() Option { return func(s *Server) { s.readOnly = true } }
 
 // Server implements grpcproc.inspect.v1.Inspector for one node.
@@ -248,6 +250,52 @@ func (s *Server) Send(ctx context.Context, req *inspectv1.SendRequest) (*inspect
 		return nil, status.Errorf(codes.Unavailable, "inspect: %v", err)
 	}
 	return &inspectv1.SendResponse{}, nil
+}
+
+func (s *Server) Call(ctx context.Context, req *inspectv1.CallRequest) (*inspectv1.CallResponse, error) {
+	if err := s.writable(); err != nil {
+		return nil, err
+	}
+	if c, node, err := s.remote(ctx, req.GetNode(), req.GetTarget()); c != nil || err != nil {
+		return forward(node, err, func() (*inspectv1.CallResponse, error) { return c.Call(ctx, req) })
+	}
+	to, err := s.addr(req.GetTarget())
+	if err != nil {
+		return nil, err
+	}
+	if req.GetBody() == nil {
+		return nil, status.Error(codes.InvalidArgument, "inspect: body is required")
+	}
+	body, err := req.GetBody().UnmarshalNew()
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "inspect: body: %v", err)
+	}
+	resp, err := s.node.CallTo[proto.Message](ctx, to, body)
+	if err != nil {
+		return nil, callStatus(err)
+	}
+	a, err := anypb.New(resp)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "inspect: answer: %v", err)
+	}
+	return &inspectv1.CallResponse{Body: a}, nil
+}
+
+// callStatus is how a call that failed reads over gRPC: an answer that is an
+// error keeps its text, as Unknown, which is what a tool compares.
+func callStatus(err error) error {
+	if re, ok := errors.AsType[*grpcproc.RemoteError](err); ok {
+		return status.Error(codes.Unknown, re.Msg)
+	}
+	switch {
+	case errors.Is(err, grpcproc.ErrNoProc):
+		return status.Errorf(codes.NotFound, "inspect: %v", err)
+	case errors.Is(err, grpcproc.ErrType):
+		return status.Errorf(codes.InvalidArgument, "inspect: %v", err)
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		return status.FromContextError(err).Err()
+	}
+	return status.Errorf(codes.Unavailable, "inspect: %v", err)
 }
 
 func (s *Server) Exit(ctx context.Context, req *inspectv1.ExitRequest) (*inspectv1.ExitResponse, error) {
