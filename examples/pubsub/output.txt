@@ -1,0 +1,4 @@
+apple left: 8
+apple left: 7
+apple left: 5
+stock ended: closing

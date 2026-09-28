@@ -637,7 +637,7 @@ them. Two primitives went into the core because they need process internals:
   when its significant children end by themselves for good; one it stops
   does not count. A permanent child cannot be significant.
 
-## Pub/sub (`grpcproc/pubsub`, sketch)
+## Pub/sub (`grpcproc/pubsub`, done)
 
 Built on the public core API only, as `actor` is. A topic is a process: it
 keeps its subscribers and its last `Buffer` events, and sends each event it

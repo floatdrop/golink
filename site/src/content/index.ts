@@ -15,6 +15,7 @@ import { guidesConfiguration } from './guides-configuration.tsx';
 import { guidesEtcd } from './guides-etcd.tsx';
 import { guidesInspector } from './guides-inspector.tsx';
 import { guidesObservability } from './guides-observability.tsx';
+import { guidesPubsub } from './guides-pubsub.tsx';
 import { guidesSupervisors } from './guides-supervisors.tsx';
 import { guidesTesting } from './guides-testing.tsx';
 import { landing } from './landing.tsx';
@@ -41,6 +42,7 @@ const all: Doc[] = [
 	guidesActors,
 	guidesSupervisors,
 	guidesBlockingIO,
+	guidesPubsub,
 	guidesConfiguration,
 	guidesTesting,
 	guidesObservability,
