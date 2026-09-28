@@ -18,9 +18,9 @@ leader.Start(node, leader.Spec[*schedpb.State]{
     },
 })
 
-// on any node that takes part
-info, err := leader.Status(ctx, node, "scheduler") // Role, Term, Leader, View, Singleton
-sched := grpcproc.Named[*schedpb.Msg](info.Leader, "scheduler")
+// on any node that takes part: the singleton, wherever it runs
+resp, err := leader.Call[*schedpb.Scheduled](ctx, node, "scheduler", "scheduler", &schedpb.Schedule{…})
+info, err := leader.Status(ctx, node, "scheduler") // Role, Term, Leader, View, Singleton, Cordoned
 ```
 
 ## Leadership is the singleton's lifetime
@@ -112,6 +112,33 @@ State and terms live in memory. A cluster that loses a majority of its nodes at
 once loses them, and a restarted node, which may have voted before, votes only
 once it has had time to hear from a leader. Keep the state to what the next
 leader needs to carry on: the jobs a scheduler ran last, not a database.
+
+## Calling the leader
+
+```go
+scheduled, err := leader.Call[*schedpb.Scheduled](ctx, p, "scheduler", "scheduler", &schedpb.Schedule{…})
+```
+
+calls the process registered as `scheduler` on whichever node leads
+`scheduler`, from a node or from inside a process (`p`), and follows
+leadership as it moves. It asks again, for as long as `ctx` allows, only when
+the call cannot have reached the singleton:
+
+| The call | Asked again? |
+| --- | --- |
+| no leader is known yet | yes |
+| the node named has no such process: it no longer leads, or has not started its singleton yet | yes |
+| never left this node: a `*grpcproc.LinkError` whose `Unsent` is set | yes |
+| left, and its link broke, or `ctx` ended, while it waited | no: it may have been handled |
+| was answered with an error | no: that is the answer |
+
+Delivery is at most once, so the choice to repeat a call that may have been
+handled is the caller's: fine for a read, or for a request the singleton
+de-duplicates.
+[`examples/singleton`](../examples/singleton/ids_test.go) has a singleton
+that hands out numbers that never repeat, across a leader crash: each is
+checkpointed before it is handed out, and callers on every node reach it
+through `leader.Call`.
 
 ## Moving the leader, and taking a node out
 

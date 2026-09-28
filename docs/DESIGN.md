@@ -786,6 +786,12 @@ leader's singleton, and its state the singleton's.
   refused pre-vote carries the voter's term: a restarted node, which holds
   nothing, catches up without a leader to send it anything, which is what
   keeps a cluster whose other nodes are all cordoned from deadlocking.
+- **Calling the leader.** `leader.Call` finds the leader through the
+  caller's node's elector and calls the singleton by name, following
+  leadership as it moves. It asks again only when the call cannot have
+  reached it: no leader known, `ErrNoProc` from the node named, or a
+  `LinkError` whose `Unsent` is set. A call that left may have been handled,
+  and delivery stays at most once, so that one is the caller's to repeat.
 - **In memory.** Terms, votes and state are not persisted: losing a majority
   at once loses them. A restarted elector does not vote for two election
   timeouts, the time a leader elected with a vote it may have cast before

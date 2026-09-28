@@ -1,5 +1,3 @@
-github.com/floatdrop/grpcproc v0.0.6-0.20260928070700-4f455e10e5bb h1:MXYbKtDoV6EAexbkHosMhv1pm8ouNgfiVqwdJxkjalA=
-github.com/floatdrop/grpcproc v0.0.6-0.20260928070700-4f455e10e5bb/go.mod h1:lUNiPLRR97lqydfE+CturNB9EZHd0lJuVktmF408bc0=
 github.com/floatdrop/grpcproc v0.0.6-0.20260928084944-cddd57c677e9 h1:V4BLmvQ1l43L2E2/qRiLmeVwQutzbV+9wRz+L52AAGw=
 github.com/floatdrop/grpcproc v0.0.6-0.20260928084944-cddd57c677e9/go.mod h1:lUNiPLRR97lqydfE+CturNB9EZHd0lJuVktmF408bc0=
 github.com/golang/protobuf v1.5.4 h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=
