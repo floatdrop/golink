@@ -124,6 +124,17 @@ func blocking(started *runs) cron.Action {
 	})
 }
 
+// deaf is an Action that holds its run until the cron process tells it to
+// exit, whatever its Deadline: it watches its process's context, which has
+// none, where blocking's context ends at the Deadline by itself.
+func deaf(started *runs) cron.Action {
+	return func(p *grpcproc.Process[proto.Message], r cron.Run) error {
+		started.record(r)
+		<-p.Context().Done()
+		return context.Cause(p.Context())
+	}
+}
+
 func inspect(t *testing.T, n *grpcproc.Node, pid grpcproc.PID) map[string]string {
 	t.Helper()
 	m, err := n.Inspect(t.Context(), pid)
@@ -317,7 +328,8 @@ func TestTimeout(t *testing.T) {
 		started, f := &runs{}, &failures{}
 		_, err := cron.Start(n, cron.Spec{Jobs: []cron.Job{
 			{Name: "slow", Spec: "* * * * *", Timeout: 10 * time.Second, Action: blocking(started), OnFailure: f.on},
-			{Name: "slower", Spec: "* * * * *", Timeout: 20 * time.Second, Action: blocking(started), OnFailure: f.on},
+			// Only the cron process's Exit ends this one, at its Deadline.
+			{Name: "slower", Spec: "* * * * *", Timeout: 20 * time.Second, Action: deaf(started), OnFailure: f.on},
 		}})
 		if err != nil {
 			t.Fatal(err)

@@ -264,6 +264,9 @@ func (c *Cluster) keep(ctx context.Context, self grpcproc.Member, value []byte, 
 			if ctx.Err() != nil {
 				return
 			}
+			// The lease is gone, and nothing is published under it: a
+			// withdraw while this registers again has nothing to revoke.
+			lease.Store(0)
 			c.log.Warn("lease lost, registering again", "node", self.Name, "err", err)
 			select {
 			case <-ctx.Done():

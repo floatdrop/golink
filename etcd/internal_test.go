@@ -309,6 +309,32 @@ func TestKeepStopsWhenANewerIncarnationIsRegistered(t *testing.T) {
 	}
 }
 
+// A withdraw while keep registers again, after the lease was lost, has
+// nothing to revoke: the lost lease is gone, and nothing else is published.
+func TestWithdrawWhileRegisteringAgain(t *testing.T) {
+	e := setup(t)
+	withdraw, err := e.c.Register(t.Context(), grpcproc.Member{Name: "b", Incarnation: 1, Addr: "b:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, _ := e.cli.Get(t.Context(), "/x/nodes/b")
+	e.lease.failGrants.Store(1 << 20) // registering again fails, and keeps trying
+	grants := e.lease.grants.Load()
+	if _, err := e.cli.Revoke(t.Context(), clientv3.LeaseID(resp.Kvs[0].Lease)); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for e.lease.grants.Load() == grants {
+		if time.Now().After(deadline) {
+			t.Fatal("never tried to register again")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := withdraw(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestKeepRegistersAgainThroughFailures(t *testing.T) {
 	e := setup(t)
 	// KeepAlive fails at once, and so does the first registration after it.
