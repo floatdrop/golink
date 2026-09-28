@@ -691,11 +691,10 @@ has:
   subscriber, and with the upstream topic, for its reason, which its
   subscribers see.
 - **The relay waits as long as its first subscriber.** It subscribes to its
-  topic while that subscriber's call waits on it. A call's deadline does not
-  cross to the callee, so `Subscribe` carries the time left on its ctx, and
-  the relay gives up when the subscriber does, rather than after a timeout
-  of its own. A relay that fails ends, and the subscribers queued behind the
-  first start another.
+  topic while that subscriber's call waits on it, within the call's
+  deadline, which the call carries (`Msg.Context`): the relay gives up when
+  the subscriber does, rather than after a timeout of its own. A relay that
+  fails ends, and the subscribers queued behind the first start another.
 - **Where the monitor goes.** A subscriber on the topic's node monitors by
   PID after the answer, so a failed call leaves no Down behind. The relay
   monitors first, on the same link as its call: a monitor placed after the

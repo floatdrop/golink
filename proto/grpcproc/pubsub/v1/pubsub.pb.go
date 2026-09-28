@@ -13,7 +13,6 @@ import (
 	v1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -28,12 +27,10 @@ const (
 
 // Subscribe, as a call, adds the caller to a topic. The topic sends it the
 // events it keeps first, then answers with Subscribed; every event published
-// after that follows, in order.
+// after that follows, in order. A relay that has to subscribe to its topic
+// first does so within the call's deadline.
 type Subscribe struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The time left to the caller, for a relay that has to subscribe to its
-	// topic first: it gives up when the caller does. Unset: no limit.
-	Timeout       *durationpb.Duration `protobuf:"bytes,1,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -66,13 +63,6 @@ func (x *Subscribe) ProtoReflect() protoreflect.Message {
 // Deprecated: Use Subscribe.ProtoReflect.Descriptor instead.
 func (*Subscribe) Descriptor() ([]byte, []int) {
 	return file_grpcproc_pubsub_v1_pubsub_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *Subscribe) GetTimeout() *durationpb.Duration {
-	if x != nil {
-		return x.Timeout
-	}
-	return nil
 }
 
 // Subscribed answers Subscribe.
@@ -228,9 +218,8 @@ var File_grpcproc_pubsub_v1_pubsub_proto protoreflect.FileDescriptor
 
 const file_grpcproc_pubsub_v1_pubsub_proto_rawDesc = "" +
 	"\n" +
-	"\x1fgrpcproc/pubsub/v1/pubsub.proto\x12\x12grpcproc.pubsub.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1agrpcproc/v1/grpcproc.proto\"@\n" +
-	"\tSubscribe\x123\n" +
-	"\atimeout\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"^\n" +
+	"\x1fgrpcproc/pubsub/v1/pubsub.proto\x12\x12grpcproc.pubsub.v1\x1a\x1agrpcproc/v1/grpcproc.proto\"\v\n" +
+	"\tSubscribe\"^\n" +
 	"\n" +
 	"Subscribed\x12$\n" +
 	"\x04from\x18\x01 \x01(\v2\x10.grpcproc.v1.PIDR\x04from\x12\x16\n" +
@@ -256,21 +245,19 @@ func file_grpcproc_pubsub_v1_pubsub_proto_rawDescGZIP() []byte {
 
 var file_grpcproc_pubsub_v1_pubsub_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_grpcproc_pubsub_v1_pubsub_proto_goTypes = []any{
-	(*Subscribe)(nil),           // 0: grpcproc.pubsub.v1.Subscribe
-	(*Subscribed)(nil),          // 1: grpcproc.pubsub.v1.Subscribed
-	(*Unsubscribe)(nil),         // 2: grpcproc.pubsub.v1.Unsubscribe
-	(*Demand)(nil),              // 3: grpcproc.pubsub.v1.Demand
-	(*durationpb.Duration)(nil), // 4: google.protobuf.Duration
-	(*v1.PID)(nil),              // 5: grpcproc.v1.PID
+	(*Subscribe)(nil),   // 0: grpcproc.pubsub.v1.Subscribe
+	(*Subscribed)(nil),  // 1: grpcproc.pubsub.v1.Subscribed
+	(*Unsubscribe)(nil), // 2: grpcproc.pubsub.v1.Unsubscribe
+	(*Demand)(nil),      // 3: grpcproc.pubsub.v1.Demand
+	(*v1.PID)(nil),      // 4: grpcproc.v1.PID
 }
 var file_grpcproc_pubsub_v1_pubsub_proto_depIdxs = []int32{
-	4, // 0: grpcproc.pubsub.v1.Subscribe.timeout:type_name -> google.protobuf.Duration
-	5, // 1: grpcproc.pubsub.v1.Subscribed.from:type_name -> grpcproc.v1.PID
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	4, // 0: grpcproc.pubsub.v1.Subscribed.from:type_name -> grpcproc.v1.PID
+	1, // [1:1] is the sub-list for method output_type
+	1, // [1:1] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_grpcproc_pubsub_v1_pubsub_proto_init() }

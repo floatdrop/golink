@@ -167,9 +167,9 @@ export const guidesPubsub: Doc = {
 						topic forgets it.
 					</p>
 					<p>
-						The relay subscribes to the topic while its first subscriber waits. A call's deadline
-						does not reach the process called, so <C>Subscribe</C> sends the relay the time left on
-						its <C>ctx</C>, and the relay gives up when the subscriber does. Give <C>Subscribe</C> a
+						The relay subscribes to the topic while its first subscriber waits, within that
+						subscriber's deadline: a call carries its <C>ctx</C>'s deadline to the process called,
+						so the relay gives up when the subscriber does. Give <C>Subscribe</C> a
 						deadline, as the dashboard does: with none, the relay waits until the topic answers or
 						its node becomes unreachable. A topic that does not exist is <C>ErrNoProc</C>, and a node
 						that cannot be reached <C>ErrNoConnection</C>, as for a call.

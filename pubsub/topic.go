@@ -1,7 +1,6 @@
 package pubsub
 
 import (
-	"context"
 	"errors"
 	"slices"
 	"strconv"
@@ -124,9 +123,9 @@ func (t *topic) handle(m grpcproc.Msg[proto.Message]) error {
 	}
 	// A topic traps no exits: no Exited reaches it, and the exit of the
 	// process that owns it ends it in Receive.
-	switch b := m.Body.(type) {
+	switch m.Body.(type) {
 	case *pubsubv1.Subscribe:
-		return t.subscribe(m, b)
+		return t.subscribe(m)
 	case *pubsubv1.Unsubscribe:
 		if ref, ok := t.subs[m.From]; ok {
 			t.p.Demonitor(ref)
@@ -146,19 +145,16 @@ func (t *topic) handle(m grpcproc.Msg[proto.Message]) error {
 	return nil
 }
 
-func (t *topic) subscribe(m grpcproc.Msg[proto.Message], req *pubsubv1.Subscribe) error {
+func (t *topic) subscribe(m grpcproc.Msg[proto.Message]) error {
 	if !m.IsCall() {
 		t.p.Log().Warn("pubsub: Subscribe must be a call", "from", m.From)
 		return nil
 	}
 	if t.up != nil && t.up.sub.From.IsZero() {
-		// The first subscriber waits for this; the relay gives up when it does.
-		ctx := t.p.Context()
-		if req.Timeout != nil {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, req.Timeout.AsDuration())
-			defer cancel()
-		}
+		// The first subscriber waits for this, within its call's deadline,
+		// which m.Context ends at: the relay gives up when it does.
+		ctx, cancel := m.Context(t.p.Context())
+		defer cancel()
 		s, r, err := subscribe(ctx, t.p, t.up.addr)
 		if err != nil {
 			_ = m.Reply(nil, toRelay(err))

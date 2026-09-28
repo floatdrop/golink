@@ -4,19 +4,15 @@ syntax = "proto3";
 
 package grpcproc.pubsub.v1;
 
-import "google/protobuf/duration.proto";
 import "grpcproc/v1/grpcproc.proto";
 
 option go_package = "github.com/floatdrop/grpcproc/proto/grpcproc/pubsub/v1;pubsubv1";
 
 // Subscribe, as a call, adds the caller to a topic. The topic sends it the
 // events it keeps first, then answers with Subscribed; every event published
-// after that follows, in order.
-message Subscribe {
-  // The time left to the caller, for a relay that has to subscribe to its
-  // topic first: it gives up when the caller does. Unset: no limit.
-  google.protobuf.Duration timeout = 1;
-}
+// after that follows, in order. A relay that has to subscribe to its topic
+// first does so within the call's deadline.
+message Subscribe {}
 
 // Subscribed answers Subscribe.
 message Subscribed {

@@ -33,10 +33,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"time"
 
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/floatdrop/grpcproc"
 	pubsubv1 "github.com/floatdrop/grpcproc/proto/grpcproc/pubsub/v1"
@@ -153,11 +151,7 @@ func subscribe[M proto.Message](ctx context.Context, p *grpcproc.Process[M], to 
 	if remote {
 		ref = p.Monitor(to)
 	}
-	req := &pubsubv1.Subscribe{}
-	if deadline, ok := ctx.Deadline(); ok {
-		req.Timeout = durationpb.New(time.Until(deadline))
-	}
-	r, err := p.CallTo[*pubsubv1.Subscribed](ctx, to, req)
+	r, err := p.CallTo[*pubsubv1.Subscribed](ctx, to, &pubsubv1.Subscribe{})
 	if err != nil {
 		if remote {
 			p.Demonitor(ref)
