@@ -1,5 +1,6 @@
 import ordersTest from '../../../examples/guide/internal/orders/orders_test.go?raw';
 import supervisor from '../../../examples/supervisor/main.go?raw';
+import restartTest from '../../../examples/supervisor/restart_test.go?raw';
 import shopTest from '../../../examples/testing/shop_test.go?raw';
 
 import { Code, region } from '../code.tsx';
@@ -11,7 +12,7 @@ export const guidesTesting: Doc = {
 	path: 'guides/testing/',
 	title: 'Testing',
 	description:
-		'A cluster inside one go test with grpcproctest, partitions and crashes included, and a single actor tested alone with fakes behind the addresses it calls.',
+		'A cluster inside one go test with grpcproctest, partitions and crashes included, a single actor tested alone with fakes behind the addresses it calls, and timers and restarts tested deterministically with testing/synctest.',
 	lead: (
 		<p>
 			The best argument for processes that work the same locally and remotely is that a three-node
@@ -181,6 +182,44 @@ shop, warehouse := c.Node("shop"), c.Node("warehouse")`}</Code>
 						process that must be gone, <C>node.Process(pid)</C> answers whether it still runs, and{' '}
 						<C>node.Whereis(name)</C> whether a name is registered, which is what a restart hands
 						over.
+					</p>
+				</>
+			)
+		},
+		{
+			id: 'deterministic',
+			title: 'Deterministic tests',
+			body: (
+				<>
+					<p>
+						A test that waits on real time is slow when it waits long enough and flaky when it does
+						not. Go's <C>testing/synctest</C> removes both. Inside <C>synctest.Test</C>, the time
+						package runs on a fake clock that moves only when every goroutine in the test's bubble
+						waits, and <C>synctest.Wait</C> returns once they all do. grpcproc runs in a bubble as
+						it is: a process waits on channels the bubble sees, and <C>SendAfter</C>,{' '}
+						<C>ReceiveTimeout</C>, a caller's deadline and a supervisor's restart window and{' '}
+						<C>Shutdown</C> all keep the bubble's time. A <C>grpcproctest</C> cluster runs there too,
+						since its connections are in memory, and so do its partitions, crashes and restarts.
+					</p>
+					<Code caption="examples/supervisor/restart_test.go">{region(restartTest, /^\/\/ The tree restarts the inventory/, /^}/)}</Code>
+					<p>
+						<C>time.Sleep(time.Minute)</C> takes no time at all, and <C>synctest.Wait</C> after a
+						crash returns once the supervisor has restarted the child, or given up: every process
+						waits, so the test can look. There is no sleep to tune and no event to wait for, which
+						is what <A to="guides/testing/#events">subscribing</A> does outside a bubble, for every
+						process at once.
+					</p>
+					<p>
+						Two rules keep a test in its bubble. Everything it uses is made inside{' '}
+						<C>synctest.Test</C>: nodes, clusters, channels, contexts; a channel or a timer made
+						outside cannot be used inside. And every process has ended by the time the test does,
+						or synctest reports a deadlock with the goroutines still waiting: stopping the node in{' '}
+						<C>t.Cleanup</C>, as <C>grpcproctest</C> does for its cluster, ends them all, and a
+						process that ignores its exit is then the leak the report shows. Real sockets stay
+						outside: a goroutine blocked on the network is not waiting where the bubble can see it,
+						so a test that listens on a port, as the{' '}
+						<A to="guides/blocking-io/">blocking I/O</A> example does, or talks to etcd, runs on
+						real time.
 					</p>
 				</>
 			)

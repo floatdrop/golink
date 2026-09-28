@@ -1,3 +1,4 @@
+import inventoryTest from '../../../examples/actors/inventory_test.go?raw';
 import actors from '../../../examples/actors/main.go?raw';
 import actorsOutput from '../../../examples/actors/output.txt?raw';
 
@@ -285,31 +286,18 @@ addr, err := node.Spawn(actor.Run(&Pricer{table: table}))`}</Code>
 				<>
 					<p>
 						An actor is a process, so a test spawns it on a node and talks to it. A node with no
-						peers needs only a name and an empty resolver, and stops when the test ends:
+						peers needs only a name and an empty resolver, and stops when the test ends. Run inside
+						Go's <C>testing/synctest</C>, the test needs no timeout to tell a parked call from a slow
+						one: <C>synctest.Wait</C> returns once every process waits, so a reservation not
+						answered by then is parked, and one answered after the restock was answered by it:
 					</p>
-					<Code>{`func TestInventoryParksAReservation(t *testing.T) {
-	node, err := grpcproc.NewNode(grpcproc.Config{Name: "test", Resolver: grpcproc.StaticResolver{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = node.Stop(context.Background()) })
-
-	addr, err := node.Spawn(actor.Run(&Inventory{ledger: &Ledger{}}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	inv := shoppb.StockAddr{Addr: addr}
-	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
-	defer cancel()
-	if _, err := inv.Reserve(ctx, node, &shoppb.Reserve{Sku: "apple", Qty: 1}); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("a reservation with no stock should wait, got %v", err)
-	}
-}`}</Code>
+					<Code caption="examples/actors/inventory_test.go">{region(inventoryTest, /^\/\/ A reservation with nothing in stock/, /^}/)}</Code>
 					<p>
 						An actor that calls other actors takes their addresses as dependencies, and a test puts
 						fakes behind them: plain process functions registered under the same names.{' '}
-						<A to="guides/testing/">Testing</A> shows that with the tutorial's orders desk, and{' '}
-						<C>grpcproctest</C> for anything that needs more than one node.
+						<A to="guides/testing/">Testing</A> shows that with the tutorial's orders desk,{' '}
+						<C>grpcproctest</C> for anything that needs more than one node, and{' '}
+						<A to="guides/testing/#deterministic">deterministic tests</A> for timers and restarts.
 					</p>
 				</>
 			)

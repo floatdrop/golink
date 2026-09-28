@@ -404,6 +404,18 @@ c.Restart("b")
 Its nodes dial again at once after a failed dial (`DialBackoff` is negative),
 so the send right after `Heal` or `Restart` reaches the peer.
 
+Nodes and clusters run inside a `testing/synctest` bubble as they are, and
+tests in the core, `actor`, `grpcproctest` and `pubsub` hold them to it. A process
+waits on channels the bubble sees, so `synctest.Wait` returns once every
+process waits, and timers (`SendAfter`, `ReceiveTimeout`, deadlines, a
+supervisor's restart window and `Shutdown`) keep the bubble's fake clock;
+`grpcproctest`'s bufconn connections are channels too. That is the whole of
+deterministic testing: no clock interface in `Config`, no mock node. One
+default had to change for it: a bubble's clock stands still until every
+goroutine waits, so the default incarnation, the start time, is now one
+more than the last this program picked when the clock has not moved, and
+a node made again under the same name still gets a newer one.
+
 ## Observability (v0.1 core surface, v0.2 tools)
 
 This is the part taken from ergo. Its Observer, REST API and MCP server are

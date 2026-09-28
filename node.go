@@ -63,6 +63,22 @@ type MemberEvent struct {
 	Up     bool
 }
 
+// lastIncarnation is the default incarnation this program picked last.
+var lastIncarnation atomic.Uint64
+
+// nextIncarnation is the current Unix time in nanoseconds, or one more than
+// the incarnation picked last, if the clock has not moved past it: two nodes
+// of one name started at the same instant must not share an incarnation.
+func nextIncarnation() uint64 {
+	for {
+		last := lastIncarnation.Load()
+		inc := max(uint64(time.Now().UnixNano()), last+1)
+		if lastIncarnation.CompareAndSwap(last, inc) {
+			return inc
+		}
+	}
+}
+
 // ResolverFunc adapts a function to Resolver.
 type ResolverFunc func(ctx context.Context, node string) (string, error)
 
@@ -94,7 +110,10 @@ type Config struct {
 	// it calls Disconnect: a random or hashed Incarnation would be refused
 	// whenever it came out lower than the last one. Zero picks the current
 	// Unix time in nanoseconds, which grows as long as the clocks of the
-	// hosts the node starts on agree to within the time between two starts.
+	// hosts the node starts on agree to within the time between two starts,
+	// or one more than the last incarnation picked in this program, if the
+	// clock has not moved since: a coarse clock, or a testing/synctest
+	// bubble, whose clock stands still until every goroutine in it waits.
 	Incarnation uint64
 	// Resolver maps peer names to addresses.
 	Resolver Resolver
@@ -239,7 +258,9 @@ func NewNode(cfg Config) (*Node, error) {
 	if cfg.Resolver == nil {
 		return nil, errors.New("grpcproc: Config.Resolver is required")
 	}
-	cfg.Incarnation = cmp.Or(cfg.Incarnation, uint64(time.Now().UnixNano()))
+	if cfg.Incarnation == 0 {
+		cfg.Incarnation = nextIncarnation()
+	}
 	cfg.Logger = cmp.Or(cfg.Logger, slog.Default())
 	cfg.DialTimeout = cmp.Or(cfg.DialTimeout, 5*time.Second)
 	cfg.DialBackoff = cmp.Or(cfg.DialBackoff, 5*time.Second)
