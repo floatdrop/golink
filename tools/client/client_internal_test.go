@@ -118,16 +118,10 @@ func TestFailuresAndOddities(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A cluster whose first node fails is an error.
-	c.rpc = &failing{}
+	c.rpc = unreachable{}
 	if _, err := c.Cluster(ctx); !errors.Is(err, errFake) {
 		t.Fatal(err)
 	}
-}
-
-type failing struct{ inspectv1.InspectorClient }
-
-func (failing) GetNode(context.Context, *inspectv1.GetNodeRequest, ...grpc.CallOption) (*inspectv1.GetNodeResponse, error) {
-	return nil, errFake
 }
 
 func TestDeadlinePassed(t *testing.T) {

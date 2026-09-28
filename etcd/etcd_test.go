@@ -115,7 +115,7 @@ func TestRegisterResolveAndMembers(t *testing.T) {
 func TestWatch(t *testing.T) {
 	cli := startEtcd(t)
 	c := grpcprocetcd.New(cli, "/w")
-	wa, _ := c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 1, Addr: "a:1"})
+	_, _ = c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 1, Addr: "a:1"})
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	events, err := c.Watch(ctx)
@@ -140,7 +140,6 @@ func TestWatch(t *testing.T) {
 	if ev := next(t, events); !ev.Up || ev.Member.Incarnation != 2 {
 		t.Fatalf("%+v", ev)
 	}
-	_ = wa
 	// Garbage is skipped; deleting it is a down for whichever incarnation.
 	_, _ = cli.Put(t.Context(), "/w/nodes/junk", "{")
 	_, _ = cli.Delete(t.Context(), "/w/nodes/junk")

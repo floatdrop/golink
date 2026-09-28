@@ -4,7 +4,6 @@ import (
 	"errors"
 	"testing"
 	"testing/synctest"
-	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -47,20 +46,9 @@ func (h exits) HandleExited(_ *P, e grpcproc.Exited) error {
 	return nil
 }
 
+// newTrapping returns a trapping that links to target, unless it is nil.
 func newTrapping(target grpcproc.Target) *trapping {
 	return &trapping{target: target, ready: make(chan struct{}), seen: make(chan string, 4), ended: make(chan error, 1)}
-}
-
-func within[T any](t *testing.T, ch <-chan T) T {
-	t.Helper()
-	select {
-	case v := <-ch:
-		return v
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out")
-		var zero T
-		return zero
-	}
 }
 
 // An actor that traps exits hands them to HandleExited, and carries on;
@@ -87,14 +75,7 @@ func TestHandleExited(t *testing.T) {
 				_ = n.Exit(t.Context(), target, "gone")
 				// The Exited is the actor's first item: once it is taken, the
 				// message sent next is handled after it.
-				for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
-					if info, _ := n.Process(a.PID()); info.Received == 1 {
-						break
-					}
-					if time.Now().After(deadline) {
-						t.Fatal("the Exited never came")
-					}
-				}
+				until(t, "the Exited is taken", func() bool { info, _ := n.Process(a.PID()); return info.Received == 1 })
 				if tc.want != "" {
 					if got := within(t, h.seen); got != tc.want {
 						t.Fatal(got)
@@ -186,15 +167,10 @@ func TestRestartsLeaveOneLinkPerChild(t *testing.T) {
 			send(t, n, "w1", -1)
 			restarted(t, n, "w1", old)
 		}
-		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		until(t, "the supervisor settles at two watchers and two monitors", func() bool {
 			info, _ := n.Process(sup)
-			if info.Watchers == 2 && info.Monitors == 2 {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("supervisor: %+v", info)
-			}
-		}
+			return info.Watchers == 2 && info.Monitors == 2
+		})
 	})
 }
 

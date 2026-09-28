@@ -1,12 +1,9 @@
 package actor_test
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"log/slog"
 	"strings"
-	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -21,15 +18,6 @@ import (
 	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
-func until(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); !cond(); time.Sleep(2 * time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatalf("never: %s", what)
-		}
-	}
-}
-
 // draining exits, once told to, only after d: a graceful drain.
 func draining(d time.Duration) func(*P) error {
 	return func(p *P) error {
@@ -39,23 +27,7 @@ func draining(d time.Duration) func(*P) error {
 	}
 }
 
-type logBuf struct {
-	mu sync.Mutex
-	b  bytes.Buffer
-}
-
-func (l *logBuf) Write(p []byte) (int, error) { l.mu.Lock(); defer l.mu.Unlock(); return l.b.Write(p) }
-func (l *logBuf) String() string              { l.mu.Lock(); defer l.mu.Unlock(); return l.b.String() }
-
-func logged(t *testing.T) (*grpcproc.Node, *logBuf) {
-	t.Helper()
-	buf := &logBuf{}
-	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithConfig(func(_ string, cfg *grpcproc.Config) {
-		cfg.Logger = slog.New(slog.NewTextHandler(buf, nil))
-	})}, "a")
-	return c.Node("a"), buf
-}
-
+// children is what Inspect shows of sup's children, by name.
 func children(t *testing.T, n *grpcproc.Node, sup grpcproc.PID) map[string]string {
 	t.Helper()
 	insp, err := n.Inspect(t.Context(), sup)
@@ -273,7 +245,7 @@ func TestStartAndStopChild(t *testing.T) {
 		if err := actor.StopChild(t.Context(), n, sup, dyn); err != nil {
 			t.Fatal(err)
 		}
-		if d := down(t, downs); d.Reason != grpcproc.ReasonShutdown {
+		if d := within(t, downs); d.Reason != grpcproc.ReasonShutdown {
 			t.Fatalf("%+v", d)
 		}
 		if _, ok := children(t, n, sup)["dyn"]; ok {
@@ -292,7 +264,7 @@ func TestStartAndStopChild(t *testing.T) {
 	})
 }
 
-// What StartChild refuses: a supervisor on another node, a spec it would
+// What StartChild refuses: a caller on another node, a spec it would
 // refuse in Spec, a child that cannot start; and what a supervisor refuses
 // from a call.
 func TestStartChildRefusals(t *testing.T) {
@@ -303,8 +275,8 @@ func TestStartChildRefusals(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := actor.StartChild(t.Context(), c.Node("b"), sup, actor.ChildFunc("", worker)); err == nil {
-			t.Fatal("started a child from another node")
+		if _, err := actor.StartChild(t.Context(), c.Node("b"), sup, actor.ChildFunc("", worker)); err == nil || !strings.Contains(err.Error(), "only from the supervisor's node") {
+			t.Fatalf("StartChild from another node: %v", err)
 		}
 		if _, err := actor.StartChild(t.Context(), n, sup, actor.ChildFunc("x", worker).WithRestart(actor.Transient).WithSignificant(true)); err == nil {
 			t.Fatal("a significant child under a supervisor that never shuts down")
@@ -367,10 +339,10 @@ func TestSignificantChildren(t *testing.T) {
 				t.Fatalf("%v", insp)
 			}
 			send(t, n, "job", 0) // done: the supervisor ends
-			if d := down(t, downs); d.Reason != grpcproc.ReasonShutdown {
+			if d := within(t, downs); d.Reason != grpcproc.ReasonShutdown {
 				t.Fatalf("%+v", d)
 			}
-			if d := down(t, other); d.Reason != grpcproc.ReasonShutdown {
+			if d := within(t, other); d.Reason != grpcproc.ReasonShutdown {
 				t.Fatalf("other: %+v", d)
 			}
 		})
@@ -396,7 +368,7 @@ func TestSignificantChildren(t *testing.T) {
 				t.Fatal("ended with a significant child left")
 			}
 			send(t, n, "j2", -1)
-			if d := down(t, downs); d.Reason != grpcproc.ReasonShutdown {
+			if d := within(t, downs); d.Reason != grpcproc.ReasonShutdown {
 				t.Fatalf("%+v", d)
 			}
 		})
@@ -510,11 +482,10 @@ func TestStartAndStopAChildSupervisor(t *testing.T) {
 }
 
 // A StartChild that fails, here because its caller gave up while the
-// supervisor waited, or because the supervisor was busy, starts nothing;
-// one sent from another node is refused.
+// supervisor waited, or because the supervisor was busy, starts nothing.
 func TestStartChildThatFailsStartsNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		c := grpcproctest.New(t, "a", "b")
+		c := grpcproctest.New(t, "a")
 		n := c.Node("a")
 		sup, err := actor.Supervise(n, actor.Spec{Children: []actor.ChildSpec{
 			actor.ChildFunc("slow", draining(200*time.Millisecond)).WithShutdown(actor.Infinity),
@@ -541,10 +512,6 @@ func TestStartChildThatFailsStartsNothing(t *testing.T) {
 		}
 		if kids := children(t, n, sup); len(kids) != 0 {
 			t.Fatalf("started after all: %v", kids)
-		}
-		req := &actorv1.Control{Op: &actorv1.Control_Start{Start: 1}}
-		if _, err := c.Node("b").CallTo[*grpcprocv1.PID](t.Context(), sup, req); err == nil || !strings.Contains(err.Error(), "only from the supervisor's node") {
-			t.Fatalf("got %v", err)
 		}
 	})
 }
@@ -599,7 +566,7 @@ func TestSignificantChildrenAddedOrStopped(t *testing.T) {
 			t.Fatal(err)
 		}
 		send(t, n, "job", 0)
-		if d := down(t, downs); d.Reason != grpcproc.ReasonShutdown {
+		if d := within(t, downs); d.Reason != grpcproc.ReasonShutdown {
 			t.Fatalf("%+v", d)
 		}
 	})
@@ -638,7 +605,7 @@ func TestChildCallingItsSupervisorWhileItExits(t *testing.T) {
 		if err := within(t, answered); err == nil {
 			t.Fatal("answered")
 		}
-		if d := down(t, downs); d.Reason != "bye" {
+		if d := within(t, downs); d.Reason != "bye" {
 			t.Fatalf("%+v", d)
 		}
 	})

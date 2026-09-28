@@ -166,7 +166,7 @@ func TestCallSpansAndDuration(t *testing.T) {
 	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithHooks(e.hooks)}, "a")
 	a := c.Node("a")
 	ep, _ := a.Spawn(echo, grpcproc.WithLabel("echo"))
-	caller, _ := a.Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
+	_, _ = a.Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
 		if _, err := ep.Call[*testpb.Pong](t.Context(), p, &testpb.Ping{N: 1}); err != nil {
 			return err
 		}
@@ -176,7 +176,6 @@ func TestCallSpansAndDuration(t *testing.T) {
 		}
 		return nil
 	}, grpcproc.WithLabel("caller"))
-	_ = caller
 	time.Sleep(100 * time.Millisecond)
 	c.Stop("a") // ends the echo's last handling span
 
@@ -386,7 +385,7 @@ func TestDefaultsUseGlobals(t *testing.T) {
 	}
 }
 
-// failing makes every instrument fail to be created.
+// failingProvider makes every instrument fail to be created.
 type failingProvider struct{ noop.MeterProvider }
 
 func (failingProvider) Meter(string, ...metric.MeterOption) metric.Meter { return failingMeter{} }

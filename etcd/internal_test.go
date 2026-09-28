@@ -124,6 +124,7 @@ func freeURL(t *testing.T) url.URL {
 	return url.URL{Scheme: "http", Host: ln.Addr().String()}
 }
 
+// startEtcd mirrors etcd_test.go's, the set-up the project site points readers to.
 func startEtcd(t *testing.T) *clientv3.Client {
 	t.Helper()
 	cfg := embed.NewConfig()
@@ -138,7 +139,11 @@ func startEtcd(t *testing.T) *clientv3.Client {
 		t.Fatal(err)
 	}
 	t.Cleanup(e.Close)
-	<-e.Server.ReadyNotify()
+	select {
+	case <-e.Server.ReadyNotify():
+	case <-time.After(20 * time.Second):
+		t.Fatal("etcd did not start")
+	}
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{client.String()}, DialTimeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
@@ -339,7 +344,6 @@ func TestKeepRegistersAgainThroughFailures(t *testing.T) {
 	e := setup(t)
 	// KeepAlive fails at once, and so does the first registration after it.
 	e.lease.failKeeps.Store(1)
-	e.lease.failGrants.Store(0)
 	withdraw, err := e.c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 1, Addr: "a:1"})
 	if err != nil {
 		t.Fatal(err)
@@ -382,12 +386,11 @@ func TestKeepRegistersAgainThroughFailures(t *testing.T) {
 	e.lease.failGrants.Store(1 << 20)
 	time.Sleep(30 * time.Millisecond)
 	_ = withdraw(t.Context())
-	e.lease.failGrants.Store(0)
 }
 
 func TestWatchRecoversFromABrokenWatch(t *testing.T) {
 	e := setup(t)
-	wa, _ := e.c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 1, Addr: "a:1"})
+	_, _ = e.c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 1, Addr: "a:1"})
 	wb, _ := e.c.Register(t.Context(), grpcproc.Member{Name: "b", Incarnation: 1, Addr: "b:1"})
 	first := make(chan clientv3.WatchResponse)
 	e.watcher.first = first
@@ -401,7 +404,6 @@ func TestWatchRecoversFromABrokenWatch(t *testing.T) {
 	_ = wb(t.Context())
 	_, _ = e.c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 2, Addr: "a:2"})
 	_, _ = e.c.Register(t.Context(), grpcproc.Member{Name: "c", Incarnation: 1, Addr: "c:1"})
-	_ = wa
 	// The watch breaks; the first attempt to list again fails too.
 	e.kv.failGets.Store(1)
 	first <- clientv3.WatchResponse{CompactRevision: 1}

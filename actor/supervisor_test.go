@@ -13,55 +13,6 @@ import (
 	"github.com/floatdrop/grpcproc/internal/testpb"
 )
 
-// worker exits normally on N == 0, fails on N < 0, and otherwise waits.
-func worker(p *P) error {
-	for {
-		m, err := p.Receive()
-		if err != nil {
-			return err
-		}
-		switch n := m.Body.GetN(); {
-		case n == 0:
-			return nil
-		case n < 0:
-			return errors.New("crash")
-		}
-	}
-}
-
-func pidOf(t *testing.T, n *grpcproc.Node, name string) grpcproc.PID {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if pid, ok := n.Whereis(name); ok {
-			return pid
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%s never registered", name)
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-}
-
-// restarted waits until name is registered to a PID other than old.
-func restarted(t *testing.T, n *grpcproc.Node, name string, old grpcproc.PID) grpcproc.PID {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if pid, ok := n.Whereis(name); ok && pid != old {
-			return pid
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%s was not restarted", name)
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-}
-
-func send(t *testing.T, n *grpcproc.Node, name string, v int64) {
-	_ = grpcproc.Named[*testpb.Ping](n.Name(), name).Send(t.Context(), n, &testpb.Ping{N: v})
-}
-
 // settle lets everything the test started run until it waits, then 50ms of
 // the bubble's time pass, for a supervisor's timers. In a synctest bubble
 // that is exact, and takes no time: every test here runs in one.
@@ -138,7 +89,7 @@ func TestRestartPolicies(t *testing.T) {
 		// A transient child comes back after a crash, not after a normal exit.
 		old = pidOf(t, n, "trans")
 		send(t, n, "trans", -1)
-		old = restarted(t, n, "trans", old)
+		restarted(t, n, "trans", old)
 		send(t, n, "trans", 0)
 		settle()
 		if _, ok := n.Whereis("trans"); ok {
@@ -150,7 +101,6 @@ func TestRestartPolicies(t *testing.T) {
 		if _, ok := n.Whereis("temp"); ok {
 			t.Fatal("temporary child restarted")
 		}
-		_ = old
 	})
 }
 
@@ -200,7 +150,7 @@ func TestIntensityAndEscalation(t *testing.T) {
 		send(t, n, "leaf", -1)
 		leaf = restarted(t, n, "leaf", leaf) // first restart: allowed
 		send(t, n, "leaf", -1)               // second: over the limit
-		if d := down(t, innerDowns); d.Reason != actor.ReasonMaxRestarts {
+		if d := within(t, innerDowns); d.Reason != actor.ReasonMaxRestarts {
 			t.Fatalf("inner exited with %q", d.Reason)
 		}
 		// The outer supervisor restarted the inner one, which started a new leaf.
@@ -209,6 +159,42 @@ func TestIntensityAndEscalation(t *testing.T) {
 		insp, _ := n.Inspect(t.Context(), outer)
 		if !strings.Contains(insp["child.inner"], "restarts=1") {
 			t.Fatalf("%v", insp)
+		}
+	})
+}
+
+// The restart intensity is a sliding window: with two restarts allowed in
+// 5s, crashes 3s apart never make three within any 5s, however many there
+// are, while a burst of crashes does, and the supervisor gives up.
+func TestIntensityWindow(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := grpcproctest.New(t, "a")
+		n := c.Node("a")
+		crash := make(chan struct{})
+		sup, err := actor.Supervise(n, actor.Spec{MaxRestarts: 2, Within: 5 * time.Second, Children: []actor.ChildSpec{
+			actor.ChildFunc("w", func(*P) error { <-crash; return errors.New("crash") }),
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		downs := watch(t, n, sup)
+		for range 4 {
+			crash <- struct{}{}
+			synctest.Wait()
+			time.Sleep(3 * time.Second)
+		}
+		if _, alive := n.Process(sup); !alive {
+			t.Fatal("the supervisor gave up on crashes 3s apart")
+		}
+		for range 3 {
+			select {
+			case crash <- struct{}{}: // none once the supervisor gave up
+				synctest.Wait()
+			default:
+			}
+		}
+		if d := within(t, downs); d.Reason != actor.ReasonMaxRestarts {
+			t.Fatalf("%+v", d)
 		}
 	})
 }
@@ -223,7 +209,7 @@ func TestNoRestartsAllowed(t *testing.T) {
 		}
 		downs := watch(t, n, sup)
 		send(t, n, "w", -1)
-		if d := down(t, downs); d.Reason != actor.ReasonMaxRestarts {
+		if d := within(t, downs); d.Reason != actor.ReasonMaxRestarts {
 			t.Fatalf("%+v", d)
 		}
 	})
@@ -241,14 +227,15 @@ func TestSupervisorExitStopsChildren(t *testing.T) {
 		}
 		w1 := watch(t, n, pidOf(t, n, "w1"))
 		w2 := watch(t, n, pidOf(t, n, "w2"))
-		// Calls to a supervisor are refused; other messages are ignored.
+		// A call other than StartChild or StopChild is refused; other
+		// messages are ignored.
 		if _, err := n.CallTo[*testpb.Pong](t.Context(), sup, &testpb.Ping{}); err == nil {
-			t.Fatal("a supervisor answered a call")
+			t.Fatal("a supervisor answered a Ping")
 		}
 		_ = n.SendTo(t.Context(), sup, &testpb.Ping{})
 		_ = n.Exit(t.Context(), grpcproc.Name{Node: "a", Name: "sup"}, grpcproc.ReasonKilled)
 		for _, ch := range []<-chan grpcproc.Down{w1, w2} {
-			if d := down(t, ch); d.Reason != grpcproc.ReasonShutdown {
+			if d := within(t, ch); d.Reason != grpcproc.ReasonShutdown {
 				t.Fatalf("child exited with %q", d.Reason)
 			}
 		}

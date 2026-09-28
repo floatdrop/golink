@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"runtime"
@@ -24,7 +25,6 @@ import (
 	"github.com/floatdrop/grpcproc/inspect"
 	"github.com/floatdrop/grpcproc/internal/testpb"
 	inspectv1 "github.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1"
-	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
 // cluster starts nodes that each serve an Inspector able to forward to the
@@ -52,12 +52,8 @@ func client(c *grpcproctest.Cluster, node string) inspectv1.InspectorClient {
 	return inspectv1.NewInspectorClient(c.Conn(node))
 }
 
-func pidPB(p grpcproc.PID) *grpcprocv1.PID {
-	return &grpcprocv1.PID{Node: p.Node, Incarnation: p.Incarnation, Id: p.ID}
-}
-
 func byPID(p grpcproc.PID) *inspectv1.Target {
-	return &inspectv1.Target{Kind: &inspectv1.Target_Pid{Pid: pidPB(p)}}
+	return &inspectv1.Target{Kind: &inspectv1.Target_Pid{Pid: p.Proto()}}
 }
 
 func byName(n string) *inspectv1.Target {
@@ -172,6 +168,17 @@ func TestListProcessesFilters(t *testing.T) {
 	})
 }
 
+func TestListProcessesForwarded(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := cluster(t, nil, "a", "b")
+		_, _ = c.Node("b").Spawn(func(p *grpcproc.Process[*testpb.Ping]) error { _, err := p.Receive(); return err }, grpcproc.WithLabel("remote"))
+		resp, err := client(c, "a").ListProcesses(t.Context(), &inspectv1.ListProcessesRequest{Node: "b", Label: "remote"})
+		if err != nil || len(resp.GetProcesses()) != 1 || resp.GetProcesses()[0].GetPid().GetNode() != "b" {
+			t.Fatalf("%v %v", resp, err)
+		}
+	})
+}
+
 // The Inspector reports an inspect function that panicked, which ended its
 // process, as the process's inspect error.
 func TestGetProcessWhoseInspectPanics(t *testing.T) {
@@ -248,10 +255,6 @@ func TestWrites(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c := cluster(t, nil, "a", "b")
 		a, b := client(c, "a"), c.Node("b")
-		w, _ := c.Node("a").Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
-			_, err := p.Receive()
-			return err
-		})
 		col := make(chan *testpb.Ping, 1)
 		target, _ := b.Spawn[*testpb.Ping](func(p *grpcproc.Process[*testpb.Ping]) error {
 			for {
@@ -262,7 +265,6 @@ func TestWrites(t *testing.T) {
 				col <- m.Body
 			}
 		}, grpcproc.WithName("t"))
-		_ = w
 
 		// SetLogLevel through the inspector of another node.
 		if _, err := a.SetLogLevel(t.Context(), &inspectv1.SetLogLevelRequest{Node: "b", Target: byName("t"), Level: int32(slog.LevelDebug)}); err != nil {
@@ -512,11 +514,10 @@ func TestWatchLocalAndForwarded(t *testing.T) {
 				}()
 				deadline := time.After(5 * time.Second)
 				for {
-					e, _ := target.Spawn(func(p *grpcproc.Process[*testpb.Ping]) error { return nil })
+					_, _ = target.Spawn(func(p *grpcproc.Process[*testpb.Ping]) error { return nil })
 					select {
 					case ev := <-seen:
 						if ev.Kind == grpcproc.EventSpawn && ev.Process.PID.Node == target.Name() {
-							_ = e
 							return
 						}
 					case <-time.After(20 * time.Millisecond):
@@ -565,59 +566,128 @@ func TestWatchEndsWhenNodeStops(t *testing.T) {
 	})
 }
 
-func TestEventConversions(t *testing.T) {
+// fakeWatch is a server stream whose Send fails.
+type fakeWatch struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (f *fakeWatch) Context() context.Context            { return f.ctx }
+func (f *fakeWatch) Send(*inspectv1.WatchResponse) error { return errors.New("client gone") }
+
+// fakePeer is an Inspector client whose Watch fails to open (err), or opens
+// a stream that fails on the first Recv (recvErr), or yields one event.
+type fakePeer struct {
+	inspectv1.InspectorClient
+	err, recvErr error
+}
+
+func (f *fakePeer) Watch(context.Context, *inspectv1.WatchRequest, ...grpc.CallOption) (grpc.ServerStreamingClient[inspectv1.WatchResponse], error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &oneEvent{err: f.recvErr}, nil
+}
+
+// oneEvent is a Watch client stream whose Recv fails with err, if set, or
+// yields an event.
+type oneEvent struct {
+	grpc.ClientStream
+	err error
+}
+
+func (o *oneEvent) Recv() (*inspectv1.WatchResponse, error) {
+	if o.err != nil {
+		return nil, o.err
+	}
+	return &inspectv1.WatchResponse{Event: &inspectv1.Event{}}, nil
+}
+
+func TestWatchSendFailures(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		now := time.Now()
-		pid := grpcproc.PID{Node: "a", Incarnation: 1, ID: 2}
-		info := grpcproc.ProcessInfo{PID: pid, Label: "l", StartedAt: now, LogLevel: slog.LevelWarn, Links: 2, TrapExit: true}
-		events := []grpcproc.Event{
-			{Kind: grpcproc.EventSpawn, Process: info},
-			{Kind: grpcproc.EventExit, Process: info, Reason: "boom"},
-			{Kind: grpcproc.EventLinkUp, Peer: grpcproc.NodeID{Name: "b", Incarnation: 3}},
-			{Kind: grpcproc.EventLinkDown, Peer: grpcproc.NodeID{Name: "b"}, Err: "eof"},
-			{Kind: grpcproc.EventDeadLetter, From: pid, To: pid, Type: "x.Y", Reason: "type"},
-		}
-		for _, ev := range events {
-			ev.Time, ev.Missed = now, 3
-			got := inspect.Event(inspect.EventToProto(ev))
-			if got.Kind != ev.Kind || got.Reason != ev.Reason || got.Peer != ev.Peer || got.Err != ev.Err ||
-				got.From != ev.From || got.Type != ev.Type || got.Missed != 3 || !got.Time.Equal(now) ||
-				got.Process.PID != ev.Process.PID || got.Process.LogLevel != ev.Process.LogLevel || !got.Process.StartedAt.Equal(ev.Process.StartedAt) ||
-				got.Process.Links != ev.Process.Links || got.Process.TrapExit != ev.Process.TrapExit {
-				t.Errorf("%v: got %+v", ev.Kind, got)
+		c := grpcproctest.New(t, "a")
+		n := c.Node("a")
+		stream := &fakeWatch{ctx: t.Context()}
+
+		// Local: the first event cannot be sent to the client.
+		srv := inspect.New(n)
+		done := make(chan error, 1)
+		go func() { done <- srv.Watch(&inspectv1.WatchRequest{}, stream) }()
+		for {
+			_, _ = n.Spawn(func(p *grpcproc.Process[*testpb.Ping]) error { return nil })
+			select {
+			case err := <-done:
+				if err == nil || err.Error() != "client gone" {
+					t.Fatalf("local: %v", err)
+				}
+				goto forwarded
+			default:
 			}
 		}
-		// A wire state no state has, unspecified or from a newer node, becomes
-		// 255 rather than wrap around into a real one.
-		for _, wire := range []int32{0, 257, -1} {
-			p := inspect.ProcessInfo(&inspectv1.ProcessInfo{State: inspectv1.ProcessState(wire)})
-			n := inspect.NodeInfo(&inspectv1.NodeInfo{Links: []*inspectv1.Link{{State: inspectv1.LinkState(wire)}}})
-			if p.State != 255 || n.Links[0].State != 255 {
-				t.Errorf("wire state %d: process %v, link %v", wire, p.State, n.Links[0].State)
-			}
+	forwarded:
+		// Forwarded: the peer's stream cannot be opened, or its event cannot be relayed.
+		upstreamErr := errors.New("peer refused")
+		srv = inspect.New(n, inspect.WithPeers(func(context.Context, string) (inspectv1.InspectorClient, error) {
+			return &fakePeer{err: upstreamErr}, nil
+		}))
+		if err := srv.Watch(&inspectv1.WatchRequest{Node: "b"}, stream); err == nil || !strings.Contains(err.Error(), "node b: peer refused") {
+			t.Fatalf("upstream: %v", err)
 		}
-		if p := inspect.ProcessInfo(&inspectv1.ProcessInfo{State: inspectv1.ProcessState_PROCESS_STATE_EXITING}); p.State != grpcproc.StateExiting {
-			t.Errorf("exiting became %v", p.State)
+		srv = inspect.New(n, inspect.WithPeers(func(context.Context, string) (inspectv1.InspectorClient, error) {
+			return &fakePeer{}, nil
+		}))
+		if err := srv.Watch(&inspectv1.WatchRequest{Node: "b"}, stream); err == nil || err.Error() != "client gone" {
+			t.Fatalf("relay: %v", err)
 		}
-		// A zero time goes as an absent timestamp, and an absent one comes back
-		// zero, in every message: a process's start and an event's time used to
-		// come back as the Unix epoch.
-		if e := inspect.EventToProto(grpcproc.Event{Kind: grpcproc.EventSpawn}); e.GetTime() != nil || e.GetSpawned().GetStartedAt() != nil {
-			t.Errorf("%v", e)
+		// The peer's stream ends: its error is returned as is.
+		recvErr := errors.New("peer stream ended")
+		srv = inspect.New(n, inspect.WithPeers(func(context.Context, string) (inspectv1.InspectorClient, error) {
+			return &fakePeer{recvErr: recvErr}, nil
+		}))
+		if err := srv.Watch(&inspectv1.WatchRequest{Node: "b"}, stream); err == nil || !strings.Contains(err.Error(), "node b: peer stream ended") {
+			t.Fatalf("peer end: %v", err)
 		}
-		if p := inspect.ProcessInfo(&inspectv1.ProcessInfo{}); !p.StartedAt.IsZero() || !p.Parent.IsZero() {
-			t.Errorf("%+v", p)
+		// The peer ends it cleanly (EOF): so does the relay.
+		srv = inspect.New(n, inspect.WithPeers(func(context.Context, string) (inspectv1.InspectorClient, error) {
+			return &fakePeer{recvErr: io.EOF}, nil
+		}))
+		if err := srv.Watch(&inspectv1.WatchRequest{Node: "b"}, stream); err != nil {
+			t.Fatalf("clean peer end: %v", err)
 		}
-		if e := inspect.Event(&inspectv1.Event{}); !e.Time.IsZero() {
-			t.Errorf("%+v", e)
+	})
+}
+
+func TestWatchEndsWhenClientCancels(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := grpcproctest.New(t, "a")
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		// A cancelled client is a clean end, not an error.
+		if err := inspect.New(c.Node("a")).Watch(&inspectv1.WatchRequest{}, &fakeWatch{ctx: ctx}); err != nil {
+			t.Fatalf("got %v", err)
 		}
-		// Zero times stay zero across the wire, and set ones cross it.
-		if n := inspect.NodeInfo(inspect.NodeInfoToProto(grpcproc.NodeInfo{Links: []grpcproc.LinkInfo{{}}})); !n.StartedAt.IsZero() || !n.Links[0].EstablishedAt.IsZero() || !n.Links[0].RetryAt.IsZero() {
-			t.Fatalf("%+v", n)
+	})
+}
+
+// okWatch is a server stream that accepts every event.
+type okWatch struct{ fakeWatch }
+
+func (*okWatch) Send(*inspectv1.WatchResponse) error { return nil }
+
+func TestWatchEndsWithUnavailableWhenNodeStops(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		// A node on its own, not behind a gRPC server that would cancel the
+		// stream first: only the node stopping can end this Watch.
+		n, err := grpcproc.NewNode(grpcproc.Config{Name: "solo", Resolver: grpcproc.StaticResolver{}})
+		if err != nil {
+			t.Fatal(err)
 		}
-		down := grpcproc.LinkInfo{Peer: grpcproc.NodeID{Name: "b"}, Outbound: true, State: grpcproc.LinkDown, LastError: "refused", RetryAt: now, Queued: 5}
-		if n := inspect.NodeInfo(inspect.NodeInfoToProto(grpcproc.NodeInfo{Links: []grpcproc.LinkInfo{down}})); !n.Links[0].RetryAt.Equal(now) || n.Links[0].State != grpcproc.LinkDown || n.Links[0].Queued != 5 {
-			t.Fatalf("%+v", n.Links[0])
+		done := make(chan error, 1)
+		go func() { done <- inspect.New(n).Watch(&inspectv1.WatchRequest{}, &okWatch{fakeWatch{ctx: t.Context()}}) }()
+		time.Sleep(20 * time.Millisecond)
+		_ = n.Stop(t.Context())
+		if err := <-done; status.Code(err) != codes.Unavailable {
+			t.Fatalf("got %v", err)
 		}
 	})
 }

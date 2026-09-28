@@ -15,7 +15,6 @@ import (
 	"github.com/floatdrop/grpcproc/grpcproctest"
 	"github.com/floatdrop/grpcproc/internal/testpb"
 	pubsubv1 "github.com/floatdrop/grpcproc/proto/grpcproc/pubsub/v1"
-	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 	"github.com/floatdrop/grpcproc/pubsub"
 )
 
@@ -548,8 +547,7 @@ func slowTopic(t *testing.T, n *grpcproc.Node, name string) (held <-chan struct{
 			h <- struct{}{}
 			select {
 			case err := <-ans:
-				self := p.PID()
-				_ = m.Reply(&pubsubv1.Subscribed{From: &grpcprocv1.PID{Node: self.Node, Incarnation: self.Incarnation, Id: self.ID}}, err)
+				_ = m.Reply(&pubsubv1.Subscribed{From: p.PID().Proto()}, err)
 			case <-p.Context().Done():
 				return nil
 			}
