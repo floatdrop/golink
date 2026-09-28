@@ -5,15 +5,47 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  test:
+  go:
+    # Every Go module in the repository, one job each: grpcproc itself; the
+    # adapters with dependencies grpcproc does not have; cron and leader,
+    # versioned on their own; the examples the README and the site embed;
+    # and the benchmarks. A module with a cover list must keep each of those
+    # packages at 100%.
+    name: ${{ matrix.module == '.' && 'grpcproc' || matrix.module }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - module: .
+            cover: . ./inspect ./actor ./pubsub
+          - module: otel
+            cover: .
+          - module: etcd
+            cover: .
+          - module: tools
+            cover: ./client ./dot ./cli ./mcpserver
+          - module: cron
+            cover: .
+          - module: leader
+            cover: .
+          - module: examples
+          - module: benchmarks
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.27"
+          cache-dependency-path: ${{ matrix.module }}/go.sum
       - name: gofmt
+        if: matrix.module == '.'
         run: test -z "$(gofmt -l .)" || (gofmt -d . && exit 1)
       - name: Vet
         run: go vet ./...
@@ -21,54 +53,22 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.13.1
-      - name: Test
-        run: go test -race -count=1 ./...
-      - name: README embeds the current examples
-        run: go run github.com/campoy/embedmd@v1.0.0 -d README.md
-      - name: Coverage (grpcproc, inspect, actor and pubsub must stay at 100%)
-        run: |
-          for pkg in . ./inspect ./actor ./pubsub; do
-            go test -count=1 -coverprofile=coverage.out -coverpkg=$pkg $pkg
-            total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')
-            echo "$pkg coverage: $total"
-            [ "$total" = "100.0%" ] || { go tool cover -func=coverage.out | awk '$3 != "100.0%"'; exit 1; }
-          done
-  modules:
-    # Nested modules: adapters with dependencies grpcproc itself does not
-    # have, and cron and leader, versioned on their own.
-    strategy:
-      matrix:
-        include:
-          - module: otel
-            cover: "."
-          - module: etcd
-            cover: "."
-          - module: tools
-            cover: "./client ./dot ./cli ./mcpserver"
-          - module: cron
-            cover: "."
-          - module: leader
-            cover: "."
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ${{ matrix.module }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.27"
-          cache-dependency-path: ${{ matrix.module }}/go.sum
-      - name: Vet
-        run: go vet ./...
-      - name: Lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.13.1
           working-directory: ${{ matrix.module }}
+      # The examples' tests run each program and compare what it prints with
+      # its output.txt.
       - name: Test
+        if: matrix.module != 'benchmarks'
         run: go test -race -count=1 ./...
+      # The benchmarks measure the working tree against other frameworks; CI
+      # only checks that they still build and run.
+      - name: Compile and run the benchmarks briefly
+        if: matrix.module == 'benchmarks'
+        run: go test -run '^$' -bench . -benchtime=50ms ./...
+      - name: README embeds the current examples
+        if: matrix.module == '.'
+        run: go run github.com/campoy/embedmd@v1.0.0 -d README.md
       - name: Coverage (must stay at 100%)
+        if: matrix.cover
         run: |
           for pkg in ${{ matrix.cover }}; do
             go test -count=1 -coverprofile=coverage.out -coverpkg=$pkg $pkg
@@ -76,55 +76,12 @@ jobs:
             echo "${{ matrix.module }}/$pkg coverage: $total"
             [ "$total" = "100.0%" ] || { go tool cover -func=coverage.out | awk '$3 != "100.0%"'; exit 1; }
           done
-  examples:
-    # The programs the README embeds. Their tests run each one and compare
-    # what it prints with its output.txt.
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: examples
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.27"
-          cache-dependency-path: examples/go.sum
-      - name: Vet
-        run: go vet ./...
-      - name: Lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.13.1
-          working-directory: examples
-      - name: Run and check output
-        run: go test -race -count=1 ./...
-  benchmarks:
-    # They measure the working tree against Hollywood; CI only checks that
-    # they still build and run.
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: benchmarks
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.27"
-          cache-dependency-path: benchmarks/go.sum
-      - name: Vet
-        run: go vet ./...
-      - name: Lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.13.1
-          working-directory: benchmarks
-      - name: Compile and run briefly
-        run: go test -run '^$' -bench . -benchtime=50ms ./...
   generate:
+    name: generated code
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.27"
       - uses: bufbuild/buf-action@v1
