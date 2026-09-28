@@ -19,7 +19,8 @@ import (
 // Options configures New.
 type Options struct {
 	// AllowWrites also offers exit_process, set_log_level, move_leader,
-	// cordon_node and uncordon_node.
+	// cordon_node, uncordon_node, enable_cron_job, disable_cron_job and
+	// remove_cron_job.
 	AllowWrites bool
 	// Version is reported to the client.
 	Version string
@@ -35,6 +36,7 @@ const instructions = `These tools inspect a grpcproc cluster: Go processes (goro
 - Supervisors (label supervisor) restart children; their inspect lists each child and its restarts.
 - watch_events shows spawns, exits with reasons, links going up and down, and dead letters (messages that found no process or the wrong type, or that a broken link never delivered).
 - A grpcproc/leader election (a cluster name) has an elector process on each node that takes part, registered as leader/<cluster>; election shows what each believes: its role, term, the leader it follows, the nodes cordoned (kept from leading) and those it cannot reach. Nodes that name different leaders, or a node with an old term, point at a partition.
+- A grpcproc/cron process runs jobs on crontab schedules; cron_jobs lists each, when it runs next and last ran, how many runs are going, and why its last failed run failed. Each run is a process of its own, labelled cron:<job>.
 - node_info and cluster_nodes list each node's links. queued on an out link is what waits to be written to that peer: a growing queue means the peer or the network cannot keep up. A down out link with retry_in means dials to that peer failed, and sends to it fail at once until then; such a peer shows incarnation 0, and cluster_nodes lists it with an error if it cannot be reached.
 
 Start with cluster_nodes, then list_processes sorted by mailbox to find backlogs, then get_process on the suspects.`
@@ -62,11 +64,15 @@ func New(c *client.Client, o Options) *mcp.Server {
 	mcp.AddTool(s, &mcp.Tool{Name: "list_processes", Description: "Processes of a node, filtered and sorted. Sort by mailbox to find backlogs.", Annotations: readOnly}, t.listProcesses)
 	mcp.AddTool(s, &mcp.Tool{Name: "get_process", Description: "One process by pid or name, with what it says about itself.", Annotations: readOnly}, t.getProcess)
 	mcp.AddTool(s, &mcp.Tool{Name: "watch_events", Description: "Collect a node's events for a few seconds: spawns, exits with reasons, links up and down, dead letters.", Annotations: readOnly}, t.watchEvents)
+	mcp.AddTool(s, &mcp.Tool{Name: "cron_jobs", Description: "The grpcproc/cron processes of a node, or of every node, and their jobs: schedule, next and last run, runs going, last failure.", Annotations: readOnly}, t.cronJobs)
 	mcp.AddTool(s, &mcp.Tool{Name: "election", Description: "A grpcproc/leader election, as each node that takes part sees it: role, term, leader, view, cordoned nodes, unreachable nodes.", Annotations: readOnly}, t.election)
 	if o.AllowWrites {
 		mcp.AddTool(s, &mcp.Tool{Name: "move_leader", Description: "Have the leader of an election hand over, to a given node or to the follower with the latest state. Its singleton stops, and starts on the new leader.", Annotations: &mcp.ToolAnnotations{DestructiveHint: new(true)}}, t.moveLeader)
 		mcp.AddTool(s, &mcp.Tool{Name: "cordon_node", Description: "Keep a node from leading an election, until uncordon_node: to work on its host. If it leads, it hands over. It still votes.", Annotations: &mcp.ToolAnnotations{DestructiveHint: new(true)}}, t.cordonNode)
 		mcp.AddTool(s, &mcp.Tool{Name: "uncordon_node", Description: "Let a cordoned node lead an election again."}, t.uncordonNode)
+		mcp.AddTool(s, &mcp.Tool{Name: "enable_cron_job", Description: "Run a disabled cron job on its schedule again, from the next minute; what it missed is not caught up."}, t.cronJob("enable"))
+		mcp.AddTool(s, &mcp.Tool{Name: "disable_cron_job", Description: "Keep a cron job but run it no more until enabled. Runs already going go on."}, t.cronJob("disable"))
+		mcp.AddTool(s, &mcp.Tool{Name: "remove_cron_job", Description: "Remove a job from a cron process until it restarts from its spec. Runs already going go on.", Annotations: &mcp.ToolAnnotations{DestructiveHint: new(true)}}, t.cronJob("remove"))
 		mcp.AddTool(s, &mcp.Tool{Name: "exit_process", Description: "Ask a process to exit. Its supervisor, if any, may restart it.", Annotations: &mcp.ToolAnnotations{DestructiveHint: new(true)}}, t.exitProcess)
 		mcp.AddTool(s, &mcp.Tool{Name: "set_log_level", Description: "Set one process's log level, to see more from it without restarting anything."}, t.setLogLevel)
 	}
@@ -278,4 +284,42 @@ func (t tools) cordon(ctx context.Context, in cordonIn, off bool) (*mcp.CallTool
 		return nil, done{Result: in.Node + " may lead " + in.Cluster + " again"}, nil
 	}
 	return nil, done{Result: in.Node + " may not lead " + in.Cluster + "; if it led, it is handing over"}, nil
+}
+
+type cronIn struct {
+	Node    string `json:"node,omitempty" jsonschema:"node to look at; empty for every node"`
+	Process string `json:"process,omitempty" jsonschema:"one cron process, a pid or a registered name (looked up on node); empty for every cron process"`
+}
+
+type cronOut struct {
+	Crons []client.CronView `json:"crons"`
+}
+
+func (t tools) cronJobs(ctx context.Context, _ *mcp.CallToolRequest, in cronIn) (*mcp.CallToolResult, cronOut, error) {
+	ctx, cancel := t.ctx(ctx)
+	defer cancel()
+	if in.Process != "" {
+		c, err := t.c.Cron(ctx, in.Node, in.Process)
+		return nil, cronOut{Crons: []client.CronView{c}}, err
+	}
+	crons, err := t.c.Crons(ctx, in.Node)
+	return nil, cronOut{Crons: crons}, err
+}
+
+type cronJobIn struct {
+	Node    string `json:"node,omitempty" jsonschema:"node the name is registered on; not needed for a pid"`
+	Process string `json:"process" jsonschema:"the cron process: a pid, <node.incarnation.id>, or a registered name"`
+	Job     string `json:"job" jsonschema:"the job's name"`
+}
+
+// cronJob is the tool that does op to a job.
+func (t tools) cronJob(op string) mcp.ToolHandlerFor[cronJobIn, done] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in cronJobIn) (*mcp.CallToolResult, done, error) {
+		ctx, cancel := t.ctx(ctx)
+		defer cancel()
+		if err := t.c.CronJob(ctx, in.Node, in.Process, op, in.Job); err != nil {
+			return nil, done{}, err
+		}
+		return nil, done{Result: fmt.Sprintf("%sd job %s of %s", op, in.Job, in.Process)}, nil
+	}
 }

@@ -74,6 +74,8 @@ monitors:              2
 | `leader move <cluster>` | hand leadership over: `--to` a node, by default the follower with the latest state |
 | `leader cordon <cluster> <node>` | keep a node from leading, to work on its host; if it leads, it hands over |
 | `leader uncordon <cluster> <node>` | let it lead again |
+| `cron [list] [<pid\|name>]` | [grpcproc/cron](../cron/README.md) processes and their jobs: `--node`, every node by default |
+| `cron enable\|disable\|remove <pid\|name> <job>` | change a job of a cron process: `--node` |
 | `dot` | Graphviz of processes and who started whom: `--node`, `--cluster` |
 | `mcp` | serve these as MCP tools over stdio: `--allow-writes` |
 
@@ -82,7 +84,7 @@ what its MCP server reports.
 
 A pid is written as grpcproc prints it, `<node.incarnation.id>`; a name is
 looked up on `--node`, by default the node serving the Inspector.
-`--json` before `node`, `nodes`, `ps`, `inspect`, `watch` or `leader` prints the same
+`--json` before `node`, `nodes`, `ps`, `inspect`, `watch`, `leader` or `cron` prints the same
 data as JSON: one indented value, or for `watch` one compact event per line,
 so `grpcprocctl --json watch | jq` sees events as they happen. The objects
 are those the MCP tools return, which wrap lists in an object of their own.
@@ -116,6 +118,27 @@ print the table once every node agrees, or as it stands when `--timeout`
 runs out, saying so. A cordon is kept in the state the leader replicates:
 the node stays out of the running across its own restarts until `uncordon`.
 
+### Cron jobs
+
+```sh
+grpcprocctl --plaintext cron disable --node b billing yearly
+```
+
+```txt
+NODE  CRON     JOB     SPEC        ZONE  NEXT                  LAST  RUNNING  LAST FAILURE  ERROR
+b     billing  leap    0 0 29 2 *  UTC   2028-02-29T00:00:00Z        0
+b     billing  paused  0 * * * *   UTC   disabled                    0
+b     billing  yearly  @yearly     UTC   disabled                    0
+```
+
+`cron` finds every cron process, on one node or all of them, by the type of
+message it takes, whatever it is named or labelled, and lists its jobs as it
+publishes them: when each runs next and last ran, how many runs are going,
+why the last one that failed did. `enable`, `disable` and `remove` go to the
+cron process through the Inspector's `Call`, then list it again. Its runs are
+processes of their own: `grpcprocctl ps --label cron:yearly` shows those
+going.
+
 ## For an AI agent
 
 ```sh
@@ -133,7 +156,8 @@ or a busy process means) and offers:
 | `get_process` | one process, with what it says about itself |
 | `watch_events` | collect events for a few seconds |
 | `election` | a leader election, as each node sees it |
-| `exit_process`, `set_log_level`, `move_leader`, `cordon_node`, `uncordon_node` | only with `--allow-writes` |
+| `cron_jobs` | cron processes and their jobs, on a node or all of them |
+| `exit_process`, `set_log_level`, `move_leader`, `cordon_node`, `uncordon_node`, `enable_cron_job`, `disable_cron_job`, `remove_cron_job` | only with `--allow-writes` |
 
 So "orders are slow since the deploy" becomes: list processes by mailbox,
 find `ledger-writer` with 41 waiting, inspect it, see it busy on one message

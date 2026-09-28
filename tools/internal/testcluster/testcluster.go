@@ -2,6 +2,7 @@
 package testcluster
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/floatdrop/grpcproc"
 	"github.com/floatdrop/grpcproc/actor"
+	"github.com/floatdrop/grpcproc/cron"
 	"github.com/floatdrop/grpcproc/grpcproctest"
 	"github.com/floatdrop/grpcproc/inspect"
 	"github.com/floatdrop/grpcproc/internal/testpb"
@@ -152,4 +154,21 @@ func (f *Fixture) Leading(t *testing.T, cluster, node string, ok func(string) bo
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// Cron starts a grpcproc/cron process registered as name on node, with
+// jobs that do not come due while a test runs: "yearly", "leap" (February
+// 29) and "paused", disabled.
+func (f *Fixture) Cron(t *testing.T, node, name string) grpcproc.PID {
+	t.Helper()
+	nothing := cron.Func(func(context.Context, cron.Run) error { return nil })
+	c, err := cron.Start(f.C.Node(node), cron.Spec{Jobs: []cron.Job{
+		{Name: "yearly", Spec: "@yearly", Action: nothing},
+		{Name: "leap", Spec: "0 0 29 2 *", Action: nothing},
+		{Name: "paused", Spec: "0 * * * *", Action: nothing, Disabled: true},
+	}}, grpcproc.WithName(name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c.PID()
 }

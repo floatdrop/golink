@@ -119,3 +119,7 @@ cron.RemoveJob(ctx, node, c, "nightly")
 
 Runs already going go on. A cron process a supervisor restarts starts again
 from its `Spec`'s jobs.
+
+From a terminal, [`grpcprocctl cron`](../tools/README.md#cron-jobs) lists every
+cron process of the cluster and its jobs, and enables, disables or removes
+one; an AI agent gets the same as MCP tools.
