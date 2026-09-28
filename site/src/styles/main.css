@@ -124,18 +124,6 @@ body {
 	gap: var(--g-spacing-2);
 }
 
-/* A plain link among the buttons, at their size. */
-.gp-topbar__link {
-	font-size: var(--g-text-body-1-font-size);
-	color: var(--g-color-text-secondary);
-	text-decoration: none;
-	margin-inline-end: var(--g-spacing-1);
-}
-
-.gp-topbar__link:hover {
-	color: var(--g-color-text-primary);
-}
-
 /* ---- theme and copy buttons ---------------------------------------------- */
 
 /* Neither button re-renders -- the page ships no React -- so both states are

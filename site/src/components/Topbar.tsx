@@ -5,7 +5,7 @@ import Moon from '@gravity-ui/icons/Moon';
 import Sun from '@gravity-ui/icons/Sun';
 import { Button, Icon } from '../uikit.ts';
 
-import { PKG_DOC, REPO, url } from '../config.ts';
+import { REPO, url } from '../config.ts';
 import { labels } from '../content/labels.ts';
 import { Mark } from './Mark.tsx';
 
@@ -19,10 +19,6 @@ export function Topbar() {
 				</a>
 
 				<div className="gp-controls">
-					<a className="gp-topbar__link" href={PKG_DOC}>
-						API
-					</a>
-
 					{/* Both icons are in the markup and CSS shows the one that
 					    applies; labelled by the inlined script. */}
 					<Button id="gp-theme" view="normal" size="m" aria-label={labels.toDark}>
