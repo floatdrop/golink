@@ -39,8 +39,8 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/floatdrop/grpcproc"
-	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 	pubsubv1 "github.com/floatdrop/grpcproc/proto/grpcproc/pubsub/v1"
+	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
 // Config configures a topic.

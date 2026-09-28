@@ -324,7 +324,7 @@ func TestRemoteSubscribersSeeTheTopicsNodeGo(t *testing.T) {
 	}
 	l := listen(t, b, pubsub.Named[*testpb.Ping]("a", "pings"))
 	c.Partition("a", "b")
-	l.expect(t, "down " + grpcproc.ReasonNoConnection)
+	l.expect(t, "down "+grpcproc.ReasonNoConnection)
 }
 
 // subscribeFrom subscribes a new process of n to topic, and returns what
