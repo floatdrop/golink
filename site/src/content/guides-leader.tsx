@@ -1,6 +1,6 @@
 import singleton from '../../../examples/singleton/singleton_test.go?raw';
 
-import { Code, region } from '../code.tsx';
+import { Code, Output, region } from '../code.tsx';
 import { Drawing } from '../components/Figure.tsx';
 import { Election } from '../components/diagrams-leader.tsx';
 import { A, C, Ext, Table } from '../components/prose.tsx';
@@ -241,6 +241,20 @@ leader.Uncordon(ctx, node, "scheduler", "c")`}</Code>
 						node of the view to lead is refused.
 					</p>
 					<p>
+						From a terminal, <A to="guides/inspector/#grpcprocctl">grpcprocctl</A> does the same
+						through the Inspector, and shows what every node's elector believes once they agree:
+					</p>
+					<Code lang="sh">{'grpcprocctl --plaintext leader cordon scheduler b   # b led: it hands over'}</Code>
+					<Output>{`NODE  ROLE      TERM  LEADER  VIEW   STATE  CORDONED  UNREACHABLE  SINGLETON  BACKOFF  ERROR
+a     leader    2     a       a,b,c  2.3    b                      <a.1.11>
+b     follower  2     a       a,b,c  2.3    b                      none       200ms
+c     follower  2     a       a,b,c  2.3    b                      none`}</Output>
+					<p>
+						<C>grpcprocctl leader scheduler</C> shows the same table; <C>leader move scheduler</C>{' '}
+						(with <C>--to</C> a node) and <C>leader uncordon scheduler b</C> are the other two
+						operations, and an agent gets them as MCP tools.
+					</p>
+					<p>
 						A node that restarts holds no state, and voters refuse a candidate whose state is
 						older than theirs; so a voter that refuses one sends its own with the refusal, and
 						the candidate campaigns again with it. A restarted node catches up even when no
@@ -332,7 +346,7 @@ leader.Uncordon(ctx, node, "scheduler", "c")`}</Code>
 							[<C>cordoned</C>, 'The nodes that may not lead.'],
 							[<C>checkpoints_waiting</C>, 'On the leader: checkpoints a majority does not hold yet.'],
 							[<C>singleton</C>, 'Its PID on the leader, or none, starting, stopping.'],
-							[<C>backoff</C>, 'How long a node whose singleton failed waits before it campaigns again.']
+							[<C>backoff</C>, 'How long a node waits before it campaigns again: after its singleton failed, or after it handed over.']
 						]}
 					/>
 					<p>

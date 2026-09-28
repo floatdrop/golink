@@ -160,6 +160,23 @@ monitors:              2
 							[<C>exit &lt;pid|name&gt; [reason]</C>, 'Ask a process to exit.'],
 							[<C>loglevel &lt;pid|name&gt; &lt;level&gt;</C>, "Change one process's log level."],
 							[
+								<C>leader [status] &lt;cluster&gt;</C>,
+								<>
+									A <A to="guides/leader/">leader election</A>, as each node that takes part sees it.
+								</>
+							],
+							[
+								<C>leader move &lt;cluster&gt;</C>,
+								<>
+									Hand leadership over: <C>--to</C> a node, by default the follower with the latest
+									state.
+								</>
+							],
+							[
+								<C>leader cordon|uncordon &lt;cluster&gt; &lt;node&gt;</C>,
+								'Keep a node from leading, to work on its host, or let it lead again.'
+							],
+							[
 								<C>dot</C>,
 								<>
 									Graphviz of processes and who started whom: <C>--node</C>, <C>--cluster</C>.
@@ -176,7 +193,8 @@ monitors:              2
 						installed at, which is also what its MCP server reports.
 					</p>
 					<p>
-						<C>--json</C> before <C>node</C>, <C>nodes</C>, <C>ps</C>, <C>inspect</C> or <C>watch</C>{' '}
+						<C>--json</C> before <C>node</C>, <C>nodes</C>, <C>ps</C>, <C>inspect</C>, <C>watch</C>{' '}
+						or <C>leader</C>{' '}
 						prints the same data as JSON: one indented value, or for <C>watch</C> one compact event
 						per line, so <C>grpcprocctl --json watch | jq</C> sees events as they happen. The objects
 						are those the MCP tools return, which wrap lists in an object of their own.
@@ -207,9 +225,11 @@ monitors:              2
 							[<C>list_processes</C>, 'Filter and sort, by mailbox say, to find backlogs.'],
 							[<C>get_process</C>, 'One process, with what it says about itself.'],
 							[<C>watch_events</C>, 'Collect events for a few seconds.'],
+							[<C>election</C>, 'A leader election, as each node sees it.'],
 							[
 								<>
-									<C>exit_process</C>, <C>set_log_level</C>
+									<C>exit_process</C>, <C>set_log_level</C>, <C>move_leader</C>, <C>cordon_node</C>,{' '}
+									<C>uncordon_node</C>
 								</>,
 								<>Only with <C>--allow-writes</C>.</>
 							]

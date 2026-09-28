@@ -70,6 +70,10 @@ monitors:              2
 | `watch` | stream spawns, exits, links, dead letters: `--node`, `--kind`, `--count` |
 | `exit <pid\|name> [reason]` | ask a process to exit |
 | `loglevel <pid\|name> <level>` | change one process's log level |
+| `leader [status] <cluster>` | a [grpcproc/leader](../leader/README.md) election, as each node that takes part sees it |
+| `leader move <cluster>` | hand leadership over: `--to` a node, by default the follower with the latest state |
+| `leader cordon <cluster> <node>` | keep a node from leading, to work on its host; if it leads, it hands over |
+| `leader uncordon <cluster> <node>` | let it lead again |
 | `dot` | Graphviz of processes and who started whom: `--node`, `--cluster` |
 | `mcp` | serve these as MCP tools over stdio: `--allow-writes` |
 
@@ -78,7 +82,7 @@ what its MCP server reports.
 
 A pid is written as grpcproc prints it, `<node.incarnation.id>`; a name is
 looked up on `--node`, by default the node serving the Inspector.
-`--json` before `node`, `nodes`, `ps`, `inspect` or `watch` prints the same
+`--json` before `node`, `nodes`, `ps`, `inspect`, `watch` or `leader` prints the same
 data as JSON: one indented value, or for `watch` one compact event per line,
 so `grpcprocctl --json watch | jq` sees events as they happen. The objects
 are those the MCP tools return, which wrap lists in an object of their own.
@@ -91,6 +95,26 @@ grpcprocctl --plaintext dot --cluster | dot -Tsvg -o processes.svg
 
 draws each node as a cluster, each supervisor bold, an edge from each
 process to those it started, and any process with waiting messages in red.
+
+### Leader elections
+
+```sh
+grpcprocctl --plaintext leader cordon sched b   # b led: it hands over
+```
+
+```txt
+NODE  ROLE      TERM  LEADER  VIEW   STATE  CORDONED  UNREACHABLE  SINGLETON  BACKOFF  ERROR
+a     leader    2     a       a,b,c  2.3    b                      <a.1.11>
+b     follower  2     a       a,b,c  2.3    b                      none       200ms
+c     follower  2     a       a,b,c  2.3    b                      none
+```
+
+Each row is what one node's elector believes, so nodes that name different
+leaders, or lag a term behind, show a partition. `move`, `cordon` and
+`uncordon` go to whichever node leads, through the Inspector's `Call`, and
+print the table once every node agrees, or as it stands when `--timeout`
+runs out, saying so. A cordon is kept in the state the leader replicates:
+the node stays out of the running across its own restarts until `uncordon`.
 
 ## For an AI agent
 
@@ -108,7 +132,8 @@ or a busy process means) and offers:
 | `list_processes` | filter and sort, e.g. by mailbox to find backlogs |
 | `get_process` | one process, with what it says about itself |
 | `watch_events` | collect events for a few seconds |
-| `exit_process`, `set_log_level` | only with `--allow-writes` |
+| `election` | a leader election, as each node sees it |
+| `exit_process`, `set_log_level`, `move_leader`, `cordon_node`, `uncordon_node` | only with `--allow-writes` |
 
 So "orders are slow since the deploy" becomes: list processes by mailbox,
 find `ledger-writer` with 41 waiting, inspect it, see it busy on one message

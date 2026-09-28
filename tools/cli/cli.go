@@ -81,6 +81,10 @@ Commands:
   watch                       stream events (--node, --kind, --count)
   exit <pid|name> [reason]    ask a process to exit (--node)
   loglevel <pid|name> <level> set a process's log level (--node)
+  leader [status] <cluster>   a grpcproc/leader election, as each node sees it
+  leader move <cluster>       hand leadership over (--to a node; by default the most up-to-date follower)
+  leader cordon <cluster> <node>    keep a node from leading, to work on its host
+  leader uncordon <cluster> <node>  let it lead again
   dot                         Graphviz of processes and who started whom (--node, --cluster)
   mcp                         serve these as MCP tools over stdio (--allow-writes)
 
@@ -131,7 +135,7 @@ func Main(ctx context.Context, args []string, env Env) int {
 	fs.StringVar(&a.conn.Key, "key", "", "client key file, for mutual TLS")
 	fs.StringVar(&a.conn.ServerName, "servername", "", "server name to verify, when it differs from the address")
 	fs.DurationVar(&a.timeout, "timeout", 5*time.Second, "time limit for each request")
-	fs.BoolVar(&a.json, "json", false, "print JSON: node, nodes, ps, inspect, watch")
+	fs.BoolVar(&a.json, "json", false, "print JSON: node, nodes, ps, inspect, watch, leader")
 	fs.BoolVar(&showVersion, "version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -229,7 +233,7 @@ var commands map[string]command
 func init() {
 	commands = map[string]command{
 		"node": cmdNode, "nodes": cmdNodes, "ps": cmdPS, "inspect": cmdInspect, "watch": cmdWatch,
-		"exit": cmdExit, "loglevel": cmdLogLevel, "dot": cmdDot, "mcp": cmdMCP,
+		"exit": cmdExit, "loglevel": cmdLogLevel, "dot": cmdDot, "mcp": cmdMCP, "leader": cmdLeader,
 	}
 }
 
@@ -498,6 +502,118 @@ func cmdLogLevel(ctx context.Context, a *app, args []string) error {
 	ctx, cancel := a.request(ctx)
 	defer cancel()
 	return a.client.SetLogLevel(ctx, node, fs.Arg(0), level)
+}
+
+// leaderArgs is how many arguments each leader verb takes.
+var leaderArgs = map[string]int{"status": 1, "move": 1, "cordon": 2, "uncordon": 2}
+
+func cmdLeader(ctx context.Context, a *app, args []string) error {
+	verb := "status"
+	if len(args) > 0 {
+		if _, ok := leaderArgs[args[0]]; ok {
+			verb, args = args[0], args[1:]
+		}
+	}
+	var to string
+	fs, err := a.flags("leader "+verb, args, func(fs *flag.FlagSet) {
+		if verb == "move" {
+			fs.StringVar(&to, "to", "", "the node to hand over to; by default the follower with the latest state")
+		}
+	})
+	if err != nil {
+		return err
+	}
+	if fs.NArg() != leaderArgs[verb] {
+		return usageError{"want: leader [status] <cluster> | leader move <cluster> | leader cordon|uncordon <cluster> <node>"}
+	}
+	cluster, node := fs.Arg(0), fs.Arg(1)
+	if verb == "status" {
+		ctx, cancel := a.request(ctx)
+		defer cancel()
+		views, err := a.client.Election(ctx, cluster)
+		if err != nil {
+			return err
+		}
+		return a.printElection(views)
+	}
+	rctx, cancel := a.request(ctx)
+	var was string
+	if verb == "move" {
+		was, err = a.client.MoveLeader(rctx, cluster, to)
+	} else {
+		was, err = a.client.Cordon(rctx, cluster, node, verb == "uncordon")
+	}
+	cancel()
+	if err != nil {
+		return err
+	}
+	// The change is made; show it once every node agrees, or as it stands.
+	views, settled := a.settle(ctx, cluster, func(vs []client.ElectorView) bool {
+		lead := agreed(vs)
+		if verb == "move" {
+			return lead != "" && lead != was && (to == "" || lead == to)
+		}
+		for _, v := range vs {
+			if slices.Contains(v.Cordoned, node) != (verb == "cordon") {
+				return false
+			}
+		}
+		return lead != "" && (verb == "uncordon" || lead != node)
+	})
+	if !settled {
+		fmt.Fprintf(a.env.Stderr, "grpcprocctl leader %s: done, but the nodes do not all agree yet (--timeout %v)\n", verb, a.timeout)
+	}
+	return a.printElection(views)
+}
+
+// settle asks for cluster's election until done says every node shows what
+// it should, or the request time limit passes; it returns the last answer.
+func (a *app) settle(ctx context.Context, cluster string, done func([]client.ElectorView) bool) ([]client.ElectorView, bool) {
+	ctx, cancel := a.request(ctx)
+	defer cancel()
+	var last []client.ElectorView
+	for {
+		if views, err := a.client.Election(ctx, cluster); err == nil {
+			last = views
+			if done(views) {
+				return last, true
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return last, false
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+// agreed is the leader every node names, or empty while they do not all
+// name the same one, or one could not be asked.
+func agreed(views []client.ElectorView) string {
+	var lead string
+	for i, v := range views {
+		if v.Error != "" || v.Leader == "" || i > 0 && v.Leader != lead {
+			return ""
+		}
+		lead = v.Leader
+	}
+	return lead
+}
+
+func (a *app) printElection(views []client.ElectorView) error {
+	if a.json {
+		return a.printJSON(views)
+	}
+	rows := make([][]string, 0, len(views))
+	for _, v := range views {
+		term := ""
+		if v.Term > 0 {
+			term = u(v.Term)
+		}
+		rows = append(rows, []string{v.Node, v.Role, term, v.Leader, strings.Join(v.View, ","), v.State,
+			strings.Join(v.Cordoned, ","), strings.Join(v.Unreachable, ","), v.Singleton, v.Backoff, v.Error})
+	}
+	return a.table("NODE\tROLE\tTERM\tLEADER\tVIEW\tSTATE\tCORDONED\tUNREACHABLE\tSINGLETON\tBACKOFF\tERROR", rows)
 }
 
 func cmdDot(ctx context.Context, a *app, args []string) error {

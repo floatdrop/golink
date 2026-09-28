@@ -13,6 +13,7 @@ import (
 	"github.com/floatdrop/grpcproc/grpcproctest"
 	"github.com/floatdrop/grpcproc/inspect"
 	"github.com/floatdrop/grpcproc/internal/testpb"
+	"github.com/floatdrop/grpcproc/leader"
 )
 
 // Fixture is what Start leaves running on node "a".
@@ -102,7 +103,7 @@ func Start(t *testing.T, more ...string) *Fixture {
 				return err
 			}
 			if m.IsCall() {
-				_ = p.Reply(m, &testpb.Pong{}, nil)
+				_ = m.Reply(&testpb.Pong{}, nil)
 			}
 		}
 	}, grpcproc.WithName("echo"))
@@ -112,4 +113,43 @@ func Start(t *testing.T, more ...string) *Fixture {
 	}
 	time.Sleep(20 * time.Millisecond) // the stuck process takes its first message
 	return f
+}
+
+// Elect runs a grpcproc/leader election called cluster among nodes, which
+// are its voters, with short timeouts and an idle singleton, and waits until
+// one of them leads.
+func (f *Fixture) Elect(t *testing.T, cluster string, nodes ...string) {
+	t.Helper()
+	spec := leader.Spec[proto.Message]{
+		Cluster:           cluster,
+		Voters:            nodes,
+		ElectionTimeout:   100 * time.Millisecond,
+		HeartbeatInterval: 20 * time.Millisecond,
+		Singleton: func(*leader.Lease[proto.Message], proto.Message) (actor.ChildSpec, error) {
+			return actor.ChildFunc("singleton", worker), nil
+		},
+	}
+	for _, n := range nodes {
+		if _, err := leader.Start(f.C.Node(n), spec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.Leading(t, cluster, nodes[0], func(lead string) bool { return lead != "" })
+}
+
+// Leading waits until node's elector for cluster names a leader ok
+// accepts, and returns it.
+func (f *Fixture) Leading(t *testing.T, cluster, node string, ok func(string) bool) string {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		info, err := leader.Status(t.Context(), f.C.Node(node), cluster)
+		if err == nil && info.Leader != "" && ok(info.Leader) {
+			return info.Leader
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: no leader as wanted: %+v, %v", cluster, info, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
