@@ -63,6 +63,7 @@ grpcproc/proto/grpcproc/v1       wire protocol (.proto + generated code)
 grpcproc/grpcproctest            in-memory clusters over bufconn: Cluster, Partition, Kill
 grpcproc/inspect             grpcproc.v1.Inspector gRPC service + Go client (optional to register)
 grpcproc/actor               optional helpers: handler loop, supervisor, timers
+grpcproc/pubsub              optional: topics with a replay buffer, relayed once per node
 grpcproc/etcd     (nested module)   Resolver + Registrar + Membership on etcd leases
 grpcproc/otel     (nested module)   Hooks implementation: OTel metrics + trace propagation
 grpcproc/tools    (nested module)   grpcprocctl: CLI, Graphviz and MCP server over the Inspector
@@ -636,11 +637,50 @@ them. Two primitives went into the core because they need process internals:
   when its significant children end by themselves for good; one it stops
   does not count. A permanent child cannot be significant.
 
+## Pub/sub (`grpcproc/pubsub`, sketch)
+
+Built on the public core API only, as `actor` is. A topic is a process: it
+keeps its subscribers and its last `Buffer` events, and sends each event it
+is given to every subscriber. Each part of it is something the core already
+has:
+
+| Feature | grpcproc/pubsub |
+|---|---|
+| Owning a topic | a topic process under a name; holding its address is the right to publish |
+| Publishing | `Topic.Publish`: a send to the topic, which sends on; in order per sender, so per topic |
+| Subscribing | `Topic.Subscribe` monitors; a subscriber that wants to exit with the topic links to it |
+| Replay | the topic sends what it kept, then answers: a local call's reply does not pass through the mailbox, and a remote one shares the link with the sends, so nothing is missed or seen twice |
+| Demand | `Config.Notify` gets a `Demand` on the first subscriber and after the last; the topic monitors its subscribers |
+| A topic that ends with its producer | `SpawnOwned` links the topic to its owner; its reason reaches subscribers in their Down |
+| A topic for the whole node | `Spawn` on the node; a restart loses subscribers, who see a Down and subscribe again, as with `pg` |
+| The node's own events | `Node.Subscribe`, and the Inspector's `Watch` for other nodes |
+
+- **A relay per node.** A topic sending to each remote subscriber would
+  encode and send an event once per subscriber. So `Subscribe` to another
+  node's topic goes through a relay on the subscriber's node,
+  `pubsub:{name@node}`, which the first subscriber starts: a topic whose
+  events come from the upstream topic, holding its buffer. The upstream
+  topic sends each event once per node. The relay ends with its last
+  subscriber, and with the upstream topic, for its reason, which its
+  subscribers see.
+- **The relay waits as long as its first subscriber.** It subscribes to its
+  topic while that subscriber's call waits on it. A call's deadline does not
+  cross to the callee, so `Subscribe` carries the time left on its ctx, and
+  the relay gives up when the subscriber does, rather than after a timeout
+  of its own. A relay that fails ends, and the subscribers queued behind the
+  first start another.
+- **Where the monitor goes.** A subscriber on the topic's node monitors by
+  PID after the answer, so a failed call leaves no Down behind. The relay
+  monitors first, on the same link as its call: a monitor placed after the
+  answer could reach a topic that exited meanwhile, and say noproc in place
+  of the reason.
+- A reply carries an error's text, not the error: the relay answers with
+  the sentinel its own call returned, and `Subscribe` maps the text back.
+
 ## Later
 
 - A **global name registry** (`grpcproc.Global{"ledger"}` resolving through
   etcd, with a lease as fencing token), on top of `grpcproc/etcd`.
-- Cross-node pub/sub with a replay buffer (ergo's events). Useful; not core.
 - Delivery beyond at-most-once, in order per sender. Explicitly out of scope;
   build it above `grpcproc`, as OTP does.
 - Virtual actors / placement, persistence, remote spawn. Out of scope.
