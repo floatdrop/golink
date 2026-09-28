@@ -36,6 +36,11 @@ const server = createServer(async (req, res) => {
 	if (path.endsWith('/')) {
 		path += 'index.html';
 	}
+	// A page's address ends in a slash; Pages redirects one typed without it.
+	if (!extname(path)) {
+		res.writeHead(302, { location: base + path + '/' }).end();
+		return;
+	}
 
 	const file = join(outDir, path);
 	if (!file.startsWith(outDir)) {
@@ -54,8 +59,9 @@ const server = createServer(async (req, res) => {
 		});
 		createReadStream(file).pipe(res);
 	} catch {
-		res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-		res.end(`not found: ${path}\n`);
+		// What Pages serves for an address with no page.
+		res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' });
+		createReadStream(join(outDir, '404.html')).pipe(res);
 	}
 });
 

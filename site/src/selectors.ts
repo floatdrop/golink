@@ -4,13 +4,13 @@
  * script that finds it, and the stylesheet that draws its states.
  */
 export const THEME_TOGGLE = '#gp-theme';
-export const COPY_BUTTON = '#gp-copy';
-/** Worn by the copy button for a moment after a successful copy. */
+export const COPY_BUTTON = '.gp-copy';
+/** Worn by a copy button for a moment after a successful copy. */
 export const COPY_DONE = 'gp-copy_done';
 
-/** The sections the table of contents points at, and its links to them. */
+/** The sections the page's outline points at, and its links to them. */
 export const SECTION = '.gp-section';
-export const TOC_LINK = '.gp-toc a[href^="#"]';
+export const TOC_LINK = '.gp-outline a[href^="#"]';
 /**
  * uikit's own active modifier, on the element it puts it on. Setting it is all
  * the highlight takes -- Toc ships the brand rail and the text colour, and
@@ -20,13 +20,13 @@ export const TOC_LINK = '.gp-toc a[href^="#"]';
 export const TOC_ACTIVE = 'g-toc-item__section_active';
 
 /**
- * The button that hides the table of contents, and the class that is on the
+ * The button that hides the site's navigation, and the class that is on the
  * root while it is hidden. The root, because the script settles it from the
  * head before the aside exists, and because what changes is the grid the
  * aside sits in, not the aside alone.
  */
-export const TOC_TOGGLE = '#gp-toc-toggle';
-export const TOC_HIDDEN = 'gp-toc-hidden';
+export const NAV_TOGGLE = '#gp-nav-toggle';
+export const NAV_HIDDEN = 'gp-nav-hidden';
 
 /**
  * The GitHub button, and the count the script appends to it. The class is

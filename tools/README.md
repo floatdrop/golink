@@ -1,7 +1,7 @@
 # grpcproc/tools
 
 `grpcprocctl`: inspect and operate grpcproc nodes through their
-[Inspector](../README.md#inspector), from a terminal or, as an MCP server,
+[Inspector](https://floatdrop.github.io/grpcproc/guides/inspector/), from a terminal or, as an MCP server,
 from an AI agent. A separate module, so grpcproc itself carries no CLI or MCP
 dependencies.
 

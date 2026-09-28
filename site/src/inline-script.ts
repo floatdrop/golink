@@ -1,22 +1,22 @@
 export interface InlineConfig {
 	/** Selector for the theme button. */
 	themeToggle: string;
-	/** Selector for the copy button beside the install line. */
+	/** Selector for a copy button; its data-copy attribute is what it copies. */
 	copyButton: string;
-	/** Class the copy button wears for a moment after a successful copy. */
+	/** Class a copy button wears for a moment after a successful copy. */
 	copyDone: string;
-	/** Selector for the sections the table of contents points at. */
+	/** Selector for the sections the page's outline points at. */
 	section: string;
-	/** Selector for the table of contents' links. */
+	/** Selector for the outline's links. */
 	tocLink: string;
 	/** uikit's active modifier, set on each link's parent. */
 	tocActive: string;
 	/** How far below the viewport top a section counts as current. */
 	tocOffset: number;
-	/** Selector for the button that hides and shows the table of contents. */
-	tocToggle: string;
-	/** Class the root wears while the table of contents is hidden. */
-	tocHidden: string;
+	/** Selector for the button that hides and shows the site's navigation. */
+	navToggle: string;
+	/** Class the root wears while the navigation is hidden. */
+	navHidden: string;
 	/** Selector for the GitHub button the star count is appended to. */
 	githubButton: string;
 	/** Selector for that count once it exists. */
@@ -25,17 +25,15 @@ export interface InlineConfig {
 	starsClass: string;
 	/** The GitHub API endpoint for this repository. */
 	starsApi: string;
-	/** What the copy button puts on the clipboard. */
-	copyText: string;
 	labels: {
 		/** Announced by the theme button while the dark theme is on. */
 		toLight: string;
 		/** Announced while the light theme is on. */
 		toDark: string;
-		/** Announced by the contents button while the contents are shown. */
-		hideToc: string;
-		/** Announced while they are hidden. */
-		showToc: string;
+		/** Announced by the navigation button while the navigation is shown. */
+		hideNav: string;
+		/** Announced while it is hidden. */
+		showNav: string;
 	};
 }
 
@@ -79,32 +77,32 @@ export function inlineScript(config: InlineConfig) {
 	}
 
 	/**
-	 * Hides or shows the table of contents. Hidden is a choice kept across
+	 * Hides or shows the site's navigation. Hidden is a choice kept across
 	 * visits, like the theme, and settled from the head for the same reason: a
-	 * page that drew its contents and then took them away would jump the prose
+	 * page that drew its navigation and then took it away would jump the prose
 	 * sideways under the reader.
 	 */
-	const TOC_KEY = 'gp-toc';
+	const NAV_KEY = 'gp-nav';
 
-	function tocShown(): boolean {
+	function navShown(): boolean {
 		try {
-			return localStorage.getItem(TOC_KEY) !== 'hidden';
+			return localStorage.getItem(NAV_KEY) !== 'hidden';
 		} catch {
 			return true;
 		}
 	}
 
-	function showToc(shown: boolean) {
-		root.classList.toggle(config.tocHidden, !shown);
-		const button = document.querySelector(config.tocToggle);
+	function showNav(shown: boolean) {
+		root.classList.toggle(config.navHidden, !shown);
+		const button = document.querySelector(config.navToggle);
 		if (button) {
 			button.setAttribute('aria-expanded', String(shown));
-			button.setAttribute('aria-label', shown ? config.labels.hideToc : config.labels.showToc);
+			button.setAttribute('aria-label', shown ? config.labels.hideNav : config.labels.showNav);
 		}
 	}
 
 	/**
-	 * Marks the section being read in the table of contents. uikit's Toc takes
+	 * Marks the section being read in the page's outline. uikit's Toc takes
 	 * its active item from a `value` prop, and this page has no React to change
 	 * one, so the class it would have set is set here instead.
 	 */
@@ -186,7 +184,7 @@ export function inlineScript(config: InlineConfig) {
 	}
 
 	apply(chosen() ?? system());
-	showToc(tocShown());
+	showNav(navShown());
 
 	// The first calls settle the theme and the contents before anything
 	// paints, which is the point of running in the head -- but the buttons they
@@ -195,7 +193,7 @@ export function inlineScript(config: InlineConfig) {
 	// it exists yet.
 	function ready() {
 		apply(root.classList.contains(DARK) ? 'dark' : 'light');
-		showToc(!root.classList.contains(config.tocHidden));
+		showNav(!root.classList.contains(config.navHidden));
 
 		stars();
 
@@ -240,24 +238,25 @@ export function inlineScript(config: InlineConfig) {
 			return;
 		}
 
-		if (target.closest(config.tocToggle)) {
-			const show = root.classList.contains(config.tocHidden);
+		if (target.closest(config.navToggle)) {
+			const show = root.classList.contains(config.navHidden);
 			try {
 				if (show) {
-					localStorage.removeItem(TOC_KEY);
+					localStorage.removeItem(NAV_KEY);
 				} else {
-					localStorage.setItem(TOC_KEY, 'hidden');
+					localStorage.setItem(NAV_KEY, 'hidden');
 				}
 			} catch {
-				// Storage is denied; the contents stay as set for this page only.
+				// Storage is denied; the navigation stays as set for this page only.
 			}
-			showToc(show);
+			showNav(show);
 			return;
 		}
 
 		const copy = target.closest(config.copyButton);
-		if (copy && navigator.clipboard) {
-			navigator.clipboard.writeText(config.copyText).then(
+		const text = copy?.getAttribute('data-copy');
+		if (copy && text && navigator.clipboard) {
+			navigator.clipboard.writeText(text).then(
 				function () {
 					copy.classList.add(config.copyDone);
 					setTimeout(function () {

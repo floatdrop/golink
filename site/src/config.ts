@@ -1,5 +1,6 @@
 export const REPO = 'https://github.com/floatdrop/grpcproc';
 export const PKG_DOC = 'https://pkg.go.dev/github.com/floatdrop/grpcproc';
+export const SITE_TITLE = 'grpcproc';
 
 /**
  * GitHub Pages serves a project site under /<repo>; the workflow sets
@@ -8,18 +9,13 @@ export const PKG_DOC = 'https://pkg.go.dev/github.com/floatdrop/grpcproc';
 export const BASE = (process.env['BASE_PATH'] ?? '').replace(/\/$/, '');
 
 /**
- * An in-site URL.
- *
- * With a base path the URLs are absolute, which is what Pages needs. Without
- * one they are relative to the page, so `build/` can be opened straight off
- * the filesystem or served from any prefix. Absolute paths with no base look
- * right and are wrong in both of those cases: the stylesheet 404s, and a page
- * with no CSS does not look like a broken link, it looks like a broken design.
+ * An in-site URL, absolute from the site's root: the pages live at several
+ * depths, so a relative URL would differ from page to page. `npm run
+ * preview` serves the build under its base path, and `npm run dev` at the
+ * root, which is what an absolute URL needs; opening build/ straight off the
+ * filesystem is not supported.
  */
-export const url = (path: string) => {
-	const clean = path.replace(/^\//, '');
-	if (BASE) {
-		return `${BASE}/${clean}`;
-	}
-	return clean === '' ? './' : clean;
-};
+export const url = (path: string) => `${BASE}/${path.replace(/^\//, '')}`;
+
+/** A file in the repository, on GitHub. */
+export const file = (path: string) => `${REPO}/blob/main/${path}`;

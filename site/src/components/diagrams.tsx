@@ -1,10 +1,11 @@
-// The guide's drawings, as inline SVG. Every colour is a Gravity UI token, set
+// The site's drawings, as inline SVG: the primitives, and the tutorial's
+// figures. Other pages draw with the same primitives in their own files. Every colour is a Gravity UI token, set
 // in main.css, so a drawing follows the theme the way the text does; the
 // shapes are the only thing here. Coordinates are in the viewBox, which is
 // drawn at the width of the column.
 import type { ReactNode } from 'react';
 
-type Kind = 'plain' | 'actor' | 'supervisor' | 'platform' | 'contract' | 'outside';
+export type Kind = 'plain' | 'actor' | 'supervisor' | 'platform' | 'contract' | 'outside';
 
 interface BoxProps {
 	x: number;
@@ -17,7 +18,7 @@ interface BoxProps {
 }
 
 /** A labelled box; x and y are its top-left corner. */
-function Box({ x, y, w, h = 36, title, sub, kind = 'plain' }: BoxProps) {
+export function Box({ x, y, w, h = 36, title, sub, kind = 'plain' }: BoxProps) {
 	const cx = x + w / 2;
 	return (
 		<g className={`gp-d-box gp-d-box_${kind}`}>
@@ -35,7 +36,7 @@ function Box({ x, y, w, h = 36, title, sub, kind = 'plain' }: BoxProps) {
 }
 
 /** A process boundary: everything drawn inside runs in one OS process. */
-function Frame({ x, y, w, h, title }: { x: number; y: number; w: number; h: number; title: string }) {
+export function Frame({ x, y, w, h, title }: { x: number; y: number; w: number; h: number; title: string }) {
 	return (
 		<g className="gp-d-frame">
 			<rect x={x} y={y} width={w} height={h} rx={10} />
@@ -55,7 +56,7 @@ interface LineProps {
 	kind?: 'solid' | 'dashed' | 'tree';
 }
 
-function Line({ d, id, end = true, start = false, kind = 'solid' }: LineProps) {
+export function Line({ d, id, end = true, start = false, kind = 'solid' }: LineProps) {
 	return (
 		<path
 			className={`gp-d-line gp-d-line_${kind}`}
@@ -66,7 +67,7 @@ function Line({ d, id, end = true, start = false, kind = 'solid' }: LineProps) {
 	);
 }
 
-function Note({ x, y, children, anchor = 'start' }: { x: number; y: number; children: ReactNode; anchor?: 'start' | 'middle' | 'end' }) {
+export function Note({ x, y, children, anchor = 'start' }: { x: number; y: number; children: ReactNode; anchor?: 'start' | 'middle' | 'end' }) {
 	return (
 		<text className="gp-d-note" x={x} y={y} textAnchor={anchor}>
 			{children}
@@ -75,7 +76,7 @@ function Note({ x, y, children, anchor = 'start' }: { x: number; y: number; chil
 }
 
 /** The svg element, its accessible name, and this drawing's arrowheads. */
-function Diagram({ id, width, height, label, children }: { id: string; width: number; height: number; label: string; children: ReactNode }) {
+export function Diagram({ id, width, height, label, children }: { id: string; width: number; height: number; label: string; children: ReactNode }) {
 	return (
 		<svg className="gp-diagram" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={label}>
 			<defs>
@@ -208,7 +209,7 @@ interface TreeProps {
 }
 
 /** A node's supervision tree: the root, a supervisor per service, its process. */
-function Tree({ x, y, services }: TreeProps) {
+export function Tree({ x, y, services }: TreeProps) {
 	const gap = 118;
 	const left = x - ((services.length - 1) * gap) / 2;
 	return (

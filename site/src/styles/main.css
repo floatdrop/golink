@@ -124,6 +124,18 @@ body {
 	gap: var(--g-spacing-2);
 }
 
+/* A plain link among the buttons, at their size. */
+.gp-topbar__link {
+	font-size: var(--g-text-body-1-font-size);
+	color: var(--g-color-text-secondary);
+	text-decoration: none;
+	margin-inline-end: var(--g-spacing-1);
+}
+
+.gp-topbar__link:hover {
+	color: var(--g-color-text-primary);
+}
+
 /* ---- theme and copy buttons ---------------------------------------------- */
 
 /* Neither button re-renders -- the page ships no React -- so both states are
@@ -234,52 +246,138 @@ body {
 
 /* ---- body ---------------------------------------------------------------- */
 
+/* One column of prose by default; the navigation and the outline join it
+   at the widths below. */
 .gp-layout {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr);
 	gap: var(--g-spacing-8);
-	padding-bottom: 4rem;
+	padding-block: var(--g-spacing-6) 4rem;
 }
 
-/* ---- table of contents --------------------------------------------------- */
+/* ---- navigation ---------------------------------------------------------- */
 
-/* uikit's Toc draws the rail, the indent and every state, the active one
-   included -- the inlined script only sets the class as you scroll. What the
-   component leaves to the page is the type, since it inherits whatever it is
-   dropped into. Nothing else here overrides it. */
-.gp-toc {
-	display: none; /* shown beside the prose from the two-column width up */
+/* The site's map, in an aside beside the prose from the two-column width up,
+   and folded into a <details> at the top of the prose below it. */
+.gp-nav {
+	display: none;
 	min-width: 0;
 	font-size: var(--g-text-body-1-font-size);
 	line-height: var(--g-text-body-1-line-height);
 }
 
-/* The button that hides the list, and the list's name beside it. */
-.gp-toc__head {
+.gp-nav__head {
 	display: flex;
 	align-items: center;
 	gap: var(--g-spacing-1);
-	margin-bottom: var(--g-spacing-2);
+	margin-bottom: var(--g-spacing-3);
 	color: var(--g-color-text-secondary);
 }
 
-/* Hidden, the contents are down to that one button, which the root class
-   leaves where it was -- sticky with the aside, so the list is a click away
-   from anywhere on the page. The prose takes the column it gives up; see the
-   two-column block below. */
-.gp-toc-hidden .gp-toc__title,
-.gp-toc-hidden .gp-toc__list {
+.gp-nav__group {
+	margin-bottom: var(--g-spacing-4);
+}
+
+.gp-nav__group-title {
+	margin-bottom: var(--g-spacing-2);
+	font-size: var(--g-text-caption-2-font-size);
+	font-weight: var(--g-text-accent-font-weight);
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--g-color-text-secondary);
+}
+
+.gp-nav__list {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	border-inline-start: 1px solid var(--g-color-line-generic);
+}
+
+.gp-nav__link {
+	display: flex;
+	align-items: center;
+	gap: var(--g-spacing-1);
+	margin-inline-start: -1px;
+	padding: 3px var(--g-spacing-3);
+	border-inline-start: 2px solid transparent;
+	color: var(--g-color-text-complementary);
+	text-decoration: none;
+}
+
+.gp-nav__link:hover {
+	color: var(--g-color-text-primary);
+}
+
+.gp-nav__link_current {
+	border-inline-start-color: var(--g-color-line-brand);
+	color: var(--g-color-text-primary);
+	font-weight: var(--g-text-accent-font-weight);
+}
+
+.gp-nav__link_external {
+	color: var(--g-color-text-secondary);
+}
+
+/* Hidden, the navigation is down to its one button, which the root class
+   leaves where it was -- sticky with the aside, so the map is a click away
+   from anywhere on the page. The prose takes the column it gives up. */
+.gp-nav-hidden .gp-nav__title,
+.gp-nav-hidden .gp-nav__body {
 	display: none;
 }
 
-/* ---- two columns --------------------------------------------------------- */
+/* The folded navigation for narrow widths. */
+.gp-nav-mobile {
+	margin-bottom: var(--g-spacing-6);
+	border: 1px solid var(--g-color-line-generic);
+	border-radius: var(--g-border-radius-l);
+	font-size: var(--g-text-body-1-font-size);
+	line-height: var(--g-text-body-1-line-height);
+}
 
-/* The one breakpoint on the page. Below it the hero is the words alone and
-   the table of contents is not shown at all; from it up, the scene sits
-   beside the words and the contents beside the prose, sticky. The two switch
-   together, so the page never has one of them without the other. This block
-   comes after every base rule it overrides, since the cascade breaks the tie
-   between equal selectors by order. */
+.gp-nav-mobile__summary {
+	padding: var(--g-spacing-2) var(--g-spacing-4);
+	cursor: pointer;
+	color: var(--g-color-text-secondary);
+}
+
+.gp-nav-mobile[open] .gp-nav-mobile__summary {
+	border-bottom: 1px solid var(--g-color-line-generic);
+}
+
+.gp-nav-mobile .gp-nav__groups {
+	padding: var(--g-spacing-4);
+}
+
+/* ---- outline ------------------------------------------------------------- */
+
+/* "On this page": uikit's Toc draws the rail, the indent and every state,
+   the active one included -- the inlined script only sets the class as you
+   scroll. What the component leaves to the page is the type. */
+.gp-outline {
+	display: none;
+	min-width: 0;
+	font-size: var(--g-text-body-1-font-size);
+	line-height: var(--g-text-body-1-line-height);
+}
+
+.gp-outline__title {
+	margin-bottom: var(--g-spacing-2);
+	font-size: var(--g-text-caption-2-font-size);
+	font-weight: var(--g-text-accent-font-weight);
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--g-color-text-secondary);
+}
+
+/* ---- columns ------------------------------------------------------------- */
+
+/* Two breakpoints. From the first, the scene sits beside the hero's words
+   and the navigation beside the prose, sticky; from the second, the outline
+   joins on the other side. These blocks come after every base rule they
+   override, since the cascade breaks the tie between equal selectors by
+   order. */
 @media (min-width: 64rem) {
 	.gp-hero {
 		grid-template-columns: minmax(0, 1fr) auto;
@@ -298,7 +396,7 @@ body {
 		gap: var(--g-spacing-9);
 	}
 
-	.gp-toc {
+	.gp-nav {
 		display: block;
 		position: sticky;
 		top: calc(var(--gp-topbar-height) + var(--g-spacing-5));
@@ -307,12 +405,38 @@ body {
 		overflow-y: auto;
 	}
 
-	.gp-toc-hidden .gp-layout {
+	.gp-nav-mobile {
+		display: none;
+	}
+
+	.gp-nav-hidden .gp-layout {
 		grid-template-columns: auto minmax(0, 1fr);
 		gap: var(--g-spacing-5);
 	}
 }
 
+@media (min-width: 84rem) {
+	.g-root {
+		--gp-page: 84rem;
+	}
+
+	.gp-layout {
+		grid-template-columns: 15rem minmax(0, 1fr) 12rem;
+	}
+
+	.gp-nav-hidden .gp-layout {
+		grid-template-columns: auto minmax(0, 1fr) 12rem;
+	}
+
+	.gp-outline {
+		display: block;
+		position: sticky;
+		top: calc(var(--gp-topbar-height) + var(--g-spacing-5));
+		align-self: start;
+		max-height: calc(100vh - var(--gp-topbar-height) - var(--g-spacing-8));
+		overflow-y: auto;
+	}
+}
 
 /* ---- prose --------------------------------------------------------------- */
 
@@ -320,13 +444,62 @@ body {
    wants; its 24px leading is a control's, so the leading is set in ems. */
 .gp-prose {
 	min-width: 0;
+	max-width: 46rem;
 	font-size: var(--g-text-body-3-font-size);
 	line-height: 1.6;
 }
 
-.gp-prose p {
+.gp-prose p,
+.gp-prose ul,
+.gp-prose ol {
 	margin: 0 0 1.15em;
 	max-width: var(--gp-measure);
+}
+
+.gp-prose ul,
+.gp-prose ol {
+	padding-inline-start: 1.4em;
+}
+
+.gp-prose li {
+	margin-bottom: 0.35em;
+}
+
+.gp-prose li > p {
+	margin-bottom: 0.35em;
+}
+
+.gp-prose h3 {
+	margin: 1.8em 0 0.5em;
+	font-size: var(--g-text-subheader-3-font-size);
+	line-height: var(--g-text-subheader-3-line-height);
+	font-weight: var(--g-text-subheader-font-weight);
+	letter-spacing: -0.01em;
+}
+
+.gp-prose a {
+	color: var(--g-color-text-link);
+}
+
+.gp-prose a:hover {
+	color: var(--g-color-text-link-hover);
+}
+
+/* The page's title and its one-line description. */
+.gp-doc-head {
+	margin-bottom: 2.5rem;
+}
+
+.gp-doc-head__title {
+	margin: 0 0 var(--g-spacing-3);
+	letter-spacing: -0.02em;
+	text-wrap: balance;
+}
+
+.gp-doc-head__lead {
+	margin: 0;
+	max-width: var(--gp-measure);
+	line-height: 1.5;
 }
 
 .gp-intro {
@@ -343,22 +516,186 @@ body {
 }
 
 .gp-section__heading {
-	display: flex;
-	align-items: baseline;
-	gap: var(--g-spacing-3);
+	position: relative;
 	margin: 0 0 var(--g-spacing-4);
 	line-height: 1.25;
 	letter-spacing: -0.01em;
 	text-wrap: balance;
 }
 
-.gp-section__number {
-	flex: none;
-	font-family: var(--g-font-family-monospace);
-	font-size: var(--g-text-body-2-font-size);
+/* A hash to the left of the heading, shown on hover, that links to it. */
+.gp-section__anchor {
+	position: absolute;
+	right: 100%;
+	padding-inline-end: var(--g-spacing-2);
+	color: var(--g-color-text-hint);
 	font-weight: var(--g-text-body-font-weight);
-	font-variant-numeric: tabular-nums;
+	text-decoration: none;
+	opacity: 0;
+}
+
+.gp-section__heading:hover .gp-section__anchor {
+	opacity: 1;
+}
+
+/* ---- previous and next --------------------------------------------------- */
+
+.gp-prevnext {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: var(--g-spacing-4);
+	margin-top: 3rem;
+	padding-top: var(--g-spacing-6);
+	border-top: 1px solid var(--g-color-line-generic);
+	font-size: var(--g-text-body-2-font-size);
+	line-height: var(--g-text-body-2-line-height);
+}
+
+.gp-prevnext__link {
+	display: flex;
+	flex-direction: column;
+	gap: var(--g-spacing-1);
+	padding: var(--g-spacing-3) var(--g-spacing-4);
+	border: 1px solid var(--g-color-line-generic);
+	border-radius: var(--g-border-radius-l);
+	text-decoration: none;
+	color: var(--g-color-text-primary);
+}
+
+.gp-prevnext__link:hover {
+	border-color: var(--g-color-line-generic-hover);
+	background: var(--g-color-base-generic-ultralight);
+}
+
+.gp-prevnext__link_next {
+	text-align: end;
+	align-items: flex-end;
+}
+
+.gp-prevnext__label {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--g-spacing-1);
+	font-size: var(--g-text-caption-2-font-size);
 	color: var(--g-color-text-secondary);
+}
+
+.gp-prevnext__title {
+	font-weight: var(--g-text-accent-font-weight);
+}
+
+/* ---- cards --------------------------------------------------------------- */
+
+.gp-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+	gap: var(--g-spacing-4);
+	margin: var(--g-spacing-5) 0 var(--g-spacing-6);
+}
+
+.gp-card {
+	display: flex;
+	flex-direction: column;
+	gap: var(--g-spacing-2);
+	padding: var(--g-spacing-4) var(--g-spacing-5);
+	border: 1px solid var(--g-color-line-generic);
+	border-radius: var(--g-border-radius-l);
+	text-decoration: none;
+	color: var(--g-color-text-primary);
+	font-size: var(--g-text-body-2-font-size);
+	line-height: var(--g-text-body-2-line-height);
+}
+
+.gp-card:hover {
+	border-color: var(--g-color-line-brand);
+	background: var(--g-color-base-generic-ultralight);
+}
+
+.gp-card__title {
+	font-weight: var(--g-text-accent-font-weight);
+	font-size: var(--g-text-body-3-font-size);
+}
+
+.gp-card__text {
+	color: var(--g-color-text-secondary);
+}
+
+/* ---- tables -------------------------------------------------------------- */
+
+.gp-table-wrap {
+	margin: var(--g-spacing-4) 0 var(--g-spacing-6);
+	overflow-x: auto;
+	border: 1px solid var(--g-color-line-generic);
+	border-radius: var(--g-border-radius-l);
+}
+
+.gp-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: var(--g-text-body-2-font-size);
+	line-height: var(--g-text-body-2-line-height);
+}
+
+.gp-table th,
+.gp-table td {
+	padding: var(--g-spacing-2) var(--g-spacing-4);
+	vertical-align: top;
+	text-align: start;
+	border-bottom: 1px solid var(--g-color-line-generic);
+}
+
+.gp-table th {
+	font-weight: var(--g-text-accent-font-weight);
+	color: var(--g-color-text-secondary);
+	background: var(--g-color-base-generic-ultralight);
+}
+
+.gp-table tr:last-child td {
+	border-bottom: none;
+}
+
+.gp-table td:first-child {
+	white-space: nowrap;
+}
+
+.gp-table .gp-code {
+	font-size: var(--g-text-code-inline-2-font-size);
+}
+
+/* ---- asides -------------------------------------------------------------- */
+
+/* Something beside the main line of the page, for a reader with a
+   particular background. */
+.gp-aside {
+	margin: var(--g-spacing-5) 0 var(--g-spacing-6);
+	padding: var(--g-spacing-3) var(--g-spacing-5);
+	border-inline-start: 3px solid var(--g-color-line-info);
+	border-radius: var(--g-border-radius-m);
+	background: var(--g-color-base-info-light);
+	font-size: var(--g-text-body-2-font-size);
+	line-height: 1.55;
+}
+
+.gp-aside__title {
+	margin-bottom: var(--g-spacing-1);
+	font-weight: var(--g-text-accent-font-weight);
+	color: var(--g-color-text-info-heavy);
+}
+
+.gp-aside__body p:last-child {
+	margin-bottom: 0;
+}
+
+/* An external link's arrow, in a sentence. */
+.gp-ext__icon {
+	margin-inline-start: 0.2em;
+	vertical-align: -1px;
+}
+
+/* ---- not found ----------------------------------------------------------- */
+
+.gp-notfound {
+	padding-block: 4rem;
 }
 
 /* Inline code inside prose: one step below body-3, which is code-inline-3, so

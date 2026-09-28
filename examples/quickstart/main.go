@@ -18,9 +18,9 @@ import (
 	"github.com/floatdrop/grpcproc/examples/shoppb"
 )
 
-// inventory is a process whose mailbox holds *shoppb.Reserve and nothing
-// else; every message is a call, answered with *shoppb.Reserved or with an
-// error.
+// inventory is a process: a goroutine with a mailbox. The mailbox holds
+// *shoppb.Reserve and nothing else, and every message is a call, answered
+// with a *shoppb.Reserved or an error.
 func inventory(p *grpcproc.Process[*shoppb.Reserve]) error {
 	left := map[string]int64{"apple": 3}
 	for {
@@ -40,26 +40,15 @@ func inventory(p *grpcproc.Process[*shoppb.Reserve]) error {
 func main() {
 	ctx := context.Background()
 
-	// Where each node's gRPC server listens: a static address book here,
-	// grpcproc/etcd in a real cluster.
-	warehouseLis := listen()
-	shopLis := listen()
-	peers := grpcproc.StaticResolver{
-		"warehouse": warehouseLis.Addr().String(),
-		"shop":      shopLis.Addr().String(),
-	}
+	// Two nodes, each on its own gRPC server; see node() below.
+	warehouse, shop := node(ctx, "warehouse"), node(ctx, "shop")
 
-	warehouse, stopWarehouse := serve(ctx, "warehouse", warehouseLis, peers)
-	defer stopWarehouse()
-	shop, stopShop := serve(ctx, "shop", shopLis, peers)
-	defer stopShop()
+	// The process runs on warehouse, under a name.
+	_, err := warehouse.Spawn(inventory, grpcproc.WithName("stock"))
+	check(err)
 
-	if _, err := warehouse.Spawn(inventory, grpcproc.WithName("stock")); err != nil {
-		log.Fatal(err)
-	}
-
-	// From shop, it is a node name and a process name. The address carries
-	// the mailbox type, so the compiler checks what is sent to it.
+	// From shop it is a node name and a process name. The address carries the
+	// mailbox type, so the compiler checks what is sent to it.
 	stock := grpcproc.Named[*shoppb.Reserve]("warehouse", "stock")
 	for range 2 {
 		r, err := shop.Call[*shoppb.Reserved](ctx, stock, &shoppb.Reserve{Sku: "apple", Qty: 2})
@@ -70,14 +59,13 @@ func main() {
 		fmt.Println("reserved, left:", r.Left)
 	}
 
-	// A process on shop monitors stock, then asks it to exit. The Down
-	// arrives with the reason, as it would for a crash or a lost node.
+	// A monitor across nodes works as one within a node does. A process on
+	// shop monitors stock, then asks it to exit; the Down arrives with the
+	// reason, as it would for a crash or a lost node.
 	exited := make(chan string)
-	_, err := shop.Spawn(func(p *grpcproc.Process[proto.Message]) error {
+	_, err = shop.Spawn(func(p *grpcproc.Process[proto.Message]) error {
 		p.Monitor(stock)
-		if err := p.Exit(stock, "closing"); err != nil {
-			return err
-		}
+		check(p.Exit(stock, "closing"))
 		m, err := p.Receive() // the Down: nothing else is sent to this process
 		if err != nil {
 			return err
@@ -85,44 +73,42 @@ func main() {
 		exited <- m.Down.Reason
 		return nil
 	})
-	if err != nil {
-		log.Fatal(err)
-	}
+	check(err)
 	fmt.Println("stock exited:", <-exited)
 
 	_, err = shop.Call[*shoppb.Reserved](ctx, stock, &shoppb.Reserve{Sku: "apple", Qty: 1})
 	fmt.Println("no such process:", errors.Is(err, grpcproc.ErrNoProc))
+
+	check(shop.Stop(ctx))
+	check(warehouse.Stop(ctx))
 }
 
-func listen() net.Listener {
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		log.Fatal(err)
-	}
-	return lis
-}
+// peers is where each node's gRPC server listens: a static address book
+// here, grpcproc/etcd in a real cluster.
+var peers = grpcproc.StaticResolver{}
 
-// serve runs a node on its own gRPC server, the one the service already has
+// node runs a node on its own gRPC server, the one a service already has
 // for its other APIs.
-func serve(ctx context.Context, name string, lis net.Listener, peers grpcproc.Resolver) (*grpcproc.Node, func()) {
-	node, err := grpcproc.NewNode(grpcproc.Config{
+func node(ctx context.Context, name string) *grpcproc.Node {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	check(err)
+	peers[name] = lis.Addr().String()
+
+	n, err := grpcproc.NewNode(grpcproc.Config{
 		Name:        name,
 		Resolver:    peers,
 		DialOptions: []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 	})
+	check(err)
+	srv := grpc.NewServer()
+	n.Register(srv) // grpcproc.v1.Node, next to the service's own
+	go func() { _ = srv.Serve(lis) }()
+	check(n.Start(ctx))
+	return n
+}
+
+func check(err error) {
 	if err != nil {
 		log.Fatal(err)
-	}
-	srv := grpc.NewServer()
-	node.Register(srv) // grpcproc.v1.Node, next to the service's own
-	go func() { _ = srv.Serve(lis) }()
-	if err := node.Start(ctx); err != nil {
-		log.Fatal(err)
-	}
-	return node, func() {
-		if err := node.Stop(ctx); err != nil {
-			log.Println(err)
-		}
-		srv.GracefulStop()
 	}
 }

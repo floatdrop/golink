@@ -1,6 +1,6 @@
 # grpcproc/etcd
 
-Cluster membership for [grpcproc](../README.md) on etcd: nodes register under
+Cluster membership for [grpcproc](https://floatdrop.github.io/grpcproc/) on etcd: nodes register under
 a lease they keep alive, peers resolve their addresses from it, and when a
 lease ends (the node stopped, or stopped answering) every node that watches
 the cluster drops its links to it. A separate module, so grpcproc itself does

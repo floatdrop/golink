@@ -1,7 +1,7 @@
 name: Site
 
-# The guide under site/, a React project prerendered to static HTML and
-# deployed to GitHub Pages. Its code blocks are the files of examples/guide,
+# The documentation under site/, a React project prerendered to static HTML
+# and deployed to GitHub Pages. Its code blocks are the files of examples/,
 # imported at build time, so a change there rebuilds the site, and the Go CI
 # is what keeps them compiling and their pinned output true.
 #
@@ -11,9 +11,9 @@ name: Site
 on:
   push:
     branches: [main]
-    paths: [site/**, examples/guide/**, .github/workflows/pages.yml]
+    paths: [site/**, examples/**, .github/workflows/pages.yml]
   pull_request:
-    paths: [site/**, examples/guide/**, .github/workflows/pages.yml]
+    paths: [site/**, examples/**, .github/workflows/pages.yml]
   workflow_dispatch:
 
 permissions:
@@ -24,15 +24,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # The page shows the guide's code and what its tests pin: they pass
-      # before it is built, as well as in the Go CI.
+      # The pages show the examples' code and what their tests pin: they
+      # pass before the site is built, as well as in the Go CI.
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
           cache-dependency-path: examples/go.sum
-      - name: guide tests
+      - name: examples' tests
         working-directory: examples
-        run: go test -count=1 ./guide/...
+        run: go test -count=1 ./...
       - uses: actions/setup-node@v5
         with:
           node-version: 24

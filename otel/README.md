@@ -1,6 +1,6 @@
 # grpcproc/otel
 
-OpenTelemetry for [grpcproc](../README.md): a span for every send, call and
+OpenTelemetry for [grpcproc](https://floatdrop.github.io/grpcproc/guides/observability/): a span for every send, call and
 handled message, chained across processes and nodes, and metrics keyed by
 process label. A separate module, so grpcproc itself does not depend on
 OpenTelemetry.

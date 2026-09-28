@@ -5,7 +5,7 @@ import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import type { Page, Styles } from '../src/entry-server.tsx';
+import type { RenderedPage, Styles } from '../src/entry-server.tsx';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ssrDir = join(root, '.ssr');
@@ -38,7 +38,7 @@ await mkdir(join(outDir, 'assets'), { recursive: true });
 await cp(join(ssrDir, cssFile), join(outDir, cssFile));
 
 const bundle = pathToFileURL(join(ssrDir, 'entry-server.js')).href;
-const { render } = (await import(bundle)) as { render: (styles: Styles) => Promise<Page[]> };
+const { render } = (await import(bundle)) as { render: (styles: Styles) => Promise<RenderedPage[]> };
 
 for (const page of await render({ link: cssFile })) {
 	const file = join(outDir, page.file);
