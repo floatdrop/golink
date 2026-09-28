@@ -109,10 +109,44 @@ the latest state to hold the leader's, and has it campaign at once. Call it
 before stopping a leader's node, and the next leader starts from the
 singleton's last word rather than its last checkpoint.
 
-State and terms live in memory. A cluster that loses a majority of its nodes at
-once loses them, and a restarted node, which may have voted before, votes only
-once it has had time to hear from a leader. Keep the state to what the next
-leader needs to carry on: the jobs a scheduler ran last, not a database.
+Keep the state to what the next leader needs to carry on: the jobs a scheduler
+ran last, not a database. Every checkpoint carries all of it.
+
+## Keeping it on disk
+
+Without a `Store`, terms, votes and state live in memory. A cluster that loses
+a majority of its nodes at once loses them, and so does a cluster of one at
+every restart: its singleton starts from nothing, and its terms from zero
+again. A restarted node, which may have voted before, votes only once it has
+had time to hear from a leader.
+
+```go
+leader.Start(node, leader.Spec[*cronv1.State]{
+    Cluster: "cron",
+    Voters:  []string{"a", "b", "c"},
+    Store:   leader.File("/var/lib/app/cron.election"), // this node's own
+    Singleton: …,
+})
+```
+
+With a `Store`, each node keeps its term, its vote and the state, as Raft
+does. It saves them before anything that tells of them leaves its elector: a
+vote, an acknowledgement of a checkpoint, a leader's own count of one, a
+lease. A cluster that restarts whole starts its singleton from the last
+checkpoint that returned, cordons included; its terms go on growing, so
+`Lease.Term` stays a fencing token; and a restarted node votes at once, having
+forgotten nothing. A `Save` that fails ends the elector, which its supervisor
+starts again from what the `Store` holds; one that cannot be loaded keeps it
+from starting.
+
+`leader.File` writes a new file beside the old one, syncs it, and renames it
+over the old, so a crash leaves one or the other. Each node needs a `Store` of
+its own, on its own disk. A shared one breaks the election, and so does a file
+restored from a backup: it has forgotten votes it cast since. Delete it instead,
+and the node starts afresh, as one without a `Store` does.
+
+The `Store` is a two-method interface, `Load` and `Save` of a few bytes, for
+anything else that stays on the node.
 
 ## Calling the leader
 

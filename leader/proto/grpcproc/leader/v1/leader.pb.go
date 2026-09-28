@@ -349,6 +349,69 @@ func (x *State) GetCordoned() []string {
 	return nil
 }
 
+// Kept is what an elector keeps in its Spec.Store, and starts from again:
+// Raft's persistent state, whose log is the one State.
+type Kept struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Term  uint64                 `protobuf:"varint,1,opt,name=term,proto3" json:"term,omitempty"`
+	// The node this one voted for in the term, if any.
+	VotedFor      string `protobuf:"bytes,2,opt,name=voted_for,json=votedFor,proto3" json:"voted_for,omitempty"`
+	State         *State `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Kept) Reset() {
+	*x = Kept{}
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Kept) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Kept) ProtoMessage() {}
+
+func (x *Kept) ProtoReflect() protoreflect.Message {
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Kept.ProtoReflect.Descriptor instead.
+func (*Kept) Descriptor() ([]byte, []int) {
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *Kept) GetTerm() uint64 {
+	if x != nil {
+		return x.Term
+	}
+	return 0
+}
+
+func (x *Kept) GetVotedFor() string {
+	if x != nil {
+		return x.VotedFor
+	}
+	return ""
+}
+
+func (x *Kept) GetState() *State {
+	if x != nil {
+		return x.State
+	}
+	return nil
+}
+
 // RequestVote asks for a vote in the term, from a candidate holding the
 // state of this version. A voter holding a newer one refuses it.
 type RequestVote struct {
@@ -368,7 +431,7 @@ type RequestVote struct {
 
 func (x *RequestVote) Reset() {
 	*x = RequestVote{}
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[4]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -380,7 +443,7 @@ func (x *RequestVote) String() string {
 func (*RequestVote) ProtoMessage() {}
 
 func (x *RequestVote) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[4]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -393,7 +456,7 @@ func (x *RequestVote) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestVote.ProtoReflect.Descriptor instead.
 func (*RequestVote) Descriptor() ([]byte, []int) {
-	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{4}
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *RequestVote) GetVersion() *Version {
@@ -433,7 +496,7 @@ type Vote struct {
 
 func (x *Vote) Reset() {
 	*x = Vote{}
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[5]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -445,7 +508,7 @@ func (x *Vote) String() string {
 func (*Vote) ProtoMessage() {}
 
 func (x *Vote) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[5]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -458,7 +521,7 @@ func (x *Vote) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Vote.ProtoReflect.Descriptor instead.
 func (*Vote) Descriptor() ([]byte, []int) {
-	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{5}
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Vote) GetGranted() bool {
@@ -494,7 +557,7 @@ type Heartbeat struct {
 
 func (x *Heartbeat) Reset() {
 	*x = Heartbeat{}
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[6]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -506,7 +569,7 @@ func (x *Heartbeat) String() string {
 func (*Heartbeat) ProtoMessage() {}
 
 func (x *Heartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[6]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -519,7 +582,7 @@ func (x *Heartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
 func (*Heartbeat) Descriptor() ([]byte, []int) {
-	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{6}
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Heartbeat) GetState() *State {
@@ -539,7 +602,7 @@ type Ack struct {
 
 func (x *Ack) Reset() {
 	*x = Ack{}
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[7]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -551,7 +614,7 @@ func (x *Ack) String() string {
 func (*Ack) ProtoMessage() {}
 
 func (x *Ack) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[7]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -564,7 +627,7 @@ func (x *Ack) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ack.ProtoReflect.Descriptor instead.
 func (*Ack) Descriptor() ([]byte, []int) {
-	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{7}
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Ack) GetVersion() *Version {
@@ -583,7 +646,7 @@ type TimeoutNow struct {
 
 func (x *TimeoutNow) Reset() {
 	*x = TimeoutNow{}
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[8]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -595,7 +658,7 @@ func (x *TimeoutNow) String() string {
 func (*TimeoutNow) ProtoMessage() {}
 
 func (x *TimeoutNow) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[8]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -608,7 +671,7 @@ func (x *TimeoutNow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TimeoutNow.ProtoReflect.Descriptor instead.
 func (*TimeoutNow) Descriptor() ([]byte, []int) {
-	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{8}
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{9}
 }
 
 // Checkpoint is a leader's singleton's state, for its elector to replicate:
@@ -624,7 +687,7 @@ type Checkpoint struct {
 
 func (x *Checkpoint) Reset() {
 	*x = Checkpoint{}
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[9]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -636,7 +699,7 @@ func (x *Checkpoint) String() string {
 func (*Checkpoint) ProtoMessage() {}
 
 func (x *Checkpoint) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[9]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -649,7 +712,7 @@ func (x *Checkpoint) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Checkpoint.ProtoReflect.Descriptor instead.
 func (*Checkpoint) Descriptor() ([]byte, []int) {
-	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{9}
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Checkpoint) GetTerm() uint64 {
@@ -675,7 +738,7 @@ type StatusRequest struct {
 
 func (x *StatusRequest) Reset() {
 	*x = StatusRequest{}
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[10]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -687,7 +750,7 @@ func (x *StatusRequest) String() string {
 func (*StatusRequest) ProtoMessage() {}
 
 func (x *StatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[10]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -700,7 +763,7 @@ func (x *StatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusRequest.ProtoReflect.Descriptor instead.
 func (*StatusRequest) Descriptor() ([]byte, []int) {
-	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{10}
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{11}
 }
 
 // Status is what an elector believes.
@@ -724,7 +787,7 @@ type Status struct {
 
 func (x *Status) Reset() {
 	*x = Status{}
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[11]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -736,7 +799,7 @@ func (x *Status) String() string {
 func (*Status) ProtoMessage() {}
 
 func (x *Status) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[11]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -749,7 +812,7 @@ func (x *Status) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Status.ProtoReflect.Descriptor instead.
 func (*Status) Descriptor() ([]byte, []int) {
-	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{11}
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Status) GetRole() string {
@@ -820,7 +883,7 @@ type Resign struct {
 
 func (x *Resign) Reset() {
 	*x = Resign{}
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[12]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -832,7 +895,7 @@ func (x *Resign) String() string {
 func (*Resign) ProtoMessage() {}
 
 func (x *Resign) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[12]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -845,7 +908,7 @@ func (x *Resign) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Resign.ProtoReflect.Descriptor instead.
 func (*Resign) Descriptor() ([]byte, []int) {
-	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{12}
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *Resign) GetTo() string {
@@ -868,7 +931,7 @@ type Cordon struct {
 
 func (x *Cordon) Reset() {
 	*x = Cordon{}
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[13]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -880,7 +943,7 @@ func (x *Cordon) String() string {
 func (*Cordon) ProtoMessage() {}
 
 func (x *Cordon) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[13]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -893,7 +956,7 @@ func (x *Cordon) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Cordon.ProtoReflect.Descriptor instead.
 func (*Cordon) Descriptor() ([]byte, []int) {
-	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{13}
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *Cordon) GetNode() string {
@@ -922,7 +985,7 @@ type PeerDown struct {
 
 func (x *PeerDown) Reset() {
 	*x = PeerDown{}
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[14]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -934,7 +997,7 @@ func (x *PeerDown) String() string {
 func (*PeerDown) ProtoMessage() {}
 
 func (x *PeerDown) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[14]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -947,7 +1010,7 @@ func (x *PeerDown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerDown.ProtoReflect.Descriptor instead.
 func (*PeerDown) Descriptor() ([]byte, []int) {
-	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{14}
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *PeerDown) GetNode() string {
@@ -973,7 +1036,7 @@ type Watch struct {
 
 func (x *Watch) Reset() {
 	*x = Watch{}
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[15]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -985,7 +1048,7 @@ func (x *Watch) String() string {
 func (*Watch) ProtoMessage() {}
 
 func (x *Watch) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[15]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -998,7 +1061,7 @@ func (x *Watch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Watch.ProtoReflect.Descriptor instead.
 func (*Watch) Descriptor() ([]byte, []int) {
-	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{15}
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{16}
 }
 
 // MemberEvent is the membership bridge telling its elector of a node
@@ -1013,7 +1076,7 @@ type MemberEvent struct {
 
 func (x *MemberEvent) Reset() {
 	*x = MemberEvent{}
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[16]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1025,7 +1088,7 @@ func (x *MemberEvent) String() string {
 func (*MemberEvent) ProtoMessage() {}
 
 func (x *MemberEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[16]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1038,7 +1101,7 @@ func (x *MemberEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemberEvent.ProtoReflect.Descriptor instead.
 func (*MemberEvent) Descriptor() ([]byte, []int) {
-	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{16}
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *MemberEvent) GetNode() string {
@@ -1068,7 +1131,7 @@ type Started struct {
 
 func (x *Started) Reset() {
 	*x = Started{}
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[17]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1080,7 +1143,7 @@ func (x *Started) String() string {
 func (*Started) ProtoMessage() {}
 
 func (x *Started) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[17]
+	mi := &file_grpcproc_leader_v1_leader_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1093,7 +1156,7 @@ func (x *Started) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Started.ProtoReflect.Descriptor instead.
 func (*Started) Descriptor() ([]byte, []int) {
-	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{17}
+	return file_grpcproc_leader_v1_leader_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *Started) GetTerm() uint64 {
@@ -1140,7 +1203,11 @@ const file_grpcproc_leader_v1_leader_proto_rawDesc = "" +
 	"\x05State\x125\n" +
 	"\aversion\x18\x01 \x01(\v2\x1b.grpcproc.leader.v1.VersionR\aversion\x12*\n" +
 	"\x05value\x18\x02 \x01(\v2\x14.google.protobuf.AnyR\x05value\x12\x1a\n" +
-	"\bcordoned\x18\x03 \x03(\tR\bcordoned\"r\n" +
+	"\bcordoned\x18\x03 \x03(\tR\bcordoned\"h\n" +
+	"\x04Kept\x12\x12\n" +
+	"\x04term\x18\x01 \x01(\x04R\x04term\x12\x1b\n" +
+	"\tvoted_for\x18\x02 \x01(\tR\bvotedFor\x12/\n" +
+	"\x05state\x18\x03 \x01(\v2\x19.grpcproc.leader.v1.StateR\x05state\"r\n" +
 	"\vRequestVote\x125\n" +
 	"\aversion\x18\x01 \x01(\v2\x1b.grpcproc.leader.v1.VersionR\aversion\x12\x1a\n" +
 	"\btransfer\x18\x02 \x01(\bR\btransfer\x12\x10\n" +
@@ -1198,51 +1265,53 @@ func file_grpcproc_leader_v1_leader_proto_rawDescGZIP() []byte {
 	return file_grpcproc_leader_v1_leader_proto_rawDescData
 }
 
-var file_grpcproc_leader_v1_leader_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_grpcproc_leader_v1_leader_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_grpcproc_leader_v1_leader_proto_goTypes = []any{
 	(*Peer)(nil),          // 0: grpcproc.leader.v1.Peer
 	(*Hello)(nil),         // 1: grpcproc.leader.v1.Hello
 	(*Version)(nil),       // 2: grpcproc.leader.v1.Version
 	(*State)(nil),         // 3: grpcproc.leader.v1.State
-	(*RequestVote)(nil),   // 4: grpcproc.leader.v1.RequestVote
-	(*Vote)(nil),          // 5: grpcproc.leader.v1.Vote
-	(*Heartbeat)(nil),     // 6: grpcproc.leader.v1.Heartbeat
-	(*Ack)(nil),           // 7: grpcproc.leader.v1.Ack
-	(*TimeoutNow)(nil),    // 8: grpcproc.leader.v1.TimeoutNow
-	(*Checkpoint)(nil),    // 9: grpcproc.leader.v1.Checkpoint
-	(*StatusRequest)(nil), // 10: grpcproc.leader.v1.StatusRequest
-	(*Status)(nil),        // 11: grpcproc.leader.v1.Status
-	(*Resign)(nil),        // 12: grpcproc.leader.v1.Resign
-	(*Cordon)(nil),        // 13: grpcproc.leader.v1.Cordon
-	(*PeerDown)(nil),      // 14: grpcproc.leader.v1.PeerDown
-	(*Watch)(nil),         // 15: grpcproc.leader.v1.Watch
-	(*MemberEvent)(nil),   // 16: grpcproc.leader.v1.MemberEvent
-	(*Started)(nil),       // 17: grpcproc.leader.v1.Started
-	(*anypb.Any)(nil),     // 18: google.protobuf.Any
-	(*v1.PID)(nil),        // 19: grpcproc.v1.PID
+	(*Kept)(nil),          // 4: grpcproc.leader.v1.Kept
+	(*RequestVote)(nil),   // 5: grpcproc.leader.v1.RequestVote
+	(*Vote)(nil),          // 6: grpcproc.leader.v1.Vote
+	(*Heartbeat)(nil),     // 7: grpcproc.leader.v1.Heartbeat
+	(*Ack)(nil),           // 8: grpcproc.leader.v1.Ack
+	(*TimeoutNow)(nil),    // 9: grpcproc.leader.v1.TimeoutNow
+	(*Checkpoint)(nil),    // 10: grpcproc.leader.v1.Checkpoint
+	(*StatusRequest)(nil), // 11: grpcproc.leader.v1.StatusRequest
+	(*Status)(nil),        // 12: grpcproc.leader.v1.Status
+	(*Resign)(nil),        // 13: grpcproc.leader.v1.Resign
+	(*Cordon)(nil),        // 14: grpcproc.leader.v1.Cordon
+	(*PeerDown)(nil),      // 15: grpcproc.leader.v1.PeerDown
+	(*Watch)(nil),         // 16: grpcproc.leader.v1.Watch
+	(*MemberEvent)(nil),   // 17: grpcproc.leader.v1.MemberEvent
+	(*Started)(nil),       // 18: grpcproc.leader.v1.Started
+	(*anypb.Any)(nil),     // 19: google.protobuf.Any
+	(*v1.PID)(nil),        // 20: grpcproc.v1.PID
 }
 var file_grpcproc_leader_v1_leader_proto_depIdxs = []int32{
-	4,  // 0: grpcproc.leader.v1.Peer.request_vote:type_name -> grpcproc.leader.v1.RequestVote
-	5,  // 1: grpcproc.leader.v1.Peer.vote:type_name -> grpcproc.leader.v1.Vote
-	6,  // 2: grpcproc.leader.v1.Peer.heartbeat:type_name -> grpcproc.leader.v1.Heartbeat
-	7,  // 3: grpcproc.leader.v1.Peer.ack:type_name -> grpcproc.leader.v1.Ack
-	8,  // 4: grpcproc.leader.v1.Peer.timeout_now:type_name -> grpcproc.leader.v1.TimeoutNow
+	5,  // 0: grpcproc.leader.v1.Peer.request_vote:type_name -> grpcproc.leader.v1.RequestVote
+	6,  // 1: grpcproc.leader.v1.Peer.vote:type_name -> grpcproc.leader.v1.Vote
+	7,  // 2: grpcproc.leader.v1.Peer.heartbeat:type_name -> grpcproc.leader.v1.Heartbeat
+	8,  // 3: grpcproc.leader.v1.Peer.ack:type_name -> grpcproc.leader.v1.Ack
+	9,  // 4: grpcproc.leader.v1.Peer.timeout_now:type_name -> grpcproc.leader.v1.TimeoutNow
 	1,  // 5: grpcproc.leader.v1.Peer.hello:type_name -> grpcproc.leader.v1.Hello
 	2,  // 6: grpcproc.leader.v1.State.version:type_name -> grpcproc.leader.v1.Version
-	18, // 7: grpcproc.leader.v1.State.value:type_name -> google.protobuf.Any
-	2,  // 8: grpcproc.leader.v1.RequestVote.version:type_name -> grpcproc.leader.v1.Version
-	3,  // 9: grpcproc.leader.v1.Vote.state:type_name -> grpcproc.leader.v1.State
-	3,  // 10: grpcproc.leader.v1.Heartbeat.state:type_name -> grpcproc.leader.v1.State
-	2,  // 11: grpcproc.leader.v1.Ack.version:type_name -> grpcproc.leader.v1.Version
-	18, // 12: grpcproc.leader.v1.Checkpoint.state:type_name -> google.protobuf.Any
-	2,  // 13: grpcproc.leader.v1.Status.version:type_name -> grpcproc.leader.v1.Version
-	19, // 14: grpcproc.leader.v1.Status.singleton:type_name -> grpcproc.v1.PID
-	19, // 15: grpcproc.leader.v1.Started.pid:type_name -> grpcproc.v1.PID
-	16, // [16:16] is the sub-list for method output_type
-	16, // [16:16] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	19, // 7: grpcproc.leader.v1.State.value:type_name -> google.protobuf.Any
+	3,  // 8: grpcproc.leader.v1.Kept.state:type_name -> grpcproc.leader.v1.State
+	2,  // 9: grpcproc.leader.v1.RequestVote.version:type_name -> grpcproc.leader.v1.Version
+	3,  // 10: grpcproc.leader.v1.Vote.state:type_name -> grpcproc.leader.v1.State
+	3,  // 11: grpcproc.leader.v1.Heartbeat.state:type_name -> grpcproc.leader.v1.State
+	2,  // 12: grpcproc.leader.v1.Ack.version:type_name -> grpcproc.leader.v1.Version
+	19, // 13: grpcproc.leader.v1.Checkpoint.state:type_name -> google.protobuf.Any
+	2,  // 14: grpcproc.leader.v1.Status.version:type_name -> grpcproc.leader.v1.Version
+	20, // 15: grpcproc.leader.v1.Status.singleton:type_name -> grpcproc.v1.PID
+	20, // 16: grpcproc.leader.v1.Started.pid:type_name -> grpcproc.v1.PID
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_grpcproc_leader_v1_leader_proto_init() }
@@ -1264,7 +1333,7 @@ func file_grpcproc_leader_v1_leader_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_grpcproc_leader_v1_leader_proto_rawDesc), len(file_grpcproc_leader_v1_leader_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

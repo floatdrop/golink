@@ -802,11 +802,21 @@ leader's singleton, and its state the singleton's.
   reached it: no leader known, `ErrNoProc` from the node named, or a
   `LinkError` whose `Unsent` is set. A call that left may have been handled,
   and delivery stays at most once, so that one is the caller's to repeat.
-- **In memory.** Terms, votes and state are not persisted: losing a majority
-  at once loses them. A restarted elector does not vote for two election
-  timeouts, the time a leader elected with a vote it may have cast before
-  needs to be heard from. `Lease.Term` is the fencing token for external
-  resources; `Confirm` makes leadership wait for an external lock.
+- **In memory, or in a `Store`.** Without a `Store`, terms, votes and state
+  are not persisted: losing a majority at once loses them. A restarted
+  elector does not vote for two election timeouts, the time a leader elected
+  with a vote it may have cast before needs to be heard from. With one, the
+  elector keeps Raft's persistent state, `{term, votedFor, State}`, the log
+  being the one entry. It saves in three places, and nowhere else: before a
+  send to a peer (a vote, an ack, a RequestVote, a heartbeat carrying a new
+  state), before `commit` counts the leader's own copy, and before the
+  singleton gets a lease, whose term must not come round again. It saves only
+  what changed since, by term, vote and state version, so a heartbeat costs no
+  write, and elections and checkpoints cost one each. A `Save` that fails
+  stops anything else from leaving, and the elector exits with it; its
+  supervisor starts it from what the `Store` holds. `leader.File` is
+  write-sync-rename-sync-directory. `Lease.Term` is the fencing token for
+  external resources; `Confirm` makes leadership wait for an external lock.
 
 ## Later
 
