@@ -153,9 +153,9 @@ sched := grpcproc.Named[*schedpb.Msg](info.Leader, "scheduler")`}</Code>
 					<p>
 						Without <C>Voters</C>, the view is dynamic: this node, <C>Peers</C>, and the nodes a{' '}
 						<C>Membership</C> reports up, the same one a node is{' '}
-						<A to="concepts/discovery/">configured with</A>, <A to="guides/etcd/">on etcd</A> say.
-						With a <C>Membership</C>, only those take part; without, a node that talks to this one
-						joins too. No leader is elected in a view smaller than <C>MinClusterSize</C>, and the
+						<A to="concepts/discovery/">configured with</A>, <A to="guides/etcd/">on etcd</A> say:
+						left unset, it is the node's own. With a <C>Membership</C>, only those take part;
+						without, on a node with none either, a node that talks to this one joins too. No leader is elected in a view smaller than <C>MinClusterSize</C>, and the
 						relays' monitors keep the view current:
 					</p>
 					<Table

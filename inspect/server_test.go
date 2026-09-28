@@ -442,10 +442,10 @@ func TestExitThatCannotRoute(t *testing.T) {
 
 func TestRoutingErrors(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		// No way to reach other nodes: another node is FailedPrecondition, for
-		// every method.
+		// Forwarding off: another node is FailedPrecondition, for every
+		// method.
 		c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithServices(func(n *grpcproc.Node, s *grpc.Server) {
-			inspect.New(n).Register(s)
+			inspect.New(n, inspect.WithPeers(nil)).Register(s)
 		})}, "a")
 		a := client(c, "a")
 		ctx := t.Context()

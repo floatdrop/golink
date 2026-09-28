@@ -551,6 +551,31 @@ func TestDynamicViewFromPeers(t *testing.T) {
 	})
 }
 
+// Without a Membership of its own, an elector follows its node's: c runs an
+// elector and talks, but the nodes' Membership has not reported it, so a
+// and b do not listen to it. Without any Membership, it would join.
+func TestMembershipDefaultsToTheNodes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m := &members{initial: []string{"a", "b"}}
+		c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithConfig(func(_ string, cfg *grpcproc.Config) {
+			cfg.Membership = m
+		})}, "a", "b", "c")
+		j := &journal{}
+		for _, name := range []string{"a", "b", "c"} {
+			s := spec(j)
+			s.Voters, s.MinClusterSize = nil, 2
+			if _, err := leader.Start(c.Node(name), s); err != nil {
+				t.Fatal(err)
+			}
+		}
+		settle(2 * time.Second)
+		lead, _ := elected(t, c, "a", "b")
+		if got := view(t, c, lead); got != "leader a,b" {
+			t.Errorf("view %q, want the node's Membership's", got)
+		}
+	})
+}
+
 func TestDynamicViewFromMembership(t *testing.T) {
 	m := &members{failures: 3, initial: []string{"a", "b"}}
 	dynamic := func(j *journal, _ string) leader.Spec[counter] {

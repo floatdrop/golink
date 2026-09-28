@@ -15,7 +15,7 @@ The node must serve the Inspector next to grpcproc:
 
 ```go
 node.Register(grpcServer)
-insp := inspect.New(node, inspect.WithResolver(resolver, dialOptions...))
+insp := inspect.New(node) // forwards to other nodes' Inspectors, as the node reaches them
 insp.Register(grpcServer)
 defer insp.Close()
 ```

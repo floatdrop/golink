@@ -11,11 +11,11 @@ import (
 	inspectv1 "github.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1"
 )
 
-// dialer reaches other nodes' Inspectors through a resolver, keeping one
-// connection per peer. Its peer method is a PeerFunc; see WithResolver.
+// dialer reaches other nodes' Inspectors, keeping one connection per peer:
+// by default through the node's own Dial, or as WithResolver says. Its peer
+// method is a PeerFunc.
 type dialer struct {
-	resolver grpcproc.Resolver
-	opts     []grpc.DialOption
+	dial func(ctx context.Context, node string) (*grpc.ClientConn, error)
 
 	mu     sync.Mutex
 	conns  map[string]*grpc.ClientConn
@@ -24,8 +24,19 @@ type dialer struct {
 
 var errClosed = errors.New("inspect: server closed")
 
-func newDialer(r grpcproc.Resolver, opts ...grpc.DialOption) *dialer {
-	return &dialer{resolver: r, opts: opts, conns: map[string]*grpc.ClientConn{}}
+func newDialer(dial func(context.Context, string) (*grpc.ClientConn, error)) *dialer {
+	return &dialer{dial: dial, conns: map[string]*grpc.ClientConn{}}
+}
+
+// resolving dials through r with opts, for WithResolver.
+func resolving(r grpcproc.Resolver, opts []grpc.DialOption) func(context.Context, string) (*grpc.ClientConn, error) {
+	return func(ctx context.Context, node string) (*grpc.ClientConn, error) {
+		addr, err := r.Resolve(ctx, node)
+		if err != nil {
+			return nil, err
+		}
+		return grpc.NewClient(addr, opts...)
+	}
 }
 
 // peer returns an Inspector client for node. It resolves and dials without
@@ -40,11 +51,8 @@ func (d *dialer) peer(ctx context.Context, node string) (inspectv1.InspectorClie
 	case cc != nil:
 		return inspectv1.NewInspectorClient(cc), nil
 	}
-	addr, err := d.resolver.Resolve(ctx, node)
+	cc, err := d.dial(ctx, node)
 	if err != nil {
-		return nil, err
-	}
-	if cc, err = grpc.NewClient(addr, d.opts...); err != nil {
 		return nil, err
 	}
 	d.mu.Lock()

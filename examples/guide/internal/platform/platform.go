@@ -118,12 +118,12 @@ func newNode(cfg Config, r grpcproc.Resolver, srv *server, log *slog.Logger) (*g
 }
 
 // newInspector serves the node to grpcprocctl, and reaches the other nodes'
-// Inspectors the way the node reaches the nodes. It is read-only, since it
-// shares the node's port and nothing here authenticates: exit and loglevel
-// are refused. A deployment that wants them puts the Inspector behind the
-// interceptors that guard its other services.
-func newInspector(n *grpcproc.Node, r grpcproc.Resolver, srv *server) *inspect.Server {
-	i := inspect.New(n, inspect.WithResolver(r, dialOptions()...), inspect.ReadOnly())
+// Inspectors the way the node reaches the nodes, which it does by default.
+// It is read-only, since it shares the node's port and nothing here
+// authenticates: exit and loglevel are refused. A deployment that wants them
+// puts the Inspector behind the interceptors that guard its other services.
+func newInspector(n *grpcproc.Node, srv *server) *inspect.Server {
+	i := inspect.New(n, inspect.ReadOnly())
 	i.Register(srv.grpc)
 	return i
 }

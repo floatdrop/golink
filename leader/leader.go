@@ -74,7 +74,8 @@ type Spec[S proto.Message] struct {
 	// Membership, with Voters empty, reports the nodes of the grpcproc
 	// cluster: each one it reports up joins the view, and each one it
 	// reports down leaves it. Only those it reports up, and Peers, take
-	// part.
+	// part. Unset, it is the node's own Config.Membership, if the node has
+	// one, so the cluster the node follows is the one given once.
 	Membership grpcproc.Membership
 	// MinClusterSize is the smallest view, this node included, that may
 	// elect a leader, with Voters empty. Default 3.

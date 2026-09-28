@@ -185,8 +185,23 @@ func TestWithResolver(t *testing.T) {
 		if err := getB(t.Context(), srv); status.Code(err) != codes.Unavailable {
 			t.Fatalf("after Close: %v", err)
 		}
-		if err := inspect.New(grpcproctest.New(t, "c").Node("c")).Close(); err != nil {
+		c := grpcproctest.New(t, "c").Node("c")
+		if err := errors.Join(inspect.New(c).Close(), inspect.New(c, inspect.WithPeers(nil)).Close()); err != nil {
 			t.Fatal("a server that opened nothing closes cleanly:", err)
+		}
+	})
+}
+
+// With no option, a server forwards through its node's own Dial.
+func TestForwardsThroughTheNodeByDefault(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithServices(func(n *grpcproc.Node, s *grpc.Server) {
+			inspect.New(n).Register(s)
+		})}, "a", "b")
+		srv := inspect.New(c.Node("a"))
+		defer func() { _ = srv.Close() }()
+		if err := getB(t.Context(), srv); err != nil {
+			t.Fatal(err)
 		}
 	})
 }

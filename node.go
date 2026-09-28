@@ -654,6 +654,23 @@ func (n *Node) Peers() []string {
 	return slices.Sorted(maps.Keys(seen))
 }
 
+// Dial opens a connection to peer's gRPC server as the node reaches it,
+// through Config.Resolver and with Config.DialOptions, credentials and all:
+// for a service registered there beside grpcproc's own, the peer's Inspector
+// say. ctx bounds resolving peer's address. The connection is the caller's
+// to close; the node's links do not use it.
+func (n *Node) Dial(ctx context.Context, peer string) (*grpc.ClientConn, error) {
+	addr, err := n.cfg.Resolver.Resolve(ctx, peer)
+	if err != nil {
+		return nil, err
+	}
+	return grpc.NewClient(addr, n.cfg.DialOptions...)
+}
+
+// Membership returns Config.Membership, or nil: for a component that follows
+// the cluster as the node does, grpcproc/leader say.
+func (n *Node) Membership() Membership { return n.cfg.Membership }
+
 func (n *Node) local(pid PID) *proc {
 	if pid.Node != n.id.Name || pid.Incarnation != n.id.Incarnation {
 		return nil

@@ -566,9 +566,10 @@ service Inspector {
 ```
 
 Every request names a node. One that is not this node is forwarded to that
-node's Inspector, which `inspect.WithResolver` dials over the node's own
-resolver and dial options, one connection per peer (`WithPeers` takes any
-other `PeerFunc`). That is ergo's "run
+node's Inspector, which the server dials as the node does its peers,
+`Node.Dial`, over the node's own resolver and dial options, one connection
+per peer; `inspect.WithResolver` takes other ones, `WithPeers` any other
+`PeerFunc`, and `WithPeers(nil)` none. That is ergo's "run
 Observer on one node and inspect the whole cluster". A process targeted by
 PID routes to the PID's node when the request names none. `GetProcess` with
 `inspect: true` returns the snapshot even when the process is too busy to

@@ -28,14 +28,17 @@ export const guidesInspector: Doc = {
 						<C>grpcproc.inspect.v1.Inspector</C>, next to the node's own:
 					</p>
 					<Code>{`node.Register(grpcServer)
-insp := inspect.New(node, inspect.WithResolver(resolver, dialOptions...)) // reaches other nodes' Inspectors
+insp := inspect.New(node) // reaches other nodes' Inspectors as the node reaches the nodes
 insp.Register(grpcServer)
 defer insp.Close()`}</Code>
 					<p>
 						Every request names a node. One that is not this node is forwarded to that node's
-						Inspector, which <C>WithResolver</C> dials through the node's own resolver and dial
-						options, one connection per peer, closed by <C>Close</C>. <C>WithPeers</C> takes any
-						other way of reaching a peer's Inspector. A process targeted by PID routes to the PID's
+						Inspector, which the server dials as the node dials its peers, <C>node.Dial</C>, through
+						the node's own resolver and dial options: one connection per peer, closed by{' '}
+						<C>Close</C>. <C>WithResolver</C> takes another resolver or other dial options, for
+						Inspectors served elsewhere than on the port the nodes link through, and{' '}
+						<C>WithPeers</C> any other way of reaching a peer's Inspector; <C>WithPeers(nil)</C>{' '}
+						keeps a server to its own node. A process targeted by PID routes to the PID's
 						node when the request names none. So a tool pointed at one node can ask about any, which
 						is what a cluster of three programs on three hosts needs.
 					</p>

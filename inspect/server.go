@@ -4,7 +4,11 @@
 // interceptors guard the application's other services.
 //
 //	node.Register(grpcServer)
-//	inspect.New(node, inspect.WithResolver(resolver, dialOptions...)).Register(grpcServer)
+//	inspect.New(node).Register(grpcServer)
+//
+// A request for another node is forwarded to that node's Inspector, reached
+// as the node reaches its peers (Node.Dial), so one Inspector answers for
+// the whole cluster.
 package inspect
 
 import (
@@ -32,21 +36,21 @@ type PeerFunc func(ctx context.Context, node string) (inspectv1.InspectorClient,
 // Option configures a Server.
 type Option func(*Server)
 
-// WithResolver lets the server answer for other nodes by forwarding to their
-// Inspector, found with r and dialed with opts: usually the node's own
-// Config.Resolver and Config.DialOptions. It keeps one connection per node,
-// until Close. Without it, or WithPeers, a request for another node is
-// FailedPrecondition.
+// WithResolver has the server reach other nodes' Inspectors through r and
+// opts rather than the node's own Dial: for Inspectors that peers serve
+// elsewhere than on the server their node links through, or over other
+// credentials. It keeps one connection per node, until Close.
 func WithResolver(r grpcproc.Resolver, opts ...grpc.DialOption) Option {
 	return func(s *Server) {
-		s.dialer = newDialer(r, opts...)
+		s.dialer = newDialer(resolving(r, opts))
 		s.peers = s.dialer.peer
 	}
 }
 
 // WithPeers is WithResolver for other ways of reaching a node's Inspector.
 // Whichever of the two comes last is used. Close does not release what f
-// holds.
+// holds. WithPeers(nil) keeps the server to its own node: a request for
+// another node is then FailedPrecondition.
 func WithPeers(f PeerFunc) Option { return func(s *Server) { s.peers, s.dialer = f, nil } }
 
 // ReadOnly refuses SetLogLevel, Send, Call and Exit with PermissionDenied.
@@ -57,23 +61,26 @@ type Server struct {
 	inspectv1.UnimplementedInspectorServer
 	node     *grpcproc.Node
 	peers    PeerFunc
-	dialer   *dialer // from WithResolver; Close closes its connections
+	dialer   *dialer // unless WithPeers; Close closes its connections
 	readOnly bool
 }
 
-// New returns an Inspector for node.
+// New returns an Inspector for node. It forwards a request for another node
+// to that node's Inspector, which it reaches through node.Dial, unless
+// WithResolver or WithPeers says otherwise.
 func New(node *grpcproc.Node, opts ...Option) *Server {
-	s := &Server{node: node}
+	s := &Server{node: node, dialer: newDialer(node.Dial)}
+	s.peers = s.dialer.peer
 	for _, o := range opts {
 		o(s)
 	}
 	return s
 }
 
-// Close closes the connections WithResolver opened to other nodes. The
-// server keeps answering for its own node; with WithResolver, a request for
-// another node fails from then on (Unavailable, or Canceled if it was
-// already on its way).
+// Close closes the connections the server opened to other nodes. It keeps
+// answering for its own node; a request for another node fails from then on
+// (Unavailable, or Canceled if it was already on its way), but with
+// WithPeers, whose connections are not its own.
 func (s *Server) Close() error {
 	if s.dialer == nil {
 		return nil
@@ -101,7 +108,7 @@ func (s *Server) remote(ctx context.Context, node string, target *inspectv1.Targ
 		return nil, "", nil
 	}
 	if s.peers == nil {
-		return nil, node, status.Errorf(codes.FailedPrecondition, "inspect: %q is not this node (%s), and there is no WithResolver or WithPeers", node, s.node.Name())
+		return nil, node, status.Errorf(codes.FailedPrecondition, "inspect: %q is not this node (%s), and it forwards to no other (WithPeers(nil))", node, s.node.Name())
 	}
 	c, err := s.peers(ctx, node)
 	if err != nil {

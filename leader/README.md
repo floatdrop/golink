@@ -72,7 +72,8 @@ partition never elects two leaders. That is the default to reach for.
 
 Without `Voters`, the view is dynamic: this node, `Peers`, and the nodes
 `Membership` reports up (with `Membership`, only those; without it, also any
-node that talks to this one). No leader is elected in a view smaller than
+node that talks to this one). Left unset, `Membership` is the node's own
+`Config.Membership`, if it has one. No leader is elected in a view smaller than
 `MinClusterSize` (3). The relays' monitors keep it current:
 
 | The peer's elector | The peer |

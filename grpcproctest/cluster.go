@@ -115,8 +115,8 @@ func NewWith(t testing.TB, opts []Option, names ...string) *Cluster {
 }
 
 // Resolver resolves node names of this cluster, for components that dial
-// nodes themselves (an Inspector built with inspect.WithResolver). Use it
-// with DialOptions.
+// nodes themselves rather than through a node's Dial. Use it with
+// DialOptions.
 func (*Cluster) Resolver() grpcproc.Resolver {
 	return grpcproc.ResolverFunc(func(_ context.Context, node string) (string, error) { return "passthrough:///" + node, nil })
 }

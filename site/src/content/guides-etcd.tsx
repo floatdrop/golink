@@ -44,9 +44,10 @@ err = node.Start(ctx) // registers; Stop withdraws`}</Code>
 						it, not <C>0.0.0.0</C> or <C>localhost</C>.
 					</p>
 					<p>
-						One <C>Cluster</C> value serves every node in a program, and the Inspector's forwarding
-						too: <C>inspect.WithResolver(cluster, dialOptions...)</C> lets one Inspector reach the
-						others through the same registry; see <A to="guides/inspector/">The Inspector</A>.
+						One <C>Cluster</C> value serves every node in a program, and whatever reaches nodes
+						through the node, <C>node.Dial</C>: the Inspector forwards to the others through the
+						same registry with no option of its own; see <A to="guides/inspector/">The Inspector</A>.
+						A <C>leader</C> elector with no <C>Membership</C> of its own follows the node's.
 					</p>
 				</>
 			)

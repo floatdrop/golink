@@ -42,6 +42,9 @@ func (es *electors[S]) run(p *grpcproc.Process[proto.Message]) error {
 		role:  Follower,
 		state: &leaderv1.State{Version: &leaderv1.Version{}},
 	}
+	if len(e.spec.Voters) == 0 && e.spec.Membership == nil {
+		e.spec.Membership = p.Node().Membership()
+	}
 	es.cur = e
 	return e.loop()
 }
