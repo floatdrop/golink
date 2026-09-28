@@ -127,7 +127,8 @@ message Envelope {                                   // one flat message, decode
   uint64 ref = 7; Status status = 8; string reason = 9;
   string body_type = 10; bytes body = 11;            // the message's full name and encoding
   Hello hello = 12;
-  map<string,string> metadata = 15;                  // trace context, deadlines, tenant …
+  int64 timeout_nanos = 13;                          // a call's time left, not its deadline
+  map<string,string> metadata = 15;                  // trace context, tenant …
 }
 ```
 
@@ -209,6 +210,17 @@ message Envelope {                                   // one flat message, decode
   for teams that want strict isolation.
 - **Calls ride the same link**, matched by a call id, never as separate unary
   RPCs, so they cannot overtake or be overtaken by messages from the same sender.
+- **A call carries its caller's deadline**, as gRPC's `grpc-timeout` does: the
+  time left when it is written, not the deadline, so that clocks need not
+  agree, counted again from when it arrives, which makes the callee's
+  deadline the caller's or a little later. A local call passes the deadline
+  itself. The callee sees it as `Msg.Deadline`, and `Msg.Context` ends then,
+  so work for a caller that gave up, a deferred reply's above all, can stop.
+  It is not applied to the callee's own sends and calls, as metadata is:
+  a callee may have to finish what it started for a caller that stopped
+  waiting (the shop's desk takes an order whose client hung up), so it
+  passes the message's context on when it wants the bound. Cancellation does
+  not travel, only the deadline.
 
 ### Typed processes
 
@@ -253,7 +265,8 @@ type Msg[M proto.Message] struct {
 }
 func (m Msg[M]) IsCall() bool
 func (m Msg[M]) Reply(resp proto.Message, err error) error // may be deferred, from any goroutine
-func (m Msg[M]) Context() context.Context      // sender's deadline and metadata
+func (m Msg[M]) Deadline() (time.Time, bool)   // when a call's caller stops waiting
+func (m Msg[M]) Context(parent context.Context) (context.Context, context.CancelFunc) // metadata, ending then
 ```
 
 `M` is whichever of these fits:

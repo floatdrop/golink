@@ -239,7 +239,8 @@ md := grpcproc.MetadataFrom(ctx) // reads it back`}</Code>
 						id on every message its handling causes, across processes and nodes, without a single
 						handler threading a context through. A call's context can add to what is inherited, and{' '}
 						<C>m.Context(parent)</C> puts a message's metadata into a context for code that wants
-						one, a database client for instance.
+						one, a database client for instance. For a call, that context also ends at the caller's
+						deadline; <A to="concepts/processes/#send-call">Send and Call</A> has how it travels.
 					</p>
 					<p>
 						This is what <A to="guides/observability/">grpcproc/otel</A> builds its traces on: a span
