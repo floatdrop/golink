@@ -19,18 +19,18 @@ func TestReserveAcrossNodes(t *testing.T) {
 	stock := grpcproc.Named[*shoppb.Reserve]("warehouse", "stock")
 	apple := &shoppb.Reserve{Sku: "apple", Qty: 1}
 
-	if r, err := shop.Call[*shoppb.Reserved](t.Context(), stock, apple); err != nil || r.Left != 2 {
+	if r, err := stock.Call[*shoppb.Reserved](t.Context(), shop, apple); err != nil || r.Left != 2 {
 		t.Fatal(r, err)
 	}
 
 	// A partition fails calls, and fires monitors with Down{noconnection},
 	// until it heals.
 	c.Partition("shop", "warehouse")
-	if _, err := shop.Call[*shoppb.Reserved](t.Context(), stock, apple); !errors.Is(err, grpcproc.ErrNoConnection) {
+	if _, err := stock.Call[*shoppb.Reserved](t.Context(), shop, apple); !errors.Is(err, grpcproc.ErrNoConnection) {
 		t.Fatal(err)
 	}
 	c.Heal("shop", "warehouse")
-	if r, err := shop.Call[*shoppb.Reserved](t.Context(), stock, apple); err != nil || r.Left != 1 {
+	if r, err := stock.Call[*shoppb.Reserved](t.Context(), shop, apple); err != nil || r.Left != 1 {
 		t.Fatal(r, err)
 	}
 
@@ -38,7 +38,7 @@ func TestReserveAcrossNodes(t *testing.T) {
 	// the processes the old one ran.
 	c.Kill("warehouse")
 	c.Restart("warehouse")
-	if _, err := shop.Call[*shoppb.Reserved](t.Context(), stock, apple); !errors.Is(err, grpcproc.ErrNoProc) {
+	if _, err := stock.Call[*shoppb.Reserved](t.Context(), shop, apple); !errors.Is(err, grpcproc.ErrNoProc) {
 		t.Fatal(err)
 	}
 }

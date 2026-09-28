@@ -58,7 +58,7 @@ func restarted(t *testing.T, n *grpcproc.Node, name string, old grpcproc.PID) gr
 }
 
 func send(t *testing.T, n *grpcproc.Node, name string, v int64) {
-	_ = n.Send(t.Context(), grpcproc.Named[*testpb.Ping](n.Name(), name), &testpb.Ping{N: v})
+	_ = grpcproc.Named[*testpb.Ping](n.Name(), name).Send(t.Context(), n, &testpb.Ping{N: v})
 }
 
 func settle() { time.Sleep(50 * time.Millisecond) }
@@ -335,15 +335,15 @@ func TestChildHandlerIsFreshOnRestart(t *testing.T) {
 	}
 	addr := grpcproc.Named[*testpb.Ping]("a", "counter")
 	pidOf(t, n, "counter")
-	_ = n.Send(t.Context(), addr, &testpb.Ping{N: 1})
-	_ = n.Send(t.Context(), addr, &testpb.Ping{N: 1})
-	if r, _ := n.Call[*testpb.Pong](t.Context(), addr, &testpb.Ping{}); r.GetN() != 2 {
+	_ = addr.Send(t.Context(), n, &testpb.Ping{N: 1})
+	_ = addr.Send(t.Context(), n, &testpb.Ping{N: 1})
+	if r, _ := addr.Call[*testpb.Pong](t.Context(), n, &testpb.Ping{}); r.GetN() != 2 {
 		t.Fatalf("count %d", r.GetN())
 	}
 	old := pidOf(t, n, "counter")
-	_ = n.Send(t.Context(), addr, &testpb.Ping{N: -1})
+	_ = addr.Send(t.Context(), n, &testpb.Ping{N: -1})
 	restarted(t, n, "counter", old)
-	if r, _ := n.Call[*testpb.Pong](t.Context(), addr, &testpb.Ping{}); r.GetN() != 0 {
+	if r, _ := addr.Call[*testpb.Pong](t.Context(), n, &testpb.Ping{}); r.GetN() != 0 {
 		t.Fatalf("state survived a restart: %d", r.GetN())
 	}
 	if built != 2 {

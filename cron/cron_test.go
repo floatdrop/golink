@@ -509,11 +509,11 @@ func TestControl(t *testing.T) {
 			"without an op":         {},
 			"the job was withdrawn": {Op: &cronv1.Control_Add{Add: 1 << 60}},
 		} {
-			if _, err := n.Call[*emptypb.Empty](ctx, c, op); err == nil || !strings.Contains(err.Error(), what) {
+			if _, err := c.Call[*emptypb.Empty](ctx, n, op); err == nil || !strings.Contains(err.Error(), what) {
 				t.Errorf("%s: %v", what, err)
 			}
 		}
-		if err := n.Send(ctx, c, &cronv1.Control{}); err != nil {
+		if err := c.Send(ctx, n, &cronv1.Control{}); err != nil {
 			t.Fatal(err)
 		}
 		synctest.Wait()

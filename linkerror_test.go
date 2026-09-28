@@ -32,7 +32,7 @@ func TestLinkErrorUnsent(t *testing.T) {
 
 	failed := make(chan error, 1)
 	go func() {
-		_, err := a.Call[*testpb.Ping](t.Context(), silent, &testpb.Ping{})
+		_, err := silent.Call[*testpb.Ping](t.Context(), a, &testpb.Ping{})
 		failed <- err
 	}()
 	<-called
@@ -42,7 +42,7 @@ func TestLinkErrorUnsent(t *testing.T) {
 		t.Fatalf("a call the link broke under: %v", le)
 	}
 
-	_, err := a.Call[*testpb.Ping](t.Context(), silent, &testpb.Ping{})
+	_, err := silent.Call[*testpb.Ping](t.Context(), a, &testpb.Ping{})
 	le, ok = errors.AsType[*grpcproc.LinkError](err)
 	if !ok || !le.Unsent || !errors.Is(err, grpcproc.ErrNoConnection) {
 		t.Fatalf("a call that never left: %v", err)
@@ -67,17 +67,17 @@ func TestCallWithADoneContextSendsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Call[*testpb.Ping](t.Context(), echo, &testpb.Ping{}); err != nil {
+	if _, err := echo.Call[*testpb.Ping](t.Context(), a, &testpb.Ping{}); err != nil {
 		t.Fatal(err) // the link is up
 	}
 	<-got
 	done, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := a.Call[*testpb.Ping](done, echo, &testpb.Ping{}); !errors.Is(err, context.Canceled) {
+	if _, err := echo.Call[*testpb.Ping](done, a, &testpb.Ping{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("got %v", err)
 	}
 	// Anything sent would arrive before this call's own message.
-	if _, err := a.Call[*testpb.Ping](t.Context(), echo, &testpb.Ping{}); err != nil {
+	if _, err := echo.Call[*testpb.Ping](t.Context(), a, &testpb.Ping{}); err != nil {
 		t.Fatal(err)
 	}
 	<-got
@@ -106,7 +106,7 @@ func TestStopFailsCallsWaitingOnPeers(t *testing.T) {
 	a := c.Node("a")
 	failed := make(chan error, 1)
 	go func() {
-		_, err := a.Call[*testpb.Ping](context.Background(), grpcproc.Named[*testpb.Ping]("b", "silent"), &testpb.Ping{})
+		_, err := grpcproc.Named[*testpb.Ping]("b", "silent").Call[*testpb.Ping](context.Background(), a, &testpb.Ping{})
 		failed <- err
 	}()
 	<-called
@@ -157,7 +157,7 @@ func TestStopFailsLocalCallsStillWaiting(t *testing.T) {
 	}
 	failed := make(chan error, 2)
 	call := func() {
-		_, err := n.Call[*testpb.Ping](context.Background(), stuck, &testpb.Ping{})
+		_, err := stuck.Call[*testpb.Ping](context.Background(), n, &testpb.Ping{})
 		failed <- err
 	}
 	go call()
@@ -181,10 +181,10 @@ func TestStopFailsLocalCallsStillWaiting(t *testing.T) {
 			t.Fatalf("got %v", err)
 		}
 	}
-	if _, err := n.Call[*testpb.Ping](context.Background(), grpcproc.Named[*testpb.Ping]("a", "nobody"), &testpb.Ping{}); !errors.Is(err, grpcproc.ErrNoProc) {
+	if _, err := grpcproc.Named[*testpb.Ping]("a", "nobody").Call[*testpb.Ping](context.Background(), n, &testpb.Ping{}); !errors.Is(err, grpcproc.ErrNoProc) {
 		t.Fatalf("after stop, no process: %v", err)
 	}
-	if resp, err := n.Call[*testpb.Ping](context.Background(), lingers, &testpb.Ping{N: 42}); err != nil || resp.GetN() != 42 {
+	if resp, err := lingers.Call[*testpb.Ping](context.Background(), n, &testpb.Ping{N: 42}); err != nil || resp.GetN() != 42 {
 		t.Fatalf("after stop, a process still running: %v, %v", resp, err)
 	}
 }
@@ -214,7 +214,7 @@ func TestReplyThroughAnotherProcess(t *testing.T) {
 				t.Fatal(err)
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			resp, err := c.Node(caller).Call[*testpb.Ping](ctx, front, &testpb.Ping{N: 1})
+			resp, err := front.Call[*testpb.Ping](ctx, c.Node(caller), &testpb.Ping{N: 1})
 			cancel()
 			if err != nil || resp.GetN() != 7 {
 				t.Fatalf("taken on a, answered on %s, called from %s: %v, %v", answerer, caller, resp, err)

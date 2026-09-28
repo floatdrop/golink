@@ -51,7 +51,7 @@ func main() {
 	// mailbox type, so the compiler checks what is sent to it.
 	stock := grpcproc.Named[*shoppb.Reserve]("warehouse", "stock")
 	for range 2 {
-		r, err := shop.Call[*shoppb.Reserved](ctx, stock, &shoppb.Reserve{Sku: "apple", Qty: 2})
+		r, err := stock.Call[*shoppb.Reserved](ctx, shop, &shoppb.Reserve{Sku: "apple", Qty: 2})
 		if err != nil {
 			fmt.Println("reserve failed:", err) // the handler's error, as a *grpcproc.RemoteError
 			continue
@@ -76,7 +76,7 @@ func main() {
 	check(err)
 	fmt.Println("stock exited:", <-exited)
 
-	_, err = shop.Call[*shoppb.Reserved](ctx, stock, &shoppb.Reserve{Sku: "apple", Qty: 1})
+	_, err = stock.Call[*shoppb.Reserved](ctx, shop, &shoppb.Reserve{Sku: "apple", Qty: 1})
 	fmt.Println("no such process:", errors.Is(err, grpcproc.ErrNoProc))
 
 	check(shop.Stop(ctx))

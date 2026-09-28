@@ -90,7 +90,7 @@ func TestAddrCallAndSend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Send(tenant, caller, &testpb.Ping{N: 1}); err != nil {
+	if err := caller.Send(tenant, a, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	for _, call := range []bool{true, false} {

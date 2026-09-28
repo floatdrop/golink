@@ -212,7 +212,7 @@ func TestFailover(t *testing.T) {
 		settle(2 * time.Second)
 		first, term := elected(t, c, "a", "b", "c")
 		one := grpcproc.Named[counter](first, "singleton")
-		if _, err := c.Node(first).Call[counter](t.Context(), one, wrapperspb.Int64(7)); err != nil {
+		if _, err := one.Call[counter](t.Context(), c.Node(first), wrapperspb.Int64(7)); err != nil {
 			t.Fatal(err)
 		}
 		c.Kill(first)

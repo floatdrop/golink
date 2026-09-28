@@ -46,10 +46,21 @@ func (a Addr[M]) String() string {
 
 func (a Addr[M]) target() (PID, string) { return a.pid, a.name }
 
-// Call sends req to the address and waits for the reply, typed as R. from
-// is who calls: the Node, as Node.Call does, or a Process, as Process.Call
-// does, with the metadata of the message it is handling. Errors are as for
-// Node.Call.
+// Call sends req to the address and waits for the reply, typed as R:
+//
+//	resp, err := addr.Call[*orderspb.Reserved](ctx, from, &orderspb.Order{…})
+//
+// from is who calls: the Node, or a Process from inside its handler, whose
+// call carries the metadata of the message it is handling with ctx's merged
+// over it. Replies do not pass through the mailbox, so calling from inside a
+// process never reorders its messages. The callee sees ctx's deadline as the
+// call's (Msg.Deadline).
+//
+// A reply of another type is ErrType; a handler error is a *RemoteError; a
+// callee that is gone, or exits before answering, is ErrNoProc; a peer that
+// cannot be reached is a *LinkError, whose Unsent says that req never left.
+// If ctx ends first, Call returns its error, and req may have been handled;
+// a ctx already done sends nothing.
 //
 // It lets a contract package write its protocol once, as a method per
 // operation on its own address type, which names R so callers do not:
@@ -68,10 +79,14 @@ func (a Addr[M]) Call[R proto.Message](ctx context.Context, from Caller, req M) 
 	return typed[R](o.n.doCall(ctx, o.from, o.p, a.dest(), req, o.md))
 }
 
-// Send delivers m to the address, from the Node or a Process, as their Send
-// does. Unlike Process.Send it takes a ctx: from a process, ctx's metadata
-// is merged over what the process inherited, as for Process.Call, and ctx
-// bounds the wait for a first connection, as for Node.Send.
+// Send delivers m to the address, local or remote, from the Node or a
+// Process, and returns once m is queued. From a process, m carries the
+// metadata of the message it is handling with ctx's merged over it; from the
+// node, ctx's. ctx bounds only the wait for a connection to a peer the node
+// has no link to yet, and while dials to the peer are failing it does not
+// wait at all (see Config.DialBackoff). Sending to a process that does not
+// exist is not an error (it is a dead letter); an error means m could not be
+// encoded, the node could not be reached, or ctx ended first.
 func (a Addr[M]) Send(ctx context.Context, from Caller, m M) error {
 	o := from.origin(ctx)
 	return o.n.send(ctx, o.from, o.p, a.dest(), m, o.md)
@@ -132,7 +147,8 @@ func typed[R proto.Message](resp proto.Message, err error) (R, error) {
 type mdKey struct{}
 
 // WithMetadata returns a context carrying md, merged over any metadata already
-// in ctx. Node.Send, Node.SendTo and every Call propagate it with the message.
+// in ctx. Every send and call made with ctx propagates it with the message,
+// merged, from a process, over what the process inherited.
 func WithMetadata(ctx context.Context, md Metadata) context.Context {
 	if old := MetadataFrom(ctx); len(old) > 0 {
 		merged := maps.Clone(old)

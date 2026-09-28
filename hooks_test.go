@@ -101,13 +101,13 @@ func TestMetadataFlowsThroughProcesses(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if err := p.Send(sink, proto.Message(m.Body)); err != nil {
+			if err := sink.Send(p.Context(), p, m.Body); err != nil {
 				return err
 			}
 		}
 	}, grpcproc.WithLabel("relay"))
 	ctx := grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"tenant": "acme"})
-	if err := a.Send(ctx, relay, &testpb.Ping{N: 1}); err != nil {
+	if err := relay.Send(ctx, a, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	m := recv(t, got)
@@ -134,7 +134,7 @@ func TestMetadataFlowsThroughProcesses(t *testing.T) {
 	// Handling ends at the next Receive: send another message and s2 closes.
 	// By then the relay's send has returned too: s3 ended. (The collector
 	// may have its message before that.)
-	_ = a.Send(ctx, relay, &testpb.Ping{N: 2})
+	_ = relay.Send(ctx, a, &testpb.Ping{N: 2})
 	recv(t, got)
 	for _, want := range []string{"handled s2", "end s3"} {
 		if !slices.Contains(tr.Events(), want) {
@@ -152,13 +152,13 @@ func TestInheritanceEndsWithHandling(t *testing.T) {
 		if _, err := p.Receive(); err != nil {
 			return err
 		}
-		_ = p.Send(sink, proto.Message(&testpb.Ping{N: 1})) // inherits
+		_ = sink.Send(p.Context(), p, &testpb.Ping{N: 1}) // inherits
 		if _, err := p.ReceiveTimeout(time.Millisecond); err == nil {
 			t.Error("expected timeout")
 		}
-		return p.Send(sink, proto.Message(&testpb.Ping{N: 2})) // inherits nothing
+		return sink.Send(p.Context(), p, &testpb.Ping{N: 2}) // inherits nothing
 	})
-	_ = a.Send(grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"tenant": "acme"}), p, &testpb.Ping{})
+	_ = p.Send(grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"tenant": "acme"}), a, &testpb.Ping{})
 	if m := recv(t, got); m.Metadata["tenant"] != "acme" {
 		t.Fatalf("1: %v", m.Metadata)
 	}
@@ -185,10 +185,10 @@ func TestCallMergesContextMetadata(t *testing.T) {
 			return err
 		}
 		ctx := grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"extra": "1"})
-		_, err := p.Call[*testpb.Pong](ctx, probe, &testpb.Ping{})
+		_, err := probe.Call[*testpb.Pong](ctx, p, &testpb.Ping{})
 		return err
 	})
-	_ = a.Send(grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"tenant": "acme"}), p, &testpb.Ping{})
+	_ = p.Send(grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"tenant": "acme"}), a, &testpb.Ping{})
 	select {
 	case md := <-seen:
 		if md["tenant"] != "acme" || md["extra"] != "1" {
@@ -205,13 +205,13 @@ func TestDoneReportsOutcomes(t *testing.T) {
 	a := c.Node("a")
 	e, _ := a.Spawn(echo, grpcproc.WithLabel("echo"))
 	// A call ends with its error.
-	if _, err := a.Call[*testpb.Pong](t.Context(), e, &testpb.Ping{N: -1}); err == nil {
+	if _, err := e.Call[*testpb.Pong](t.Context(), a, &testpb.Ping{N: -1}); err == nil {
 		t.Fatal("expected error")
 	}
 	// A send that cannot route ends with that error.
 	_ = a.SendTo(t.Context(), grpcproc.Named[*testpb.Ping]("nowhere", "x"), &testpb.Ping{})
 	// A process that exits abnormally ends its handling with the reason.
-	_ = a.Send(t.Context(), e, &testpb.Ping{N: -100})
+	_ = e.Send(t.Context(), a, &testpb.Ping{N: -100})
 	w, ch := watcher(t, a)
 	w.Monitor(e)
 	recv(t, ch)
@@ -309,7 +309,7 @@ func TestExitCountsQueuedCallBeforeAnswering(t *testing.T) {
 	}
 	errs := make(chan error, 1)
 	go func() {
-		_, err := n.Call[*testpb.Ping](t.Context(), pid, &testpb.Ping{})
+		_, err := pid.Call[*testpb.Ping](t.Context(), n, &testpb.Ping{})
 		close(h.answered)
 		errs <- err
 	}()

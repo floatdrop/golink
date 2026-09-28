@@ -62,7 +62,7 @@ func TestDispatchAnswersDoNotWaitForADial(t *testing.T) {
 	a, b := c.Node("a"), c.Node("b")
 	called := make(chan error, 1)
 	go func() {
-		_, err := b.Call[*testpb.Ping](context.Background(), grpcproc.Named[*testpb.Ping]("a", "nobody"), &testpb.Ping{})
+		_, err := grpcproc.Named[*testpb.Ping]("a", "nobody").Call[*testpb.Ping](context.Background(), b, &testpb.Ping{})
 		called <- err
 	}()
 	within(t, entered, "dial")

@@ -102,7 +102,7 @@ func TestGetNodeLocalAndForwarded(t *testing.T) {
 	}
 	// Asking a about b forwards to b's Inspector.
 	e, _ := c.Node("b").Spawn(func(p *grpcproc.Process[*testpb.Ping]) error { _, err := p.Receive(); return err })
-	if _, err := c.Node("a").Call[*testpb.Pong](t.Context(), e, &testpb.Ping{}); err == nil {
+	if _, err := e.Call[*testpb.Pong](t.Context(), c.Node("a"), &testpb.Ping{}); err == nil {
 		t.Fatal("expected no reply")
 	}
 	resp, err = a.GetNode(t.Context(), &inspectv1.GetNodeRequest{Node: "b"})
@@ -128,9 +128,9 @@ func TestListProcessesFilters(t *testing.T) {
 	_, _ = n.Spawn(fn3, grpcproc.WithName("billing"), grpcproc.WithLabel("bill"), insp3)
 	fn4, _ := worker(release)
 	_, _ = n.Spawn(fn4, grpcproc.WithLabel("misc")) // no name: matches only an empty name filter
-	_ = n.Send(t.Context(), busy, &testpb.Ping{N: 7})
-	_ = n.Send(t.Context(), busy, &testpb.Ping{N: 1})
-	_ = n.Send(t.Context(), busy, &testpb.Ping{N: 1})
+	_ = busy.Send(t.Context(), n, &testpb.Ping{N: 7})
+	_ = busy.Send(t.Context(), n, &testpb.Ping{N: 1})
+	_ = busy.Send(t.Context(), n, &testpb.Ping{N: 1})
 	time.Sleep(30 * time.Millisecond)
 
 	a := client(c, "a")
@@ -198,7 +198,7 @@ func TestGetProcess(t *testing.T) {
 	spawner := <-parents
 	parent := spawner.PID()
 	pid, _ := spawner.Spawn(fn, grpcproc.WithName("w"), insp)
-	_ = b.Send(t.Context(), pid, &testpb.Ping{N: 1})
+	_ = pid.Send(t.Context(), b, &testpb.Ping{N: 1})
 	time.Sleep(20 * time.Millisecond)
 
 	a := client(c, "a")
@@ -216,7 +216,7 @@ func TestGetProcess(t *testing.T) {
 		t.Fatalf("%v %v", resp, err)
 	}
 	// Busy: the snapshot is still returned, with why inspect is empty.
-	_ = b.Send(t.Context(), pid, &testpb.Ping{N: 7})
+	_ = pid.Send(t.Context(), b, &testpb.Ping{N: 7})
 	time.Sleep(20 * time.Millisecond)
 	resp, err = a.GetProcess(t.Context(), &inspectv1.GetProcessRequest{Target: byPID(pid.PID()), Inspect: true, InspectTimeout: durationpb.New(30 * time.Millisecond)})
 	if err != nil || !strings.Contains(resp.GetInspectError(), "busy") || resp.GetProcess() == nil {

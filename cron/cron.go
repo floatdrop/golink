@@ -119,9 +119,14 @@ func Func(fn func(ctx context.Context, r Run) error) Action {
 
 // Send is an Action that sends what msg builds for the run to to. The run
 // succeeds once the message is sent: what its receiver makes of it is the
-// receiver's.
+// receiver's. A first send to a node with no link yet waits for the dial
+// within the run's Deadline.
 func Send[N proto.Message](to grpcproc.Addr[N], msg func(Run) N) Action {
-	return func(p *grpcproc.Process[proto.Message], r Run) error { return p.Send(to, msg(r)) }
+	return func(p *grpcproc.Process[proto.Message], r Run) error {
+		ctx, cancel := r.context(p)
+		defer cancel()
+		return to.Send(ctx, p, msg(r))
+	}
 }
 
 // Call is an Action that calls to with what req builds for the run. The run
@@ -132,7 +137,7 @@ func Call[N proto.Message](to grpcproc.Addr[N], req func(Run) N) Action {
 	return func(p *grpcproc.Process[proto.Message], r Run) error {
 		ctx, cancel := r.context(p)
 		defer cancel()
-		_, err := p.Call[proto.Message](ctx, to, req(r))
+		_, err := to.Call[proto.Message](ctx, p, req(r))
 		return err
 	}
 }

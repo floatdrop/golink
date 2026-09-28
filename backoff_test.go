@@ -201,7 +201,7 @@ func TestUnroutableReplyOrDownCutsThePeersLink(t *testing.T) {
 
 	// A reply from a process. b is told why its link went, and that its
 	// call may have been handled: it was.
-	_, err = b.Call[*testpb.Ping](ctx, grpcproc.Named[*testpb.Ping]("a", "echo"), &testpb.Ping{})
+	_, err = grpcproc.Named[*testpb.Ping]("a", "echo").Call[*testpb.Ping](ctx, b, &testpb.Ping{})
 	if le, ok := errors.AsType[*grpcproc.LinkError](err); !ok || le.Unsent || !strings.Contains(err.Error(), "a cannot reach b back: no route to b") {
 		t.Fatalf("call: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestDialBackoffInAOneWayPartition(t *testing.T) {
 	}
 	var waits []time.Duration
 	for range 2 {
-		_, err := b.Call[*testpb.Ping](t.Context(), grpcproc.Named[*testpb.Ping]("a", "echo"), &testpb.Ping{})
+		_, err := grpcproc.Named[*testpb.Ping]("a", "echo").Call[*testpb.Ping](t.Context(), b, &testpb.Ping{})
 		if !errors.Is(err, grpcproc.ErrNoConnection) || !strings.Contains(err.Error(), "a cannot reach b back: no route to b") {
 			t.Fatalf("got %v", err)
 		}

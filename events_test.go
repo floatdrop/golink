@@ -45,12 +45,12 @@ func TestSubscribe(t *testing.T) {
 	if ev := nextEvent(t, events, grpcproc.EventDeadLetter); ev.To != e.PID() || ev.Type != "grpcproc.test.v1.Pong" || ev.Reason != grpcproc.ReasonType {
 		t.Fatalf("%+v", ev)
 	}
-	_ = a.Send(t.Context(), e, &testpb.Ping{N: -100})
+	_ = e.Send(t.Context(), a, &testpb.Ping{N: -100})
 	if ev := nextEvent(t, events, grpcproc.EventExit); ev.Process.PID != e.PID() || ev.Reason != "boom" {
 		t.Fatalf("%+v", ev)
 	}
 	e2, _ := c.Node("b").Spawn(echo)
-	if _, err := a.Call[*testpb.Pong](t.Context(), e2, &testpb.Ping{N: 1}); err != nil {
+	if _, err := e2.Call[*testpb.Pong](t.Context(), a, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if ev := nextEvent(t, events, grpcproc.EventLinkUp); ev.Peer.Name != "b" {
@@ -96,7 +96,7 @@ func TestLinkDownWithoutError(t *testing.T) {
 	a := c.Node("a")
 	events := a.Subscribe(t.Context(), 64)
 	e, _ := c.Node("b").Spawn(echo)
-	if _, err := a.Call[*testpb.Pong](t.Context(), e, &testpb.Ping{N: 1}); err != nil {
+	if _, err := e.Call[*testpb.Pong](t.Context(), a, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	c.Stop("b")

@@ -366,7 +366,7 @@ func (e *elector[S]) greet(p *peer, now time.Time, reply bool) {
 	e.send(p, &leaderv1.Peer{Term: e.term, Kind: &leaderv1.Peer_Hello{Hello: &leaderv1.Hello{Reply: reply}}})
 }
 
-func (e *elector[S]) send(p *peer, m *leaderv1.Peer) { _ = e.p.Send(p.relay, proto.Message(m)) }
+func (e *elector[S]) send(p *peer, m *leaderv1.Peer) { _ = p.relay.Send(e.p.Context(), e.p, m) }
 
 // view is the nodes whose majority elects a leader, this one included,
 // sorted.
@@ -472,7 +472,7 @@ func (e *elector[S]) admit(from string, m *leaderv1.Peer, now time.Time) *peer {
 	p.ghostSince = time.Time{}
 	if p.down {
 		p.down = false
-		_ = e.p.Send(p.relay, proto.Message(&leaderv1.Watch{}))
+		_ = p.relay.Send(e.p.Context(), e.p, &leaderv1.Watch{})
 	}
 	return p
 }

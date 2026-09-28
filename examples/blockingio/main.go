@@ -38,7 +38,7 @@ func listener(ln net.Listener) func(*grpcproc.Process[proto.Message]) error {
 				continue
 			}
 			// Writes reach a connection as messages, from any process.
-			_ = p.Send(conn, write("welcome to "+p.Node().Name()))
+			_ = conn.Send(p.Context(), p, write("welcome to "+p.Node().Name()))
 		}
 	}
 }
@@ -55,10 +55,10 @@ func serve(c net.Conn) func(*grpcproc.Process[*connpb.Event]) error {
 		go func() {
 			lines := bufio.NewScanner(c)
 			for lines.Scan() {
-				_ = node.Send(context.Background(), self, received(lines.Text()))
+				_ = self.Send(context.Background(), node, received(lines.Text()))
 			}
 			if p.Context().Err() == nil { // not the process's own exit closing c
-				_ = node.Send(context.Background(), self, closed(lines.Err()))
+				_ = self.Send(context.Background(), node, closed(lines.Err()))
 			}
 		}()
 		for {

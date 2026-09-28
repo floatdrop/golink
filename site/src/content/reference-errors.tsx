@@ -107,7 +107,7 @@ export const referenceErrors: Doc = {
 						<C>*LinkError</C> implements <C>Is</C> for <C>ErrNoConnection</C> and <C>Unwrap</C> for
 						the transport error, so both tests work, and <C>errors.AsType</C> gets at the fields:
 					</p>
-					<Code>{`_, err := node.Call[*shoppb.Reserved](ctx, stock, req)
+					<Code>{`_, err := stock.Call[*shoppb.Reserved](ctx, node, req)
 if le, ok := errors.AsType[*grpcproc.LinkError](err); ok && le.Unsent {
 	// The message never left this node: sending it again cannot deliver it twice.
 }

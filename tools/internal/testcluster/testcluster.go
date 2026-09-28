@@ -88,7 +88,7 @@ func Start(t *testing.T, more ...string) *Fixture {
 	}, grpcproc.WithName("stuck"), grpcproc.WithLabel("stuck"))
 	f.Stuck = stuck.PID()
 	for range 4 {
-		_ = a.Send(t.Context(), stuck, &testpb.Ping{})
+		_ = stuck.Send(t.Context(), a, &testpb.Ping{})
 	}
 	talker, _ := a.Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
 		for {
@@ -110,7 +110,7 @@ func Start(t *testing.T, more ...string) *Fixture {
 		}
 	}, grpcproc.WithName("echo"))
 	f.Echo = echo.PID()
-	if _, err := a.Call[*testpb.Pong](t.Context(), echo, &testpb.Ping{}); err != nil {
+	if _, err := echo.Call[*testpb.Pong](t.Context(), a, &testpb.Ping{}); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(20 * time.Millisecond) // the stuck process takes its first message

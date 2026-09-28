@@ -142,13 +142,12 @@ pid, ok := warehouse.Whereis("stock") // on this node, now`}</Code>
 			body: (
 				<>
 					<p>
-						A typed call names its reply, <C>node.Call[*shoppb.Reserved](ctx, stock, req)</C>, and
-						every call site does, wrapping the request in the mailbox's oneof when it has one. The
-						package that owns a process can do both once. An address has <C>Call</C> and{' '}
-						<C>Send</C> of its own, which take the sender as an argument, a <C>Caller</C>: the{' '}
-						<C>*Node</C>, or a <C>*Process</C> from inside a handler, as <C>Node.Call</C> or{' '}
-						<C>Process.Call</C> would send it. A contract wraps them in a method per operation, on an
-						address type of its own:
+						A typed send or call goes through the address, which takes the sender as an argument, a{' '}
+						<C>Caller</C>: the <C>*Node</C>, or a <C>*Process</C> from inside a handler. A call names
+						its reply, <C>stock.Call[*shoppb.Reserved](ctx, node, req)</C>, and every call site does,
+						wrapping the request in the mailbox's oneof when it has one. The package that owns a
+						process can do both once. A contract wraps the address's <C>Call</C> and <C>Send</C> in a
+						method per operation, on an address type of its own:
 					</p>
 					<Code caption="examples/guide/proto/inventory/v1/address.go">
 						{`${region(inventoryAddress, /^\/\/ StockAddr addresses/, /^type StockAddr/)}
@@ -229,7 +228,7 @@ ${region(inventoryAddress, /^\/\/ Reserve takes items/, /^}/)}`}
 						interceptors would carry. From outside a process it is set on the context:
 					</p>
 					<Code>{`ctx = grpcproc.WithMetadata(ctx, grpcproc.Metadata{"tenant": "acme"})
-r, err := node.Call[*shoppb.Reserved](ctx, stock, reserve)
+r, err := stock.Call[*shoppb.Reserved](ctx, node, reserve)
 
 md := grpcproc.MetadataFrom(ctx) // reads it back`}</Code>
 					<p>
@@ -256,8 +255,7 @@ md := grpcproc.MetadataFrom(ctx) // reads it back`}</Code>
 			body: (
 				<>
 					<p>
-						A message sent from outside any process, with <C>Node.Send</C> or <C>Node.Call</C>, still
-						has a sender. It is the node's pseudo-process, <C>node.PID()</C>: the node's name and
+						A message sent from outside any process, with the node as the sender, still has a sender. It is the node's pseudo-process, <C>node.PID()</C>: the node's name and
 						incarnation with ID zero. It has no mailbox, so a process cannot reply to it with a send;
 						a call from it is answered through the call, as any other. It shows up in <C>Msg.From</C>,
 						in dead letters and in traces, so that a message from the edge is as attributable as one

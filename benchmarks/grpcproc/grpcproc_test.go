@@ -84,7 +84,7 @@ func glSend(b *testing.B, from, to *grpcproc.Node) {
 		}
 	})
 	echo := glEcho(b, to)
-	if _, err := from.Call[*shared.Msg](b.Context(), echo, &shared.Msg{Value: 1}); err != nil { // warm up
+	if _, err := echo.Call[*shared.Msg](b.Context(), from, &shared.Msg{Value: 1}); err != nil { // warm up
 		b.Fatal(err)
 	}
 	m := &shared.Msg{Value: 1}
@@ -92,7 +92,7 @@ func glSend(b *testing.B, from, to *grpcproc.Node) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		_ = from.Send(ctx, sink, m)
+		_ = sink.Send(ctx, from, m)
 	}
 	<-done
 }
@@ -100,7 +100,7 @@ func glSend(b *testing.B, from, to *grpcproc.Node) {
 func glCall(b *testing.B, from, to *grpcproc.Node, parallel bool) {
 	echo := glEcho(b, to)
 	ctx := b.Context()
-	if _, err := from.Call[*shared.Msg](ctx, echo, &shared.Msg{Value: 1}); err != nil {
+	if _, err := echo.Call[*shared.Msg](ctx, from, &shared.Msg{Value: 1}); err != nil {
 		b.Fatal(err)
 	}
 	m := &shared.Msg{Value: 1}
@@ -109,7 +109,7 @@ func glCall(b *testing.B, from, to *grpcproc.Node, parallel bool) {
 	if parallel {
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				if _, err := from.Call[*shared.Msg](ctx, echo, m); err != nil {
+				if _, err := echo.Call[*shared.Msg](ctx, from, m); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -117,7 +117,7 @@ func glCall(b *testing.B, from, to *grpcproc.Node, parallel bool) {
 		return
 	}
 	for range b.N {
-		if _, err := from.Call[*shared.Msg](ctx, echo, m); err != nil {
+		if _, err := echo.Call[*shared.Msg](ctx, from, m); err != nil {
 			b.Fatal(err)
 		}
 	}

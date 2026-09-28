@@ -101,16 +101,16 @@ child, ref, err := p.SpawnMonitor(worker)`}</Code>
 								<C>*shoppb.Stock</C>,
 								<>
 									A generated message with a <C>oneof</C>: one contract per process, visible in the{' '}
-									<C>.proto</C>, and the type Go infers at every send. The examples use this.
+									<C>.proto</C>, and the type every send through its address takes. The examples use
+									this.
 								</>
 							],
 							[
 								<C>StockMsg</C>,
 								<>
 									Your own interface, <C>interface{'{ proto.Message; stockMsg() }'}</C>, implemented by
-									several generated types with one extra method each. A send then has to name the
-									type, <C>p.Send[StockMsg](addr, &amp;shoppb.Reserve{'{}'})</C>, since Go infers{' '}
-									<C>N</C> from the address and from the message alike, and they differ.
+									several generated types with one extra method each. The address takes any of them
+									as it is, <C>addr.Send(ctx, p, &amp;shoppb.Reserve{'{}'})</C>, with no wrapper.
 								</>
 							],
 							[
@@ -139,12 +139,13 @@ child, ref, err := p.SpawnMonitor(worker)`}</Code>
 					<p>
 						<C>Send</C> queues a message and returns; nobody waits for an answer, and a process that
 						does not exist is a dead letter, not an error. <C>Call</C> sends and waits for the reply,
-						typed by what the caller asks for, under the context's deadline. Both exist on the node,
-						for code outside any process, and on <C>p</C>, where the process is the sender.
+						typed by what the caller asks for, under the context's deadline. Both are methods of the
+						address, and take the sender: <C>p</C> from inside a process, or the node for code outside
+						any.
 					</p>
-					<Code>{`err := p.Send(stock, &shoppb.Stock{Op: &shoppb.Stock_Restock{Restock: restock}})
+					<Code>{`err := stock.Send(ctx, p, &shoppb.Stock{Op: &shoppb.Stock_Restock{Restock: restock}})
 
-r, err := p.Call[*shoppb.Reserved](ctx, stock, &shoppb.Stock{Op: &shoppb.Stock_Reserve{Reserve: reserve}})`}</Code>
+r, err := stock.Call[*shoppb.Reserved](ctx, p, &shoppb.Stock{Op: &shoppb.Stock_Reserve{Reserve: reserve}})`}</Code>
 					<p>
 						The oneof and the reply type are the protocol, and spelling them at every call is the
 						job of the package that owns the process, not of its callers. It writes each operation

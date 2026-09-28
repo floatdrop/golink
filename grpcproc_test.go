@@ -136,13 +136,13 @@ func TestLocalTypedSendAndCall(t *testing.T) {
 	e, _ := a.Spawn(echo)
 	// Sending from outside any process: the Pong reply has nowhere to go, so
 	// it is a dead letter, not an error.
-	if err := a.Send(t.Context(), e, &testpb.Ping{N: 1}); err != nil {
+	if err := e.Send(t.Context(), a, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	// From inside a process the reply comes back to it.
 	gotc := make(chan grpcproc.Msg[proto.Message], 1)
 	_, err := a.Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
-		if err := p.Send(e, &testpb.Ping{N: 41}); err != nil {
+		if err := e.Send(p.Context(), p, &testpb.Ping{N: 41}); err != nil {
 			return err
 		}
 		m, err := p.Receive()
@@ -155,7 +155,7 @@ func TestLocalTypedSendAndCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := a.Call[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 9})
+	r, err := e.Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 9})
 	if err != nil || r.N != 10 {
 		t.Fatalf("call: %v %v", r, err)
 	}
@@ -163,7 +163,7 @@ func TestLocalTypedSendAndCall(t *testing.T) {
 	if pong, ok := got.Body.(*testpb.Pong); !ok || pong.N != 42 || got.From != e.PID() {
 		t.Fatalf("got %+v", got)
 	}
-	if _, err := a.Call[*testpb.Ping](ctx(t), e, &testpb.Ping{N: 1}); !errors.Is(err, grpcproc.ErrType) {
+	if _, err := e.Call[*testpb.Ping](ctx(t), a, &testpb.Ping{N: 1}); !errors.Is(err, grpcproc.ErrType) {
 		t.Fatalf("reply typed wrongly should be ErrType, got %v", err)
 	}
 }
@@ -179,7 +179,7 @@ func TestRemoteByPIDAndName(t *testing.T) {
 
 	// Same API as local: the address points at another node.
 	w, _ := watcher(t, a)
-	if err := w.Send(e, &testpb.Ping{N: 1}); err != nil {
+	if err := e.Send(w.Context(), w, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	_ = col
@@ -190,7 +190,7 @@ func TestRemoteByPIDAndName(t *testing.T) {
 	}
 	// A typed call from inside a process, reply type explicit, request inferred.
 	_, err = a.Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
-		r, err := p.Call[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 99})
+		r, err := e.Call[*testpb.Pong](ctx(t), p, &testpb.Ping{N: 99})
 		if err != nil || r.N != 100 {
 			t.Errorf("process call: %v %v", r, err)
 		}
@@ -264,7 +264,7 @@ func TestRemoteOrdering(t *testing.T) {
 	const N = 20000
 	_, _ = a.Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
 		for i := range N {
-			if err := p.Send(col, proto.Message(&testpb.Ping{N: int64(i)})); err != nil {
+			if err := col.Send(p.Context(), p, &testpb.Ping{N: int64(i)}); err != nil {
 				return err
 			}
 		}
@@ -287,9 +287,9 @@ func TestMonitorReasons(t *testing.T) {
 		kill   func(e grpcproc.Addr[*testpb.Ping])
 		reason string
 	}{
-		{"normal", func(e grpcproc.Addr[*testpb.Ping]) { _ = w.Send(e, &testpb.Ping{N: 0}) }, grpcproc.ReasonNormal},
-		{"error", func(e grpcproc.Addr[*testpb.Ping]) { _ = w.Send(e, &testpb.Ping{N: -100}) }, "boom"},
-		{"panic", func(e grpcproc.Addr[*testpb.Ping]) { _ = w.Send(e, &testpb.Ping{N: -200}) }, "panic: kaboom"},
+		{"normal", func(e grpcproc.Addr[*testpb.Ping]) { _ = e.Send(w.Context(), w, &testpb.Ping{N: 0}) }, grpcproc.ReasonNormal},
+		{"error", func(e grpcproc.Addr[*testpb.Ping]) { _ = e.Send(w.Context(), w, &testpb.Ping{N: -100}) }, "boom"},
+		{"panic", func(e grpcproc.Addr[*testpb.Ping]) { _ = e.Send(w.Context(), w, &testpb.Ping{N: -200}) }, "panic: kaboom"},
 		{"exit", func(e grpcproc.Addr[*testpb.Ping]) { _ = w.Exit(e, grpcproc.ReasonKilled) }, grpcproc.ReasonKilled},
 	}
 	for _, tc := range cases {
@@ -297,7 +297,7 @@ func TestMonitorReasons(t *testing.T) {
 			e, _ := b.Spawn(echo)
 			ref := w.Monitor(e)
 			// A call round-trips on the same link, so the monitor is installed first.
-			if _, err := w.Call[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); err != nil {
+			if _, err := e.Call[*testpb.Pong](ctx(t), w, &testpb.Ping{N: 1}); err != nil {
 				t.Fatal(err)
 			}
 			tc.kill(e)
@@ -326,10 +326,10 @@ func TestMonitorReasons(t *testing.T) {
 	t.Run("by name", func(t *testing.T) {
 		e, _ := b.Spawn(echo, grpcproc.WithName("named"))
 		ref := w.Monitor(grpcproc.Name{Node: "b", Name: "named"})
-		if _, err := w.Call[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); err != nil {
+		if _, err := e.Call[*testpb.Pong](ctx(t), w, &testpb.Ping{N: 1}); err != nil {
 			t.Fatal(err)
 		}
-		_ = w.Send(e, &testpb.Ping{N: 0})
+		_ = e.Send(w.Context(), w, &testpb.Ping{N: 0})
 		if m := recv(t, ch); m.Down == nil || m.Down.Ref != ref || m.Down.PID != e.PID() || m.Down.Name != "named" {
 			t.Fatalf("got %+v", m.Down)
 		}
@@ -337,7 +337,7 @@ func TestMonitorReasons(t *testing.T) {
 	t.Run("by name, node lost", func(t *testing.T) {
 		e, _ := b.Spawn(echo, grpcproc.WithName("lost"))
 		ref := w.Monitor(grpcproc.Name{Node: "b", Name: "lost"})
-		if _, err := w.Call[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); err != nil {
+		if _, err := e.Call[*testpb.Pong](ctx(t), w, &testpb.Ping{N: 1}); err != nil {
 			t.Fatal(err)
 		}
 		a.Disconnect("b")
@@ -387,7 +387,7 @@ func TestDemonitor(t *testing.T) {
 				waitWatchers(t, target, e.PID(), 1)
 				w.Demonitor(ref)
 				waitWatchers(t, target, e.PID(), 0)
-				_ = w.Send(e, &testpb.Ping{N: 0}) // echo exits on 0
+				_ = e.Send(w.Context(), w, &testpb.Ping{N: 0}) // echo exits on 0
 				select {
 				case m := <-ch:
 					t.Fatalf("unexpected %+v", m)
@@ -476,7 +476,7 @@ func TestPartitionAndHeal(t *testing.T) {
 	w, ch := watcher(t, a)
 	e, _ := b.Spawn(echo, grpcproc.WithName("echo"))
 	w.Monitor(e)
-	if _, err := w.Call[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); err != nil {
+	if _, err := e.Call[*testpb.Pong](ctx(t), w, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	c.Partition("a", "b")
@@ -506,7 +506,7 @@ func TestGracefulStopSendsShutdown(t *testing.T) {
 	w, ch := watcher(t, a)
 	e, _ := b.Spawn(echo)
 	w.Monitor(e)
-	if _, err := w.Call[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); err != nil {
+	if _, err := e.Call[*testpb.Pong](ctx(t), w, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	c.Stop("b")
@@ -613,7 +613,7 @@ func TestMetadataPropagates(t *testing.T) {
 	c := grpcproctest.New(t, "a", "b")
 	a, b := c.Node("a"), c.Node("b")
 	col, ch := collector(t, b)
-	if err := a.Send(grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"trace": "abc"}), col, proto.Message(&testpb.Ping{})); err != nil {
+	if err := col.Send(grpcproc.WithMetadata(t.Context(), grpcproc.Metadata{"trace": "abc"}), a, &testpb.Ping{}); err != nil {
 		t.Fatal(err)
 	}
 	if m := recv(t, ch); m.Metadata["trace"] != "abc" {
@@ -628,7 +628,7 @@ func BenchmarkLocalCall(b *testing.B) {
 	a := c.Node("a")
 	e, _ := a.Spawn(echo)
 	for b.Loop() {
-		if _, err := a.Call[*testpb.Pong](b.Context(), e, &testpb.Ping{N: 1}); err != nil {
+		if _, err := e.Call[*testpb.Pong](b.Context(), a, &testpb.Ping{N: 1}); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -638,9 +638,9 @@ func BenchmarkRemoteCall(b *testing.B) {
 	c := grpcproctest.New(b, "a", "b")
 	a := c.Node("a")
 	e, _ := c.Node("b").Spawn(echo)
-	_, _ = a.Call[*testpb.Pong](b.Context(), e, &testpb.Ping{N: 1}) // establish the link
+	_, _ = e.Call[*testpb.Pong](b.Context(), a, &testpb.Ping{N: 1}) // establish the link
 	for b.Loop() {
-		if _, err := a.Call[*testpb.Pong](b.Context(), e, &testpb.Ping{N: 1}); err != nil {
+		if _, err := e.Call[*testpb.Pong](b.Context(), a, &testpb.Ping{N: 1}); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -650,10 +650,10 @@ func BenchmarkRemoteCallParallel(b *testing.B) {
 	c := grpcproctest.New(b, "a", "b")
 	a := c.Node("a")
 	e, _ := c.Node("b").Spawn(echo)
-	_, _ = a.Call[*testpb.Pong](b.Context(), e, &testpb.Ping{N: 1})
+	_, _ = e.Call[*testpb.Pong](b.Context(), a, &testpb.Ping{N: 1})
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			if _, err := a.Call[*testpb.Pong](b.Context(), e, &testpb.Ping{N: 1}); err != nil {
+			if _, err := e.Call[*testpb.Pong](b.Context(), a, &testpb.Ping{N: 1}); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -680,11 +680,11 @@ func benchSend(b *testing.B, from, to *grpcproc.Node) {
 		b.Fatal(err)
 	}
 	msg := &testpb.Ping{}
-	_ = from.Send(b.Context(), addr, msg) // establish the link before timing
+	_ = addr.Send(b.Context(), from, msg) // establish the link before timing
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		if err := from.Send(b.Context(), addr, msg); err != nil {
+		if err := addr.Send(b.Context(), from, msg); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -718,7 +718,7 @@ func TestBusyMeasuresTheCurrentMessage(t *testing.T) {
 		}
 	})
 	time.Sleep(300 * time.Millisecond) // old, but idle
-	_ = a.Send(t.Context(), p, &testpb.Ping{N: 1})
+	_ = p.Send(t.Context(), a, &testpb.Ping{N: 1})
 	time.Sleep(20 * time.Millisecond)
 	short, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 	defer cancel()
@@ -775,7 +775,7 @@ func TestContextBoundsTheDial(t *testing.T) {
 	})}, "a", "b")
 	a := c.Node("a")
 	sink, got := collector(t, c.Node("b"))
-	ping := func(ctx context.Context, n int64) error { return a.Send(ctx, sink, proto.Message(&testpb.Ping{N: n})) }
+	ping := func(ctx context.Context, n int64) error { return sink.Send(ctx, a, &testpb.Ping{N: n}) }
 
 	// A sender whose ctx is already done does not start a dial.
 	done, cancel := context.WithCancel(t.Context())
@@ -905,7 +905,7 @@ func TestReplyToAnEarlierIncarnationIsDropped(t *testing.T) {
 	}
 
 	go func() {
-		_, _ = c.Node("b").Call[*testpb.Ping](context.Background(), grpcproc.Named[*testpb.Ping]("a", "hold"), &testpb.Ping{})
+		_, _ = grpcproc.Named[*testpb.Ping]("a", "hold").Call[*testpb.Ping](context.Background(), c.Node("b"), &testpb.Ping{})
 	}()
 	<-held
 	c.Kill("b")
@@ -916,7 +916,7 @@ func TestReplyToAnEarlierIncarnationIsDropped(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	go func() {
-		_, err := b.Call[*testpb.Ping](ctx, grpcproc.Named[*testpb.Ping]("a", "x"), &testpb.Ping{N: 1})
+		_, err := grpcproc.Named[*testpb.Ping]("a", "x").Call[*testpb.Ping](ctx, b, &testpb.Ping{N: 1})
 		pending <- err
 	}()
 	<-received
@@ -925,7 +925,7 @@ func TestReplyToAnEarlierIncarnationIsDropped(t *testing.T) {
 		t.Fatalf("the stale reply was not sent: %v", err)
 	}
 	// A reply sent after the stale one reaches b after it, on the same link.
-	if _, err := b.Call[*testpb.Ping](t.Context(), grpcproc.Named[*testpb.Ping]("a", "x"), &testpb.Ping{N: 2}); err != nil {
+	if _, err := grpcproc.Named[*testpb.Ping]("a", "x").Call[*testpb.Ping](t.Context(), b, &testpb.Ping{N: 2}); err != nil {
 		t.Fatal(err)
 	}
 	select {

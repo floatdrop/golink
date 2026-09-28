@@ -188,7 +188,7 @@ func TestStartAndStopChild(t *testing.T) {
 		}
 		pool = append(pool, pid)
 	}
-	_ = n.Send(t.Context(), grpcproc.AddrOf[*testpb.Ping](pool[0]), &testpb.Ping{N: -1}) // temporary: gone for good
+	_ = grpcproc.AddrOf[*testpb.Ping](pool[0]).Send(t.Context(), n, &testpb.Ping{N: -1}) // temporary: gone for good
 	until(t, "the supervisor forgets its temporary child", func() bool { return len(children(t, n, sup)) == 2 })
 
 	// A transient one comes back after a crash, and is forgotten after a
@@ -197,7 +197,7 @@ func TestStartAndStopChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = n.Send(t.Context(), grpcproc.AddrOf[*testpb.Ping](trans), &testpb.Ping{N: -1})
+	_ = grpcproc.AddrOf[*testpb.Ping](trans).Send(t.Context(), n, &testpb.Ping{N: -1})
 	until(t, "the transient child restarts", func() bool {
 		for _, v := range children(t, n, sup) {
 			if strings.Contains(v, "restarts=1") {

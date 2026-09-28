@@ -38,7 +38,7 @@ func TestPartitionWhileANodeStops(t *testing.T) {
 			called := make(chan error, 1)
 			if _, err := a.Spawn(func(p *grpcproc.Process[proto.Message]) error {
 				p.Monitor(echo)
-				_, err := p.Call[*testpb.Ping](context.Background(), echo, &testpb.Ping{N: int64(i)})
+				_, err := echo.Call[*testpb.Ping](context.Background(), p, &testpb.Ping{N: int64(i)})
 				called <- err
 				m, err := p.Receive()
 				if err != nil {

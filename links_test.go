@@ -46,8 +46,8 @@ func TestLinkEndsTheLinker(t *testing.T) {
 		name, reason string
 		end          func(grpcproc.Addr[*testpb.Ping])
 	}{
-		{"normal", grpcproc.ReasonNormal, func(e grpcproc.Addr[*testpb.Ping]) { _ = a.Send(ctx(t), e, &testpb.Ping{N: 0}) }},
-		{"error", "boom", func(e grpcproc.Addr[*testpb.Ping]) { _ = a.Send(ctx(t), e, &testpb.Ping{N: -100}) }},
+		{"normal", grpcproc.ReasonNormal, func(e grpcproc.Addr[*testpb.Ping]) { _ = e.Send(ctx(t), a, &testpb.Ping{N: 0}) }},
+		{"error", "boom", func(e grpcproc.Addr[*testpb.Ping]) { _ = e.Send(ctx(t), a, &testpb.Ping{N: -100}) }},
 		{"exit", "closing", func(e grpcproc.Addr[*testpb.Ping]) { _ = a.Exit(ctx(t), e, "closing") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -73,7 +73,7 @@ func TestLinkIsOneWay(t *testing.T) {
 	if got := reason(); got != "bye" {
 		t.Fatal(got)
 	}
-	if resp, err := a.Call[*testpb.Pong](ctx(t), target, &testpb.Ping{N: 1}); err != nil || resp.GetN() != 2 {
+	if resp, err := target.Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 1}); err != nil || resp.GetN() != 2 {
 		t.Fatalf("the target went with its linker: %v, %v", resp, err)
 	}
 }
@@ -89,7 +89,7 @@ func TestTrapExit(t *testing.T) {
 		t.Fatal("not trapping, or a parent for a process Node.Spawn started")
 	}
 	p.Link(target)
-	_ = a.Send(ctx(t), target, &testpb.Ping{N: -100})
+	_ = target.Send(ctx(t), a, &testpb.Ping{N: -100})
 	m := recv(t, ch)
 	if m.Exited == nil || m.From != target.PID() || *m.Exited != (grpcproc.Exited{PID: target.PID(), Reason: "boom"}) {
 		t.Fatalf("got %+v", m)
@@ -132,7 +132,7 @@ func TestLinkByName(t *testing.T) {
 	p.SetTrapExit(true)
 	p.Link(grpcproc.Named[*testpb.Ping]("a", "echo"))
 	waitWatchers(t, a, target.PID(), 1)
-	_ = a.Send(ctx(t), target, &testpb.Ping{N: 0})
+	_ = target.Send(ctx(t), a, &testpb.Ping{N: 0})
 	if m := recv(t, ch); m.Exited == nil || *m.Exited != (grpcproc.Exited{PID: target.PID(), Name: "echo", Reason: grpcproc.ReasonNormal}) {
 		t.Fatalf("got %+v", m)
 	}
@@ -164,9 +164,9 @@ func TestLinkOnceAndUnlink(t *testing.T) {
 	// receives next is what the test sends it once the target is gone.
 	obs, downs := watcher(t, a)
 	obs.Monitor(target)
-	_ = a.Send(ctx(t), target, &testpb.Ping{N: -100})
+	_ = target.Send(ctx(t), a, &testpb.Ping{N: -100})
 	recv(t, downs)
-	_ = a.Send(ctx(t), grpcproc.AddrOf[proto.Message](p.PID()), proto.Message(&testpb.Pong{N: 7}))
+	_ = grpcproc.AddrOf[proto.Message](p.PID()).Send(ctx(t), a, &testpb.Pong{N: 7})
 	if m := recv(t, ch); m.Body == nil {
 		t.Fatalf("an Exited after Unlink: %+v", m)
 	}
@@ -181,7 +181,7 @@ func TestLinkAcrossNodes(t *testing.T) {
 	p, _, reason := observed(t, a)
 	p.Link(target)
 	waitWatchers(t, b, target.PID(), 1)
-	_ = a.Send(ctx(t), target, &testpb.Ping{N: -100})
+	_ = target.Send(ctx(t), a, &testpb.Ping{N: -100})
 	if got := reason(); got != "boom" {
 		t.Fatal(got)
 	}
@@ -256,7 +256,7 @@ func TestSpawnLinks(t *testing.T) {
 		if info, _ := a.Process(p.PID()); info.Links != 1 || info.Monitors != 1 || info.Watchers != 1 {
 			t.Fatalf("parent %+v", info)
 		}
-		_ = a.Send(ctx(t), child, &testpb.Ping{N: -100})
+		_ = child.Send(ctx(t), a, &testpb.Ping{N: -100})
 		var down, exit bool
 		for range 2 {
 			switch m := recv(t, ch); {
@@ -297,7 +297,7 @@ func TestLinkAcrossNodesByNameAndToNothing(t *testing.T) {
 	p.SetTrapExit(true)
 	p.Link(grpcproc.Name{Node: "b", Name: "echo"})
 	waitWatchers(t, b, target.PID(), 1)
-	_ = a.Send(ctx(t), target, &testpb.Ping{N: 0})
+	_ = target.Send(ctx(t), a, &testpb.Ping{N: 0})
 	if m := recv(t, ch); m.Exited == nil || *m.Exited != (grpcproc.Exited{PID: target.PID(), Name: "echo", Reason: grpcproc.ReasonNormal}) {
 		t.Fatalf("by name: %+v", m)
 	}
@@ -337,12 +337,12 @@ func TestTrapExitToggles(t *testing.T) {
 	first, second := spawnEcho(t, a), spawnEcho(t, a)
 	p.Link(first)
 	p.Link(second)
-	_ = a.Send(ctx(t), first, &testpb.Ping{N: 0})
+	_ = first.Send(ctx(t), a, &testpb.Ping{N: 0})
 	if m := recv(t, ch); m.Exited == nil || m.Exited.PID != first.PID() {
 		t.Fatalf("trapping: %+v", m)
 	}
 	p.SetTrapExit(false)
-	_ = a.Send(ctx(t), second, &testpb.Ping{N: -100})
+	_ = second.Send(ctx(t), a, &testpb.Ping{N: -100})
 	if got := reason(); got != "boom" {
 		t.Fatal(got)
 	}
@@ -369,7 +369,7 @@ func TestOnReceiveSeesExited(t *testing.T) {
 	p, _ := watcher(t, a)
 	p.SetTrapExit(true)
 	p.Link(target)
-	_ = a.Send(ctx(t), target, &testpb.Ping{N: -100})
+	_ = target.Send(ctx(t), a, &testpb.Ping{N: -100})
 	if e := within(t, h.seen, "Exited"); e.PID != target.PID() || e.Reason != "boom" {
 		t.Fatalf("got %+v", e)
 	}

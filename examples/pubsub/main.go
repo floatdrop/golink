@@ -80,7 +80,7 @@ func main() {
 
 	// Three reservations before anyone listens: the topic keeps the last two.
 	for range 3 {
-		_, err := shop.Call[*shoppb.Reserved](ctx, reserve, &shoppb.Reserve{Sku: "apple", Qty: 1})
+		_, err := reserve.Call[*shoppb.Reserved](ctx, shop, &shoppb.Reserve{Sku: "apple", Qty: 1})
 		check(err)
 	}
 
@@ -91,7 +91,7 @@ func main() {
 	<-subscribed
 
 	// What is published from now on reaches it as it happens.
-	_, err = shop.Call[*shoppb.Reserved](ctx, reserve, &shoppb.Reserve{Sku: "apple", Qty: 2})
+	_, err = reserve.Call[*shoppb.Reserved](ctx, shop, &shoppb.Reserve{Sku: "apple", Qty: 2})
 	check(err)
 
 	// The topic is inventory's: when inventory exits, the dashboard learns

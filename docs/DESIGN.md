@@ -51,8 +51,8 @@ addr, _ := node.Spawn[*orderspb.OrderMsg](func(p *grpcproc.Process[*orderspb.Ord
 }, grpcproc.WithName("reservations"), grpcproc.WithLabel("order"))
 
 ref := p.Monitor(grpcproc.Name{Node: "billing-2", Name: "ledger"})
-p.Send(addr, &orderspb.OrderMsg{Kind: &orderspb.OrderMsg_Reserve{}})     // compile-time typed
-resp, err := node.Call[*orderspb.Reserved](ctx, addr, &orderspb.OrderMsg{}) // reply typed by R
+addr.Send(ctx, p, &orderspb.OrderMsg{Kind: &orderspb.OrderMsg_Reserve{}})   // compile-time typed
+resp, err := addr.Call[*orderspb.Reserved](ctx, node, &orderspb.OrderMsg{}) // reply typed by R
 ```
 
 ## Package layout
@@ -276,13 +276,15 @@ func (m Msg[M]) Context(parent context.Context) (context.Context, context.Cancel
 
 | `M` | Send site | Use |
 |---|---|---|
-| a generated oneof wrapper, `*orderspb.OrderMsg` | `p.Send(a, &orderspb.OrderMsg{Kind: …})` | one contract per process, visible in the `.proto` |
-| your own marker interface, `OrderMsg interface{ proto.Message; orderMsg() }` | `p.Send[OrderMsg](a, &orderspb.Reserve{})` | several generated types, no wrapper, one extra method each |
+| a generated oneof wrapper, `*orderspb.OrderMsg` | `a.Send(ctx, p, &orderspb.OrderMsg{Kind: …})` | one contract per process, visible in the `.proto` |
+| your own marker interface, `OrderMsg interface{ proto.Message; orderMsg() }` | `a.Send(ctx, p, &orderspb.Reserve{})` | several generated types, no wrapper, one extra method each |
 | `proto.Message` | `p.SendTo(a, anything)` | the untyped process |
 
-With an interface `M`, the send names it: Go infers `N` from the address and
-from the message alike, and they differ. That is why the examples use a
-oneof.
+A typed send or call goes through the address, whose `M` fixes the type: a
+message of any type that implements it goes as it is. The Node and the
+Process have only the untyped `SendTo` and `CallTo`, for a PID or a `Msg`'s
+`From`; typed methods of their own, which were a second way to write every
+send, went, so that there is one.
 
 `Addr.Call` and `Addr.Send` take the sender as an argument, a `Caller`: the
 `*Node` or a `*Process`. A contract package uses them to write its protocol
@@ -301,7 +303,8 @@ reserved, err := stock.Reserve(ctx, p, &Reserve{Sku: "apple", Qty: 2}) // p, or 
 ```
 
 `Caller` has one unexported method, because an interface cannot declare a
-generic one: `Node.Call` and `Process.Call` make no common method set. The
+generic one: a `*Node` and a `*Process` could share no `Call[R]`, so the
+address calls, and takes the sender. The
 sender is an argument, not bound into the address, because who sends matters:
 a process's call carries the metadata of the message it is handling and
 shows the process waiting on a reply, and an actor keeps its addresses in

@@ -90,7 +90,7 @@ func healthy(t *testing.T, n *Node) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	if r, err := n.Call[*testpb.Pong](ctx, e, &testpb.Ping{N: 1}); err != nil || r.GetN() != 2 {
+	if r, err := e.Call[*testpb.Pong](ctx, n, &testpb.Ping{N: 1}); err != nil || r.GetN() != 2 {
 		t.Fatalf("call after the frame: %v %v", r, err)
 	}
 	if err := n.Stop(ctx); err != nil {

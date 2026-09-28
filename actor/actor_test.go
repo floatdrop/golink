@@ -141,21 +141,21 @@ func TestRunLifecycle(t *testing.T) {
 	}
 	downs := watch(t, n, addr)
 	for range 3 {
-		_ = n.Send(t.Context(), addr, &testpb.Ping{N: 1})
+		_ = addr.Send(t.Context(), n, &testpb.Ping{N: 1})
 	}
-	if r, err := n.Call[*testpb.Pong](t.Context(), addr, &testpb.Ping{}); err != nil || r.GetN() != 3 {
+	if r, err := addr.Call[*testpb.Pong](t.Context(), n, &testpb.Ping{}); err != nil || r.GetN() != 3 {
 		t.Fatalf("call: %v %v", r, err)
 	}
 	// An error from HandleCall goes to the caller; the actor carries on.
-	if _, err := n.Call[*testpb.Pong](t.Context(), addr, &testpb.Ping{N: -1}); err == nil || err.Error() != "bad call" {
+	if _, err := addr.Call[*testpb.Pong](t.Context(), n, &testpb.Ping{N: -1}); err == nil || err.Error() != "bad call" {
 		t.Fatalf("call error: %v", err)
 	}
 	// A deferred reply, from another goroutine.
-	if r, err := n.Call[*testpb.Pong](t.Context(), addr, &testpb.Ping{N: -4}); err != nil || r.GetN() != 42 {
+	if r, err := addr.Call[*testpb.Pong](t.Context(), n, &testpb.Ping{N: -4}); err != nil || r.GetN() != 42 {
 		t.Fatalf("deferred: %v %v", r, err)
 	}
 	// ErrStop from a call replies first, then stops normally.
-	if r, err := n.Call[*testpb.Pong](t.Context(), addr, &testpb.Ping{N: -2}); err != nil || r.GetN() != 3 {
+	if r, err := addr.Call[*testpb.Pong](t.Context(), n, &testpb.Ping{N: -2}); err != nil || r.GetN() != 3 {
 		t.Fatalf("stop call: %v %v", r, err)
 	}
 	if d := down(t, downs); d.Reason != grpcproc.ReasonNormal {
@@ -173,9 +173,9 @@ func TestRunExits(t *testing.T) {
 		reason string
 		log    string
 	}{
-		{"message error", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Send(t.Context(), a, &testpb.Ping{N: -1}) }, "bad message", "init; terminate: bad message"},
-		{"stop", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Send(t.Context(), a, &testpb.Ping{N: -2}) }, grpcproc.ReasonNormal, "init; terminate"},
-		{"panic", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Send(t.Context(), a, &testpb.Ping{N: -3}) }, "panic: kaboom", "init; terminate: panic: kaboom"},
+		{"message error", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = a.Send(t.Context(), n, &testpb.Ping{N: -1}) }, "bad message", "init; terminate: bad message"},
+		{"stop", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = a.Send(t.Context(), n, &testpb.Ping{N: -2}) }, grpcproc.ReasonNormal, "init; terminate"},
+		{"panic", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = a.Send(t.Context(), n, &testpb.Ping{N: -3}) }, "panic: kaboom", "init; terminate: panic: kaboom"},
 		{"exit", func(n *grpcproc.Node, a grpcproc.Addr[*testpb.Ping]) { _ = n.Exit(t.Context(), a, "bye") }, "bye", "init; terminate: grpcproc: exit: bye"},
 	}
 	for _, tc := range cases {
@@ -230,7 +230,7 @@ func TestDownsAndOptionalInterfaces(t *testing.T) {
 	// Without a CallHandler, calls are answered with an error.
 	seen := make(chan int64, 4)
 	pa, _ := n.Spawn(actor.Run[*testpb.Ping](plain{seen: seen}))
-	if _, err := n.Call[*testpb.Pong](t.Context(), pa, &testpb.Ping{}); err == nil || !strings.Contains(err.Error(), "does not handle calls") {
+	if _, err := pa.Call[*testpb.Pong](t.Context(), n, &testpb.Ping{}); err == nil || !strings.Contains(err.Error(), "does not handle calls") {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -254,7 +254,7 @@ func TestPlainIgnoresDowns(t *testing.T) {
 	pa, _ := n.Spawn(actor.Run[*testpb.Ping](&monitoringPlain{plain: plain{seen: seen}, target: target}))
 	_ = n.Exit(t.Context(), target, "gone")
 	time.Sleep(20 * time.Millisecond)
-	_ = n.Send(t.Context(), pa, &testpb.Ping{N: 9})
+	_ = pa.Send(t.Context(), n, &testpb.Ping{N: 9})
 	if got := <-seen; got != 9 {
 		t.Fatal(got) // the Down was skipped, the process is alive
 	}
@@ -304,10 +304,10 @@ func TestCallsOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A plain send is dropped with a warning; the actor carries on.
-	if err := n.Send(t.Context(), addr, &testpb.Ping{N: 1}); err != nil {
+	if err := addr.Send(t.Context(), n, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
-	r, err := n.Call[*testpb.Pong](t.Context(), addr, &testpb.Ping{N: 2})
+	r, err := addr.Call[*testpb.Pong](t.Context(), n, &testpb.Ping{N: 2})
 	if err != nil || r.GetN() != 3 {
 		t.Fatalf("%v %v", r, err)
 	}

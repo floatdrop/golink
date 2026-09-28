@@ -679,37 +679,15 @@ func (n *Node) lookup(pid PID, name string) *proc {
 
 // ---------- messaging from outside a process ----------
 
-// Send delivers m to a typed address, local or remote, with the node as
-// sender and the metadata carried by ctx. It returns once m is queued; ctx
-// bounds only the wait for a connection to a peer this node has no link to
-// yet, and while dials to the peer are failing it does not wait at all (see
-// Config.DialBackoff). Sending to a process that does not exist is not an
-// error (it is a dead letter); an error means m could not be encoded, the
-// node could not be reached, or ctx ended first.
-func (n *Node) Send[N proto.Message](ctx context.Context, to Addr[N], m N) error {
-	return n.send(ctx, n.PID(), nil, to.dest(), m, MetadataFrom(ctx))
-}
-
-// SendTo delivers m to an untyped target: a PID, a Name, or an Addr of
-// another type. The target's type is checked on delivery only.
+// SendTo delivers m from the node to an untyped target: a PID, a Name, or an
+// Addr of another type, as Addr.Send does to a typed one. The target's type
+// is checked on delivery only.
 func (n *Node) SendTo(ctx context.Context, to Target, m proto.Message) error {
 	return n.send(ctx, n.PID(), nil, destOf(to), m, MetadataFrom(ctx))
 }
 
-// Call sends req to a typed address and waits for the reply, typed as R:
-//
-//	resp, err := node.Call[*orderspb.Reserved](ctx, addr, &orderspb.Order{…})
-//
-// A reply of another type is ErrType; a handler error is a *RemoteError; a
-// callee that is gone, or exits before answering, is ErrNoProc; a peer that
-// cannot be reached is a *LinkError, whose Unsent says that req never left.
-// If ctx ends first, Call returns its error, and req may have been handled;
-// a ctx already done sends nothing.
-func (n *Node) Call[R, N proto.Message](ctx context.Context, to Addr[N], req N) (R, error) {
-	return typed[R](n.doCall(ctx, n.PID(), nil, to.dest(), req, MetadataFrom(ctx)))
-}
-
-// CallTo is Call to an untyped target.
+// CallTo calls an untyped target from the node, as Addr.Call does a typed
+// one, and types the reply as R.
 func (n *Node) CallTo[R proto.Message](ctx context.Context, to Target, req proto.Message) (R, error) {
 	return typed[R](n.doCall(ctx, n.PID(), nil, destOf(to), req, MetadataFrom(ctx)))
 }
@@ -962,9 +940,10 @@ func (n *Node) exit(ctx context.Context, from PID, to Target, reason string) err
 }
 
 // route queues env on the link to node, dialing it if needed. ctx bounds the
-// wait for the dial. Everything but Node.Send, Node.SendTo, Node.Exit and
-// calls passes context.Background(): replies, monitors, Downs, process sends
-// and exits, and timers wait for the dial, which Config.DialTimeout bounds.
+// wait for the dial. Sends through an address, the node's SendTo and Exit,
+// and calls pass their caller's ctx; everything else passes
+// context.Background(): replies, monitors, Downs, a process's SendTo and
+// Exit, and timers wait for the dial, which Config.DialTimeout bounds.
 // While dials to node are backed off, route fails at once.
 func (n *Node) route(ctx context.Context, node string, env *grpcprocv1.Envelope) error {
 	if node == "" {

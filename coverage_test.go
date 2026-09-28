@@ -269,7 +269,7 @@ func TestProcessSendReplyAndMonitorVariants(t *testing.T) {
 	done := make(chan struct{})
 	_, _ = a.Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
 		defer close(done)
-		if err := p.Send(col, proto.Message(&testpb.Ping{N: 1})); err != nil {
+		if err := col.Send(p.Context(), p, &testpb.Ping{N: 1}); err != nil {
 			return err
 		}
 		// CallTo from a process, to an untyped target.

@@ -182,8 +182,8 @@ func (m Msg[M]) Deadline() (deadline time.Time, ok bool) {
 }
 
 // Context returns a context for code run on behalf of the message: it
-// carries the message's metadata, for Node.Send, a Call, or any code taking
-// a ctx, and for a call with a Deadline it ends then, when nobody waits for
+// carries the message's metadata, for a send, a call, or any code taking a
+// ctx, and for a call with a Deadline it ends then, when nobody waits for
 // the reply any more. Call cancel once that code is done, as with
 // context.WithDeadline.
 func (m Msg[M]) Context(parent context.Context) (context.Context, context.CancelFunc) {
@@ -406,31 +406,18 @@ func toMsg[M proto.Message](taker *proc, it item) Msg[M] {
 	return m
 }
 
-// Send delivers m to a typed address, local or remote. It carries the
-// metadata of the message the process is handling. A first send to a node
-// with no link yet waits for the dial, up to Config.DialTimeout, unless dials
-// to it are failing (Config.DialBackoff). See Node.Send.
-func (p *Process[M]) Send[N proto.Message](to Addr[N], m N) error {
-	return p.n.send(context.Background(), p.pid, p.proc, to.dest(), m, p.outgoing(nil))
-}
-
-// SendTo delivers msg to an untyped target such as a Msg's From. The
-// target's type is checked on delivery only.
+// SendTo delivers msg from the process to an untyped target, such as a Msg's
+// From, as Addr.Send does to a typed one, carrying the metadata of the
+// message the process is handling. A first send to a node with no link yet
+// waits for the dial, up to Config.DialTimeout, unless dials to it are
+// failing (Config.DialBackoff). The target's type is checked on delivery
+// only.
 func (p *proc) SendTo(to Target, msg proto.Message) error {
 	return p.n.send(context.Background(), p.pid, p, destOf(to), msg, p.outgoing(nil))
 }
 
-// Call sends req and waits for the Reply, typed as R:
-//
-//	resp, err := p.Call[*orderspb.Reserved](ctx, addr, &orderspb.Order{…})
-//
-// Replies do not pass through the mailbox, so calling from inside a process
-// never reorders its messages. Errors are as for Node.Call.
-func (p *Process[M]) Call[R, N proto.Message](ctx context.Context, to Addr[N], req N) (R, error) {
-	return typed[R](p.n.doCall(ctx, p.pid, p.proc, to.dest(), req, p.outgoing(MetadataFrom(ctx))))
-}
-
-// CallTo is Call to an untyped target, such as a Msg's From.
+// CallTo calls an untyped target, such as a Msg's From, from the process, as
+// Addr.Call does a typed one, and types the reply as R.
 func (p *Process[M]) CallTo[R proto.Message](ctx context.Context, to Target, req proto.Message) (R, error) {
 	return typed[R](p.n.doCall(ctx, p.pid, p.proc, destOf(to), req, p.outgoing(MetadataFrom(ctx))))
 }

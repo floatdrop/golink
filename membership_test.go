@@ -91,7 +91,7 @@ func TestMembershipDropsLinks(t *testing.T) {
 		}
 	})
 	w.Monitor(silent)
-	if _, err := w.Call[*testpb.Pong](ctx(t), mustEcho(t, b), &testpb.Ping{N: 1}); err != nil {
+	if _, err := mustEcho(t, b).Call[*testpb.Pong](ctx(t), w, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	inc := b.ID().Incarnation
@@ -122,13 +122,13 @@ func TestMembershipDropsLinks(t *testing.T) {
 	}
 
 	// b is seen again as a new incarnation while a still links to the old one.
-	if _, err := a.Call[*testpb.Pong](ctx(t), mustEcho(t, b), &testpb.Ping{N: 1}); err != nil {
+	if _, err := mustEcho(t, b).Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: inc + 1}, Up: true}
 	waitNoPeer(t, a, "b")
 	// The b a linked with is now an old incarnation.
-	if _, err := a.Call[*testpb.Pong](ctx(t), mustEcho(t, b), &testpb.Ping{N: 1}); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("b#%d is an old incarnation", inc)) {
+	if _, err := mustEcho(t, b).Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 1}); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("b#%d is an old incarnation", inc)) {
 		t.Fatalf("a calls the old b: %v", err)
 	}
 
@@ -181,7 +181,7 @@ func TestRegistrarLifecycle(t *testing.T) {
 	e, _ := a.Spawn(echo)
 	w, ch := watcher(t, b)
 	w.Monitor(e)
-	if _, err := w.Call[*testpb.Pong](ctx(t), e, &testpb.Ping{N: 1}); err != nil {
+	if _, err := e.Call[*testpb.Pong](ctx(t), w, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	var procsAtWithdraw int

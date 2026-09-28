@@ -96,7 +96,7 @@ export const guidesBlockingIO: Doc = {
 						the metadata of whatever message the process is handling at that moment, so a trace
 						would tie a line from the socket to an unrelated request; and a <C>Call</C> made there
 						shows the process as waiting on a reply while its own goroutine may be idle. The reader
-						in the example sends as the node instead, <C>node.Send(ctx, self, …)</C>: the message
+						in the example sends as the node instead, <C>self.Send(ctx, node, …)</C>: the message
 						comes from the node's own PID and carries nobody's metadata.
 					</p>
 				</>
@@ -133,8 +133,8 @@ export const guidesBlockingIO: Doc = {
 			body: (
 				<>
 					<p>
-						Code outside any process reaches processes through the node: <C>Node.Send</C> and{' '}
-						<C>Node.Call</C>, or an address's methods with the node as the sender, work from any
+						Code outside any process reaches processes with the node as the sender: an address's{' '}
+						<C>Send</C> and <C>Call</C>, or the node's <C>SendTo</C> and <C>CallTo</C>, work from any
 						goroutine. An HTTP or gRPC handler is such code. It calls the process that does the work
 						and writes the answer, with the request's context bounding the wait, and needs no process
 						of its own; <A to="shop/services/#edge">the shop's web front</A> does exactly that. A

@@ -108,10 +108,10 @@ func TestTraceChainsAcrossProcessesAndNodes(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return p.Send(sink, m.Body)
+		return sink.Send(p.Context(), p, m.Body)
 	}, grpcproc.WithLabel("relay"))
 
-	if err := a.Send(t.Context(), relay, &testpb.Ping{N: 1}); err != nil {
+	if err := relay.Send(t.Context(), a, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	var fromHandler trace.SpanContext
@@ -167,10 +167,10 @@ func TestCallSpansAndDuration(t *testing.T) {
 	a := c.Node("a")
 	ep, _ := a.Spawn(echo, grpcproc.WithLabel("echo"))
 	caller, _ := a.Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
-		if _, err := p.Call[*testpb.Pong](t.Context(), ep, &testpb.Ping{N: 1}); err != nil {
+		if _, err := ep.Call[*testpb.Pong](t.Context(), p, &testpb.Ping{N: 1}); err != nil {
 			return err
 		}
-		_, err := p.Call[*testpb.Pong](t.Context(), ep, &testpb.Ping{N: -1})
+		_, err := ep.Call[*testpb.Pong](t.Context(), p, &testpb.Ping{N: -1})
 		if err == nil {
 			return errors.New("expected an error")
 		}
@@ -227,7 +227,7 @@ func TestMetrics(t *testing.T) {
 			_ = a.Exit(t.Context(), ep, grpcproc.ReasonNormal)
 			continue
 		}
-		_ = a.Send(t.Context(), ep, &testpb.Ping{N: n})
+		_ = ep.Send(t.Context(), a, &testpb.Ping{N: n})
 	}
 	// A dead letter of the wrong type.
 	ep, _ := a.Spawn(echo, grpcproc.WithLabel("echo"))
@@ -244,11 +244,11 @@ func TestMetrics(t *testing.T) {
 		}
 	}, grpcproc.WithLabel("busy"))
 	for range 3 {
-		_ = a.Send(t.Context(), busy, &testpb.Ping{})
+		_ = busy.Send(t.Context(), a, &testpb.Ping{})
 	}
 	// A link to b, then its loss.
 	remote, _ := c.Node("b").Spawn(echo, grpcproc.WithLabel("echo"))
-	if _, err := a.Call[*testpb.Pong](t.Context(), remote, &testpb.Ping{N: 1}); err != nil {
+	if _, err := remote.Call[*testpb.Pong](t.Context(), a, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -508,7 +508,7 @@ func TestDestinationByName(t *testing.T) {
 	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithHooks(e.hooks)}, "a")
 	a := c.Node("a")
 	_, _ = a.Spawn(echo, grpcproc.WithName("svc"))
-	if _, err := a.Call[*testpb.Pong](t.Context(), grpcproc.Named[*testpb.Ping]("a", "svc"), &testpb.Ping{N: 1}); err != nil {
+	if _, err := grpcproc.Named[*testpb.Ping]("a", "svc").Call[*testpb.Pong](t.Context(), a, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	for _, s := range e.spans.Ended() {

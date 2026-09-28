@@ -301,7 +301,7 @@ func TestNodesFindAndLoseEachOther(t *testing.T) {
 		}
 	})
 	<-ready
-	if r, err := a.Call[*testpb.Pong](t.Context(), grpcproc.Named[*testpb.Ping]("b", "echo"), &testpb.Ping{N: 1}); err != nil || r.GetN() != 2 {
+	if r, err := grpcproc.Named[*testpb.Ping]("b", "echo").Call[*testpb.Pong](t.Context(), a, &testpb.Ping{N: 1}); err != nil || r.GetN() != 2 {
 		t.Fatalf("%v %v", r, err)
 	}
 

@@ -43,7 +43,7 @@ func inspect(t *testing.T, c *grpcproctest.Cluster, node string) map[string]stri
 
 func count(t *testing.T, c *grpcproctest.Cluster, node string, v int64) {
 	t.Helper()
-	got, err := c.Node(node).Call[counter](t.Context(), grpcproc.Named[counter](node, "singleton"), wrapperspb.Int64(v))
+	got, err := grpcproc.Named[counter](node, "singleton").Call[counter](t.Context(), c.Node(node), wrapperspb.Int64(v))
 	if err != nil || got.GetValue() != v {
 		t.Fatalf("checkpoint %d on %s: %v, %v", v, node, got, err)
 	}
@@ -250,7 +250,7 @@ func TestSingletonThatFails(t *testing.T) {
 		settle(2 * time.Second)
 		first, _ := elected(t, c, "a", "b", "c")
 		count(t, c, first, 3)
-		if err := c.Node(first).Send(t.Context(), grpcproc.Named[counter](first, "singleton"), wrapperspb.Int64(-1)); err != nil {
+		if err := grpcproc.Named[counter](first, "singleton").Send(t.Context(), c.Node(first), wrapperspb.Int64(-1)); err != nil {
 			t.Fatal(err)
 		}
 		settle(5 * time.Second)

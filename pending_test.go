@@ -38,7 +38,7 @@ func TestCallsLeaveNothingPending(t *testing.T) {
 
 	answered := make(chan error, 1)
 	go func() {
-		_, err := n.Call[*ping](t.Context(), peer, &ping{})
+		_, err := peer.Call[*ping](t.Context(), n, &ping{})
 		answered <- err
 	}()
 	call := queued()
@@ -54,10 +54,10 @@ func TestCallsLeaveNothingPending(t *testing.T) {
 
 	short, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 	defer cancel()
-	if _, err := n.Call[*ping](short, peer, &ping{}); !errors.Is(err, context.DeadlineExceeded) { // ctx
+	if _, err := peer.Call[*ping](short, n, &ping{}); !errors.Is(err, context.DeadlineExceeded) { // ctx
 		t.Fatal(err)
 	}
-	if _, err := n.Call[*ping](t.Context(), Named[*ping]("", "x"), &ping{}); err == nil { // route: no node
+	if _, err := Named[*ping]("", "x").Call[*ping](t.Context(), n, &ping{}); err == nil { // route: no node
 		t.Fatal("routed to no node")
 	}
 	n.pendingMu.Lock()
@@ -126,7 +126,7 @@ func TestLocalCallGivesUpWithItsCtx(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := n.Call[*ping](ctx, p, &ping{}); !errors.Is(err, context.Canceled) {
+	if _, err := p.Call[*ping](ctx, n, &ping{}); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	close(late)

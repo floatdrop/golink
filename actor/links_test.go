@@ -99,7 +99,7 @@ func TestHandleExited(t *testing.T) {
 					t.Fatal(got)
 				}
 			}
-			_ = n.Send(t.Context(), a, &testpb.Ping{N: 1})
+			_ = a.Send(t.Context(), n, &testpb.Ping{N: 1})
 			if got := within(t, h.seen); got != "message" {
 				t.Fatalf("after the Exited: %s", got)
 			}

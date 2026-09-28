@@ -161,7 +161,7 @@ func TestOldIncarnationIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	recv(t, got)
-	if _, err := a.Call[*testpb.Pong](ctx(t), svc, &testpb.Ping{N: 1}); err != nil {
+	if _, err := svc.Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	sameLinks(t, a, ">b#2", "b#2")
@@ -175,7 +175,7 @@ func TestOldIncarnationIsRefused(t *testing.T) {
 	if !errors.As(err, &le) || !le.Unsent {
 		t.Fatalf("not reported unsent: %v", err)
 	}
-	if _, err := a.Call[*testpb.Pong](ctx(t), svc, &testpb.Ping{N: 1}); err != nil {
+	if _, err := svc.Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 1}); err != nil {
 		t.Fatalf("a calls the current b: %v", err)
 	}
 	noMore(t, got)
