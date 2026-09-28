@@ -2,6 +2,7 @@ package grpcproc_test
 
 import (
 	"errors"
+	"runtime"
 	"testing"
 	"time"
 
@@ -178,7 +179,9 @@ func TestSpawnMonitorRacesParentExit(t *testing.T) {
 	c := grpcproctest.New(t, "a")
 	a := c.Node("a")
 	w, downs := watcher(t, a)
-	// Contend Node.mu so a spawn stalls between its steps.
+	// Contend Node.mu so a spawn stalls between its steps. Each contender
+	// yields between lookups: four that spin on one CPU starve every other
+	// goroutine for a time slice each, and the test took minutes to hours.
 	stop := make(chan struct{})
 	defer close(stop)
 	for range 4 {
@@ -189,6 +192,7 @@ func TestSpawnMonitorRacesParentExit(t *testing.T) {
 					return
 				default:
 					a.Whereis("x")
+					runtime.Gosched()
 				}
 			}
 		}()
@@ -203,16 +207,21 @@ func TestSpawnMonitorRacesParentExit(t *testing.T) {
 		p := <-ready
 		w.Monitor(pa)
 		kids := make(chan []grpcproc.PID, 1)
+		// Spawns until the parent's exit refuses one, yielding after each so
+		// that the exit lands among them even on one CPU, and 64 at most: a
+		// spawner that ran a whole time slice made thousands a round, each
+		// to be polled and killed, until the race detector ran out of memory.
 		go func() {
 			var ps []grpcproc.PID
-			for {
+			for len(ps) < 64 {
 				k, _, err := p.SpawnMonitor[*testpb.Ping](echo)
 				if err != nil {
-					kids <- ps
-					return
+					break
 				}
 				ps = append(ps, k.PID())
+				runtime.Gosched()
 			}
+			kids <- ps
 		}()
 		_ = a.Exit(t.Context(), pa, grpcproc.ReasonKilled)
 		ps := <-kids
