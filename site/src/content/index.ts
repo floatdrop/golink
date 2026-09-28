@@ -14,8 +14,10 @@ import { guidesBlockingIO } from './guides-blocking-io.tsx';
 import { guidesConfiguration } from './guides-configuration.tsx';
 import { guidesCron } from './guides-cron.tsx';
 import { guidesEtcd } from './guides-etcd.tsx';
+import { guidesGrpcprocctl } from './guides-grpcprocctl.tsx';
 import { guidesInspector } from './guides-inspector.tsx';
 import { guidesLeader } from './guides-leader.tsx';
+import { guidesMcp } from './guides-mcp.tsx';
 import { guidesObservability } from './guides-observability.tsx';
 import { guidesPubsub } from './guides-pubsub.tsx';
 import { guidesSupervisors } from './guides-supervisors.tsx';
@@ -49,6 +51,8 @@ const all: Doc[] = [
 	guidesTesting,
 	guidesObservability,
 	guidesInspector,
+	guidesGrpcprocctl,
+	guidesMcp,
 	guidesEtcd,
 	guidesCron,
 	guidesLeader,

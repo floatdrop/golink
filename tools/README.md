@@ -3,7 +3,9 @@
 `grpcprocctl`: inspect and operate grpcproc nodes through their
 [Inspector](https://floatdrop.github.io/grpcproc/guides/inspector/), from a terminal or, as an MCP server,
 from an AI agent. A separate module, so grpcproc itself carries no CLI or MCP
-dependencies.
+dependencies. The site has a page for each:
+[grpcprocctl](https://floatdrop.github.io/grpcproc/guides/grpcprocctl/) and
+[an AI agent over MCP](https://floatdrop.github.io/grpcproc/guides/mcp/).
 
 ```sh
 go install github.com/floatdrop/grpcproc/tools/cmd/grpcprocctl@latest

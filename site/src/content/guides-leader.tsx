@@ -289,7 +289,7 @@ leader.Uncordon(ctx, node, "scheduler", "c")`}</Code>
 						node of the view to lead is refused.
 					</p>
 					<p>
-						From a terminal, <A to="guides/inspector/#grpcprocctl">grpcprocctl</A> does the same
+						From a terminal, <A to="guides/grpcprocctl/#leader">grpcprocctl</A> does the same
 						through the Inspector, and shows what every node's elector believes once they agree:
 					</p>
 					<Code lang="sh">{'grpcprocctl --plaintext leader cordon scheduler b   # b led: it hands over'}</Code>

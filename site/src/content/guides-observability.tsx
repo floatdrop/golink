@@ -35,8 +35,9 @@ export const guidesObservability: Doc = {
 				</li>
 			</ul>
 			<p>
-				This page is the Go side. <A to="guides/inspector/">The Inspector and grpcprocctl</A> serve the
-				same data over gRPC, to a terminal or an AI agent.
+				This page is the Go side. <A to="guides/inspector/">The Inspector</A> serves the same data
+				over gRPC, to <A to="guides/grpcprocctl/">grpcprocctl</A> in a terminal or to{' '}
+				<A to="guides/mcp/">an AI agent</A>.
 			</p>
 		</>
 	),

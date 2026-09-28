@@ -67,7 +67,7 @@ export const landing: Doc = {
 							{
 								to: 'guides/actors/',
 								title: 'Guides',
-								text: 'Actors and supervisors, pub/sub, configuration, testing a cluster, observability, the Inspector, etcd, cron jobs, leader election.'
+								text: 'Actors and supervisors, pub/sub, configuration, testing a cluster, observability, the Inspector, grpcprocctl and MCP, etcd, cron jobs, leader election.'
 							},
 							{
 								to: 'shop/',
