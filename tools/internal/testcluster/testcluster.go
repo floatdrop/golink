@@ -170,5 +170,5 @@ func (f *Fixture) Cron(t *testing.T, node, name string) grpcproc.PID {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return c.PID()
+	return c.Addr().PID()
 }

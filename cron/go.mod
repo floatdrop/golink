@@ -3,7 +3,7 @@ module github.com/floatdrop/grpcproc/cron
 go 1.27.1
 
 require (
-	github.com/floatdrop/grpcproc v0.0.6-0.20260928083312-3c71934f0ab8
+	github.com/floatdrop/grpcproc v0.0.6-0.20260928112146-54c99477f664
 	google.golang.org/protobuf v1.36.12
 )
 
