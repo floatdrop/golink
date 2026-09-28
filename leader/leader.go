@@ -24,12 +24,14 @@
 // checkpoint that returned. Resign hands over on purpose: it stops the
 // singleton, brings a follower up to date and has it campaign at once.
 //
-// Nothing is persisted: terms, votes and state live in memory, and a
-// cluster that loses a majority of its nodes at once loses them. Two nodes
-// may briefly both believe they lead (one cut off from the others that has
-// not noticed yet); Lease.Term is the fencing token that lets an external
-// resource tell their writes apart, and Spec.Confirm can make leadership
-// wait for an external lock.
+// Terms, votes and state live in memory, and a cluster that loses a
+// majority of its nodes at once loses them, unless Spec.Store keeps them:
+// then each node saves its own before it tells anyone of them, as Raft
+// does, and a cluster that restarts whole carries on from where it was
+// (File keeps them in a file). Two nodes may briefly both believe they
+// lead (one cut off from the others that has not noticed yet); Lease.Term
+// is the fencing token that lets an external resource tell their writes
+// apart, and Spec.Confirm can make leadership wait for an external lock.
 package leader
 
 import (
@@ -90,6 +92,13 @@ type Spec[S proto.Message] struct {
 	// GhostTTL is how long a node of the view that cannot be reached still
 	// counts, with Voters empty and no Membership. Default 5s.
 	GhostTTL time.Duration
+	// Store, if set, keeps this node's term, vote and state across restarts
+	// of its elector and of the node (File keeps them in a file): with one
+	// on every node, a cluster that restarts whole starts again from its
+	// last checkpoint, and its terms go on growing. Without it they live in
+	// memory. A Save that fails ends the elector, and its supervisor starts
+	// it again from what the Store holds.
+	Store Store
 	// Confirm, if set, runs when this node wins an election, before its
 	// singleton starts: an error withholds leadership, and the node steps
 	// down and campaigns again only after a backoff, longer after each

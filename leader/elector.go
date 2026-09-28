@@ -1,6 +1,7 @@
 package leader
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -138,6 +139,16 @@ type elector[S proto.Message] struct {
 
 	bridge   grpcproc.Ref // the Membership bridge, while it runs
 	bridgeAt time.Time    // when to start it again
+
+	saved saved // what the Store holds
+	err   error // a Save that failed: the loop ends with it
+}
+
+// saved is what an elector's Store holds: the term, the vote, and the
+// state's version, which tells the state apart from any other.
+type saved struct {
+	term, stateTerm, stateSeq uint64
+	votedFor                  string
 }
 
 func (e *elector[S]) static() bool { return len(e.spec.Voters) > 0 }
@@ -146,12 +157,19 @@ func (e *elector[S]) loop() error {
 	if e.static() && !slices.Contains(e.spec.Voters, e.self) {
 		return fmt.Errorf("leader: %s is not among the Voters", e.self)
 	}
+	loaded, err := e.load()
+	if err != nil {
+		return err
+	}
 	now := time.Now()
-	// Votes live in memory: this node may have voted in the current term
-	// before it restarted. It votes again only once a leader elected with
-	// that vote would have been heard from.
-	e.quietUntil = now.Add(2 * e.spec.ElectionTimeout)
-	e.electionAt = e.quietUntil.Add(e.timeout())
+	e.electionAt = now.Add(e.timeout())
+	if !loaded {
+		// This node may have voted in the current term before it
+		// restarted, and forgotten. It votes again only once a leader
+		// elected with that vote would have been heard from.
+		e.quietUntil = now.Add(2 * e.spec.ElectionTimeout)
+		e.electionAt = e.quietUntil.Add(e.timeout())
+	}
 	for _, node := range slices.Concat(e.spec.Voters, e.spec.Peers) {
 		if node != e.self {
 			e.add(node).declared = true
@@ -161,6 +179,9 @@ func (e *elector[S]) loop() error {
 		now := time.Now()
 		e.timers(now)
 		e.reconcile(now)
+		if e.err != nil {
+			return e.err
+		}
 		m, err := e.p.ReceiveTimeout(time.Until(e.wake(now)))
 		switch {
 		case errors.Is(err, context.DeadlineExceeded):
@@ -170,6 +191,53 @@ func (e *elector[S]) loop() error {
 			e.handle(m, time.Now())
 		}
 	}
+}
+
+// load starts the elector from what its Store holds, and reports whether
+// it held anything.
+func (e *elector[S]) load() (bool, error) {
+	if e.spec.Store == nil {
+		return false, nil
+	}
+	b, err := e.spec.Store.Load()
+	k := &leaderv1.Kept{}
+	if err == nil {
+		err = proto.Unmarshal(b, k)
+	}
+	if err != nil {
+		return false, fmt.Errorf("leader: loading from the Store: %w", err)
+	}
+	e.term, e.votedFor, e.state = k.GetTerm(), k.GetVotedFor(), cmp.Or(k.GetState(), e.state)
+	e.saved = e.saving()
+	return len(b) > 0, nil
+}
+
+// saving is what the Store is to hold.
+func (e *elector[S]) saving() saved {
+	v := e.state.GetVersion()
+	return saved{term: e.term, stateTerm: v.GetTerm(), stateSeq: v.GetSeq(), votedFor: e.votedFor}
+}
+
+// save has the Store hold the term, the vote and the state, if they
+// changed since it last did, and reports whether it holds them. Nothing
+// that tells of them (a message to a peer, the answer to a checkpoint, a
+// lease) leaves the elector before they are saved; once a Save has failed,
+// nothing leaves it at all, and the loop ends with the error.
+func (e *elector[S]) save() bool {
+	s := e.saving()
+	if e.spec.Store == nil || e.err != nil || s == e.saved {
+		return e.err == nil
+	}
+	b, err := proto.Marshal(&leaderv1.Kept{Term: e.term, VotedFor: e.votedFor, State: e.state})
+	if err == nil {
+		err = e.spec.Store.Save(b)
+	}
+	if err != nil {
+		e.err = fmt.Errorf("leader: saving to the Store: %w", err)
+		return false
+	}
+	e.saved = s
+	return true
 }
 
 // timeout is a random election timeout.
@@ -369,7 +437,12 @@ func (e *elector[S]) greet(p *peer, now time.Time, reply bool) {
 	e.send(p, &leaderv1.Peer{Term: e.term, Kind: &leaderv1.Peer_Hello{Hello: &leaderv1.Hello{Reply: reply}}})
 }
 
-func (e *elector[S]) send(p *peer, m *leaderv1.Peer) { _ = p.relay.Send(e.p.Context(), e.p, m) }
+// send sends m to p's elector, once what it may tell of is saved.
+func (e *elector[S]) send(p *peer, m *leaderv1.Peer) {
+	if e.save() {
+		_ = p.relay.Send(e.p.Context(), e.p, m)
+	}
+}
 
 // view is the nodes whose majority elects a leader, this one included,
 // sorted.
@@ -639,8 +712,12 @@ func (e *elector[S]) failed(now time.Time, reason string) {
 	}
 }
 
-// commit answers the checkpoints a majority now holds.
+// commit answers the checkpoints a majority now holds. The leader's own
+// copy counts once it is saved.
 func (e *elector[S]) commit() {
+	if !e.save() {
+		return
+	}
 	v := e.state.GetVersion()
 	for len(e.pending) > 0 {
 		pc := e.pending[0]
@@ -699,8 +776,12 @@ func (e *elector[S]) handOver(now time.Time, force bool) {
 
 // start starts the singleton for this term, from a process of its own:
 // Confirm and the singleton's start may take their time, and heartbeats
-// must go on meanwhile.
+// must go on meanwhile. The term is saved first: a lease for a term this
+// node could lead again after a restart would be no fencing token.
 func (e *elector[S]) start(now time.Time) {
+	if !e.save() {
+		return
+	}
 	state, err := decode[S](e.state.GetValue())
 	if err != nil {
 		e.failed(now, err.Error())

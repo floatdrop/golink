@@ -212,9 +212,21 @@ lease.Save(state)                   // the same, without the wait`}</Code>
 						alone, <C>ErrNoSuccessor</C>.
 					</p>
 					<p>
-						The state lives in memory, as do the terms: a cluster that loses a majority of its nodes
-						at once loses them. Keep it to what the next leader needs to carry on, the jobs a
-						scheduler ran last, not the data they worked on.
+						Keep the state to what the next leader needs to carry on, the jobs a scheduler ran last,
+						not the data they worked on: every checkpoint carries all of it.
+					</p>
+					<p>
+						Without a <C>Store</C>, the state lives in memory, as do the terms: a cluster that loses
+						a majority of its nodes at once loses them, and a cluster of one loses them at every
+						restart. With one on each node, each keeps its term, its vote and the state, and saves
+						them before it tells anyone of them, as Raft does. A cluster that restarts whole starts
+						its singleton from the last checkpoint that returned, and its terms go on growing.
+					</p>
+					<Code>{`Store: leader.File("/var/lib/app/cron.election"), // each node its own, on its own disk`}</Code>
+					<p>
+						A <C>Store</C> shared by nodes breaks the election, and so does a file restored from a
+						backup, which has forgotten the votes cast since: delete it instead, and the node starts
+						afresh.
 					</p>
 				</>
 			)

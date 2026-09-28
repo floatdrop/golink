@@ -49,6 +49,15 @@ message State {
   repeated string cordoned = 3;
 }
 
+// Kept is what an elector keeps in its Spec.Store, and starts from again:
+// Raft's persistent state, whose log is the one State.
+message Kept {
+  uint64 term = 1;
+  // The node this one voted for in the term, if any.
+  string voted_for = 2;
+  State state = 3;
+}
+
 // RequestVote asks for a vote in the term, from a candidate holding the
 // state of this version. A voter holding a newer one refuses it.
 message RequestVote {
