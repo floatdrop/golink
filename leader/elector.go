@@ -16,7 +16,6 @@ import (
 	"github.com/floatdrop/grpcproc"
 	"github.com/floatdrop/grpcproc/actor"
 	leaderv1 "github.com/floatdrop/grpcproc/leader/proto/grpcproc/leader/v1"
-	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
 // ReasonDemoted is the exit reason a singleton is told to exit with when
@@ -715,7 +714,7 @@ func (e *elector[S]) start(now time.Time) {
 		if err != nil {
 			started.Error = err.Error()
 		} else {
-			started.Pid = &grpcprocv1.PID{Node: pid.Node, Incarnation: pid.Incarnation, Id: pid.ID}
+			started.Pid = pid.Proto()
 		}
 		return h.SendTo(h.Parent(), started)
 	}, grpcproc.LinkParent(), grpcproc.WithLabel("leader starter"))
@@ -740,7 +739,7 @@ func (e *elector[S]) started(b *leaderv1.Started, now time.Time) {
 		e.failed(now, b.GetError())
 		return
 	}
-	pid := grpcproc.PID{Node: b.GetPid().GetNode(), Incarnation: b.GetPid().GetIncarnation(), ID: b.GetPid().GetId()}
+	pid := grpcproc.PIDFromProto(b.GetPid())
 	// reconcile stops it at once if the term it was started for is over.
 	e.single = singleton{phase: running, term: b.GetTerm(), pid: pid, ref: e.p.Monitor(pid)}
 }
@@ -825,7 +824,7 @@ func (e *elector[S]) status() *leaderv1.Status {
 		Cordoned: e.state.GetCordoned(),
 	}
 	if e.single.phase == running {
-		st.Singleton = &grpcprocv1.PID{Node: e.single.pid.Node, Incarnation: e.single.pid.Incarnation, Id: e.single.pid.ID}
+		st.Singleton = e.single.pid.Proto()
 	}
 	return st
 }

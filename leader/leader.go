@@ -187,6 +187,8 @@ func (r Role) String() string {
 	return "Role(" + strconv.Itoa(int(r)) + ")"
 }
 
+// An elector's answers cross nodes as text: they come back as a
+// *grpcproc.RemoteError, which is the sentinel to errors.Is.
 var (
 	// ErrNotLeader is the answer to Checkpoint once the Lease's term is
 	// over, and to Resign on a node that does not lead.
@@ -223,14 +225,13 @@ func Status(ctx context.Context, n *grpcproc.Node, cluster string) (Info, error)
 		return Info{}, err
 	}
 	role := slices.Index(roles[:], st.GetRole())
-	s := st.GetSingleton()
 	return Info{
 		Role:      Role(role),
 		Term:      st.GetTerm(),
 		Leader:    st.GetLeader(),
 		View:      st.GetView(),
 		Quorum:    int(st.GetQuorum()),
-		Singleton: grpcproc.PID{Node: s.GetNode(), Incarnation: s.GetIncarnation(), ID: s.GetId()},
+		Singleton: grpcproc.PIDFromProto(st.GetSingleton()),
 		Cordoned:  st.GetCordoned(),
 	}, nil
 }
@@ -243,7 +244,7 @@ func Status(ctx context.Context, n *grpcproc.Node, cluster string) (Info, error)
 // start from the singleton's last state.
 func Resign(ctx context.Context, n *grpcproc.Node, cluster string) error {
 	_, err := n.CallTo[*emptypb.Empty](ctx, electorOf(n, cluster), &leaderv1.Resign{})
-	return sentinel(err)
+	return err
 }
 
 // Transfer moves the leadership of cluster to the node to: the leader, which
@@ -280,24 +281,11 @@ func viaLeader(ctx context.Context, n *grpcproc.Node, cluster string, m proto.Me
 		return ErrNoLeader
 	}
 	_, err = n.CallTo[*emptypb.Empty](ctx, grpcproc.Name{Node: info.Leader, Name: ElectorName(cluster)}, m)
-	return sentinel(err)
+	return err
 }
 
 func electorOf(n *grpcproc.Node, cluster string) grpcproc.Name {
 	return grpcproc.Name{Node: n.Name(), Name: ElectorName(cluster)}
-}
-
-// sentinel turns an elector's sentinel errors, which come back as text,
-// into themselves again.
-func sentinel(err error) error {
-	if re, ok := errors.AsType[*grpcproc.RemoteError](err); ok {
-		for _, e := range []error{ErrNotLeader, ErrNoSuccessor} {
-			if re.Msg == e.Error() {
-				return e
-			}
-		}
-	}
-	return err
 }
 
 // Lease is a leader's hold on its term, as its singleton sees it.
@@ -323,7 +311,7 @@ func (l *Lease[S]) Checkpoint(ctx context.Context, state S) error {
 		return err
 	}
 	_, err = l.n.CallTo[*emptypb.Empty](ctx, l.elector, c)
-	return sentinel(err)
+	return err
 }
 
 // Save is Checkpoint without the wait, for a caller that must not block:

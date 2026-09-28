@@ -10,22 +10,10 @@ import (
 
 	"github.com/floatdrop/grpcproc"
 	inspectv1 "github.com/floatdrop/grpcproc/proto/grpcproc/inspect/v1"
-	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
 // The To functions turn grpcproc snapshots into wire messages; the exported
 // ones turn wire messages back, for clients (a CLI, a UI, a test).
-
-func pidTo(p grpcproc.PID) *grpcprocv1.PID {
-	if p.IsZero() {
-		return nil
-	}
-	return &grpcprocv1.PID{Node: p.Node, Incarnation: p.Incarnation, Id: p.ID}
-}
-
-func pidFrom(p *grpcprocv1.PID) grpcproc.PID {
-	return grpcproc.PID{Node: p.GetNode(), Incarnation: p.GetIncarnation(), ID: p.GetId()}
-}
 
 func nodeIDTo(n grpcproc.NodeID) *inspectv1.NodeID {
 	return &inspectv1.NodeID{Name: n.Name, Incarnation: n.Incarnation}
@@ -106,11 +94,11 @@ func nodeInfoTo(n grpcproc.NodeInfo) *inspectv1.NodeInfo {
 
 func processInfoTo(p grpcproc.ProcessInfo) *inspectv1.ProcessInfo {
 	return &inspectv1.ProcessInfo{
-		Pid:       pidTo(p.PID),
+		Pid:       p.PID.Proto(),
 		Name:      p.Name,
 		Label:     p.Label,
 		Type:      p.Type,
-		Parent:    pidTo(p.Parent),
+		Parent:    p.Parent.Proto(),
 		State:     stateTo(p.State),
 		StartedAt: timeTo(p.StartedAt),
 		Mailbox: &inspectv1.Mailbox{
@@ -144,7 +132,7 @@ func eventTo(ev grpcproc.Event) *inspectv1.Event {
 		out.Kind = &inspectv1.Event_LinkDown{LinkDown: &inspectv1.LinkDown{Peer: nodeIDTo(ev.Peer), Error: ev.Err}}
 	case grpcproc.EventDeadLetter:
 		out.Kind = &inspectv1.Event_DeadLetter{DeadLetter: &inspectv1.DeadLetter{
-			From: pidTo(ev.From), To: pidTo(ev.To), Type: ev.Type, Reason: ev.Reason,
+			From: ev.From.Proto(), To: ev.To.Proto(), Type: ev.Type, Reason: ev.Reason,
 		}}
 	}
 	return out
@@ -181,8 +169,8 @@ func NodeInfo(n *inspectv1.NodeInfo) grpcproc.NodeInfo {
 // ProcessInfo converts a wire ProcessInfo back to grpcproc's.
 func ProcessInfo(p *inspectv1.ProcessInfo) grpcproc.ProcessInfo {
 	return grpcproc.ProcessInfo{
-		PID:    pidFrom(p.GetPid()),
-		Parent: pidFrom(p.GetParent()), // the zero PID for none
+		PID:    grpcproc.PIDFromProto(p.GetPid()),
+		Parent: grpcproc.PIDFromProto(p.GetParent()), // the zero PID for none
 		Name:   p.GetName(),
 		Label:  p.GetLabel(),
 		Type:   p.GetType(),
@@ -220,7 +208,7 @@ func Event(e *inspectv1.Event) grpcproc.Event {
 		out.Kind, out.Peer, out.Err = grpcproc.EventLinkDown, nodeIDFrom(k.LinkDown.GetPeer()), k.LinkDown.GetError()
 	case *inspectv1.Event_DeadLetter:
 		d := k.DeadLetter
-		out.Kind, out.From, out.To, out.Type, out.Reason = grpcproc.EventDeadLetter, pidFrom(d.GetFrom()), pidFrom(d.GetTo()), d.GetType(), d.GetReason()
+		out.Kind, out.From, out.To, out.Type, out.Reason = grpcproc.EventDeadLetter, grpcproc.PIDFromProto(d.GetFrom()), grpcproc.PIDFromProto(d.GetTo()), d.GetType(), d.GetReason()
 	}
 	return out
 }

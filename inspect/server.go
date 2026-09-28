@@ -127,7 +127,7 @@ func (s *Server) writable() error {
 func (s *Server) local(t *inspectv1.Target) (grpcproc.PID, error) {
 	switch k := t.GetKind().(type) {
 	case *inspectv1.Target_Pid:
-		return pidFrom(k.Pid), nil
+		return grpcproc.PIDFromProto(k.Pid), nil
 	case *inspectv1.Target_Name:
 		if pid, ok := s.node.Whereis(k.Name); ok {
 			return pid, nil
@@ -143,7 +143,7 @@ func (s *Server) local(t *inspectv1.Target) (grpcproc.PID, error) {
 func (s *Server) addr(t *inspectv1.Target) (grpcproc.Target, error) {
 	switch k := t.GetKind().(type) {
 	case *inspectv1.Target_Pid:
-		return pidFrom(k.Pid), nil
+		return grpcproc.PIDFromProto(k.Pid), nil
 	case *inspectv1.Target_Name:
 		return grpcproc.Name{Node: s.node.Name(), Name: k.Name}, nil
 	default:
@@ -282,7 +282,9 @@ func (s *Server) Call(ctx context.Context, req *inspectv1.CallRequest) (*inspect
 }
 
 // callStatus is how a call that failed reads over gRPC: an answer that is an
-// error keeps its text, as Unknown, which is what a tool compares.
+// error keeps its text, as Unknown, which is what a tool compares. It is
+// looked at first, since errors.Is matches a RemoteError by its text: a
+// handler that answered with ErrNoProc's text answered, and is no NotFound.
 func callStatus(err error) error {
 	if re, ok := errors.AsType[*grpcproc.RemoteError](err); ok {
 		return status.Error(codes.Unknown, re.Msg)
