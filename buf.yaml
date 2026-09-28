@@ -3,6 +3,8 @@ modules:
   - path: proto
   - path: internal
   - path: examples
+  - path: cron/proto
+  - path: leader/proto
 lint:
   use:
     - STANDARD

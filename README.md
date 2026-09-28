@@ -121,6 +121,10 @@ your `*grpc.Server` next to your other services, start and stop.
 - **An Inspector** and [`grpcprocctl`](tools/README.md): every process, its
   mailbox and what it says about itself, from a terminal or an AI agent over
   MCP. [Guide](https://floatdrop.github.io/grpcproc/guides/inspector/)
+- **Cron and leader election** in [`grpcproc/cron`](cron/README.md) and
+  [`grpcproc/leader`](leader/README.md): jobs on crontab schedules, every
+  run a process of its own; and a singleton that runs on the elected leader
+  and carries its state to the next, so a job can run once in a cluster.
 - **OpenTelemetry** in [`grpcproc/otel`](otel/README.md), **etcd** membership
   in [`grpcproc/etcd`](etcd/README.md), and `grpcproctest`, which runs a
   cluster inside one `go test`, partitions and crashes included.

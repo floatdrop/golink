@@ -1,0 +1,34 @@
+// grpcproc.cron.v1 is what grpcproc/cron's processes are called with, and
+// the state they report for a successor to resume from.
+syntax = "proto3";
+
+package grpcproc.cron.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/floatdrop/grpcproc/cron/proto/grpcproc/cron/v1;cronv1";
+
+// Control changes the jobs of a running cron process. Every op is a call,
+// answered with google.protobuf.Empty or an error.
+message Control {
+  oneof op {
+    // A job its caller registered in the cron package under this id. A
+    // job holds Go functions, so only a cron process on the caller's node
+    // can add it.
+    uint64 add = 1;
+    // The name of a job to remove. Runs already going go on.
+    string remove = 2;
+    // The name of a disabled job to run again on its schedule.
+    string enable = 3;
+    // The name of a job to keep but not run until it is enabled.
+    string disable = 4;
+  }
+}
+
+// State is what a cron process remembers of its jobs: the time each last
+// started a run, as scheduled. A cron process that resumes from it catches
+// up on the runs missed since, as far as each job's starting deadline
+// allows.
+message State {
+  map<string, google.protobuf.Timestamp> last_run = 1;
+}

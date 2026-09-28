@@ -34,7 +34,8 @@ jobs:
             [ "$total" = "100.0%" ] || { go tool cover -func=coverage.out | awk '$3 != "100.0%"'; exit 1; }
           done
   modules:
-    # Nested modules: adapters with dependencies grpcproc itself does not have.
+    # Nested modules: adapters with dependencies grpcproc itself does not
+    # have, and cron and leader, versioned on their own.
     strategy:
       matrix:
         include:
@@ -44,6 +45,10 @@ jobs:
             cover: "."
           - module: tools
             cover: "./client ./dot ./cli ./mcpserver"
+          - module: cron
+            cover: "."
+          - module: leader
+            cover: "."
     runs-on: ubuntu-latest
     defaults:
       run:
