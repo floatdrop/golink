@@ -29,15 +29,6 @@ func observed(t *testing.T, n *grpcproc.Node) (*grpcproc.Process[proto.Message],
 	}
 }
 
-func spawnEcho(t *testing.T, n *grpcproc.Node, opts ...grpcproc.SpawnOption) grpcproc.Addr[*testpb.Ping] {
-	t.Helper()
-	a, err := n.Spawn(echo, opts...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return a
-}
-
 // A process linked to another exits when it does, with its reason, however
 // it exits: normally, with an error, or asked to.
 func TestLinkEndsTheLinker(t *testing.T) {

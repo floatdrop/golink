@@ -44,17 +44,6 @@ func dialsHeld(t *testing.T) (c *grpcproctest.Cluster, entered <-chan struct{}, 
 	return c, in, release
 }
 
-func within[T any](t *testing.T, ch <-chan T, what string) T {
-	t.Helper()
-	select {
-	case v := <-ch:
-		return v
-	case <-time.After(5 * time.Second):
-		t.Fatalf("no %s", what)
-		panic("unreachable")
-	}
-}
-
 // An answer dispatch makes itself, "no such process" to a peer this node
 // has no link to yet, does not hold the peer's link while it dials:
 // Disconnect, which closes that link, does not wait out the dial.

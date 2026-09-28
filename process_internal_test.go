@@ -1,9 +1,13 @@
 package grpcproc
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
 // A link's Down that arrives after Unlink took the link is dropped; Link
@@ -86,4 +90,58 @@ func TestWatchPlacedAsTheWatcherExits(t *testing.T) {
 			n.mu.Unlock()
 		}
 	}()
+}
+
+// Demonitor sends one DEMONITOR, addressed as the monitor was: by PID or by
+// name. It used to send a second, addressed by an empty name.
+func TestDemonitorSendsOneEnvelope(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		n := newTestNode(t, "a")
+		l := &outLink{node: n, peer: NodeID{Name: "b"}, cc: testConn(t), q: newQueue[*grpcprocv1.Envelope](false), done: make(chan struct{}),
+			cancel: func() {}}
+		n.mu.Lock()
+		n.out["b"] = l // no writer: what is sent stays queued
+		n.mu.Unlock()
+		t.Cleanup(func() { // before Stop, which would wait for it to drain
+			n.mu.Lock()
+			delete(n.out, "b")
+			n.mu.Unlock()
+			l.close(nil)
+		})
+		targets := []Target{PID{Node: "b", Incarnation: 1, ID: 5}, Name{Node: "b", Name: "x"}}
+		done := make(chan struct{})
+		if _, err := n.Spawn(func(p *Process[*grpcprocv1.Hello]) error {
+			for _, target := range targets {
+				p.Demonitor(p.Monitor(target))
+			}
+			close(done)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		<-done
+		sent := l.q.drain()
+		if len(sent) != 4 {
+			t.Fatalf("sent %d envelopes: %v", len(sent), sent)
+		}
+		for i, target := range targets {
+			m, d := sent[2*i], sent[2*i+1]
+			if m.GetKind() != grpcprocv1.Kind_KIND_MONITOR || d.GetKind() != grpcprocv1.Kind_KIND_DEMONITOR ||
+				d.GetToIncarnation() != m.GetToIncarnation() || d.GetToId() != m.GetToId() ||
+				d.GetToName() != m.GetToName() || d.GetRef() != m.GetRef() {
+				t.Errorf("%v: monitor %v, demonitor %v", target, m, d)
+			}
+		}
+	})
+}
+
+func TestInspectNowOnExited(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(t.Context())
+		cancel(nil)
+		p := &proc{ctx: ctx, sys: make(chan inspectReq), started: time.Now()}
+		if _, err := p.inspectNow(t.Context()); !errors.Is(err, ErrNoProc) {
+			t.Fatal(err)
+		}
+	})
 }

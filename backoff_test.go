@@ -44,17 +44,6 @@ func backedOff(err error) bool {
 	return ok && le.Unsent && errors.Is(err, grpcproc.ErrNoConnection) && strings.Contains(err.Error(), "next dial in")
 }
 
-// eventually polls cond until it holds, for up to 5s.
-func eventually(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); !cond(); {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-}
-
 func TestDialBackoff(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		// The first wait is a 32nd of an hour, longer than the test.

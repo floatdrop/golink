@@ -15,24 +15,6 @@ import (
 	"github.com/floatdrop/grpcproc/internal/testpb"
 )
 
-func nextEvent(t *testing.T, ch <-chan grpcproc.Event, kind grpcproc.EventKind) grpcproc.Event {
-	t.Helper()
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case ev, ok := <-ch:
-			if !ok {
-				t.Fatalf("channel closed waiting for %v", kind)
-			}
-			if ev.Kind == kind {
-				return ev
-			}
-		case <-deadline:
-			t.Fatalf("timeout waiting for %v", kind)
-		}
-	}
-}
-
 func TestSubscribe(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c := grpcproctest.New(t, "a", "b")

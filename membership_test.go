@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -143,17 +142,6 @@ func TestMembershipDropsLinks(t *testing.T) {
 		m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "c"}}
 		waitNoPeer(t, a, "c")
 	})
-}
-
-func waitNoPeer(t *testing.T, n *grpcproc.Node, peer string) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for slices.Contains(n.Peers(), peer) {
-		if time.Now().After(deadline) {
-			t.Fatalf("links to %s kept: %+v", peer, n.Info().Links)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
 }
 
 func mustEcho(t *testing.T, n *grpcproc.Node) grpcproc.Addr[*testpb.Ping] {
@@ -306,4 +294,27 @@ func TestStartBoundsTheWatch(t *testing.T) {
 			t.Fatalf("got %v", err)
 		}
 	})
+}
+
+// flush returns once a has handled the events sent to m before it: the
+// second of two events is taken only once the one before them is handled.
+func flush(m *fakeMembership) {
+	for range 2 {
+		m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "zzz"}}
+	}
+}
+
+func TestMembershipIsTheConfigs(t *testing.T) {
+	m := &fakeMembership{}
+	with, err := grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Membership: m})
+	if err != nil {
+		t.Fatal(err)
+	}
+	without, err := grpcproc.NewNode(grpcproc.Config{Name: "b", Resolver: grpcproc.StaticResolver{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if with.Membership() != m || without.Membership() != nil {
+		t.Fatalf("%v %v", with.Membership(), without.Membership())
+	}
 }

@@ -136,15 +136,6 @@ func nextLinkEvent(t *testing.T, ch <-chan grpcproc.Event) grpcproc.Event {
 	}
 }
 
-func noMore[M proto.Message](t *testing.T, ch <-chan grpcproc.Msg[M]) {
-	t.Helper()
-	select {
-	case m := <-ch:
-		t.Fatalf("unexpected %+v", m)
-	case <-time.After(50 * time.Millisecond):
-	}
-}
-
 // b was replaced by incarnation 2 while incarnation 1 still runs. The old
 // one's links are refused: it cannot cut a off from the current b, and its
 // messages do not arrive.
@@ -222,14 +213,6 @@ func TestDialReachingAnOldIncarnationFails(t *testing.T) {
 			}
 		}
 	})
-}
-
-// flush returns once a has handled the events sent to m before it: the
-// second of two events is taken only once the one before them is handled.
-func flush(m *fakeMembership) {
-	for range 2 {
-		m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "zzz"}}
-	}
 }
 
 // The fence lifts once the newest incarnation is gone: when Membership
