@@ -815,8 +815,15 @@ leader's singleton, and its state the singleton's.
   write, and elections and checkpoints cost one each. A `Save` that fails
   stops anything else from leaving, and the elector exits with it; its
   supervisor starts it from what the `Store` holds. `leader.File` is
-  write-sync-rename-sync-directory. `Lease.Term` is the fencing token for
-  external resources; `Confirm` makes leadership wait for an external lock.
+  write-sync-rename-sync-directory, through a fixed `path.tmp`, so crashes
+  leave no temporary files to pile up. A Store without the syncs would be
+  worse than none: after a machine crash it could come back with an older
+  vote, which the node would trust, skip the quiet period, and vote twice in
+  a term. Saves run in the elector's loop and hold up its heartbeats (a
+  leader may write in parallel with sending, as Raft allows, but at one save
+  per election or checkpoint that is not worth it yet): on slow disks,
+  `ElectionTimeout` goes up. `Lease.Term` is the fencing token for external
+  resources; `Confirm` makes leadership wait for an external lock.
 
 ## Later
 

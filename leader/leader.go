@@ -97,7 +97,9 @@ type Spec[S proto.Message] struct {
 	// on every node, a cluster that restarts whole starts again from its
 	// last checkpoint, and its terms go on growing. Without it they live in
 	// memory. A Save that fails ends the elector, and its supervisor starts
-	// it again from what the Store holds.
+	// it again from what the Store holds. Saves hold up the elector's
+	// heartbeats: on a disk that may stall for longer than
+	// ElectionTimeout, raise it.
 	Store Store
 	// Confirm, if set, runs when this node wins an election, before its
 	// singleton starts: an error withholds leadership, and the node steps

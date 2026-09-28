@@ -139,11 +139,19 @@ forgotten nothing. A `Save` that fails ends the elector, which its supervisor
 starts again from what the `Store` holds; one that cannot be loaded keeps it
 from starting.
 
-`leader.File` writes a new file beside the old one, syncs it, and renames it
-over the old, so a crash leaves one or the other. Each node needs a `Store` of
-its own, on its own disk. A shared one breaks the election, and so does a file
-restored from a backup: it has forgotten votes it cast since. Delete it instead,
-and the node starts afresh, as one without a `Store` does.
+`leader.File(path)` writes `path.tmp`, syncs it, renames it over `path`, and
+syncs the directory, so a crash leaves the old state or the new one. Each node
+needs a `Store` of its own, on its own disk. A shared one breaks the election,
+and so does a file restored from a backup: it has forgotten votes it cast
+since. Delete it instead, and the node starts afresh, as one without a `Store`
+does.
+
+The elector saves in its own loop, so a save holds up its heartbeats. It saves
+at elections and checkpoints only, and a local SSD syncs in a millisecond or
+so, but a disk that stalls for longer than `ElectionTimeout` (150ms) has the
+followers campaign: leadership moves, safely, and for nothing. On a slower
+disk, a cloud volume say, raise `ElectionTimeout`, and `HeartbeatInterval`
+with it; etcd, which syncs the same way, defaults to 1s and 100ms.
 
 The `Store` is a two-method interface, `Load` and `Save` of a few bytes, for
 anything else that stays on the node.
