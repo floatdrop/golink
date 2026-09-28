@@ -25,9 +25,9 @@ jobs:
         run: go test -race -count=1 ./...
       - name: README embeds the current examples
         run: go run github.com/campoy/embedmd@v1.0.0 -d README.md
-      - name: Coverage (grpcproc, inspect and actor must stay at 100%)
+      - name: Coverage (grpcproc, inspect, actor and pubsub must stay at 100%)
         run: |
-          for pkg in . ./inspect ./actor; do
+          for pkg in . ./inspect ./actor ./pubsub; do
             go test -count=1 -coverprofile=coverage.out -coverpkg=$pkg $pkg
             total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')
             echo "$pkg coverage: $total"
