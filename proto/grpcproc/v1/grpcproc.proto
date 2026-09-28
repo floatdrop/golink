@@ -56,7 +56,11 @@ message Envelope {
   string body_type = 10;
   bytes body = 11;
   Hello hello = 12;
-  // Propagated context: trace headers, tenant, deadline. Never interpreted by
+  // A call's time left, in nanoseconds, when it was written: its caller
+  // waits that long for the reply. 0 for a caller with no deadline. A time
+  // left rather than a deadline, so that clocks need not agree.
+  int64 timeout_nanos = 13;
+  // Propagated context: trace headers, tenant. Never interpreted by
   // grpcproc itself.
   map<string, string> metadata = 15;
 }

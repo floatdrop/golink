@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"math"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -770,7 +771,11 @@ func (n *Node) callLocal(ctx context.Context, from, to PID, name string, req pro
 		req = proto.Clone(req)
 	}
 	ch := make(chan callResult, 1)
-	n.deliver(to, name, item{from: from, body: req, md: md, ref: n.nextRef.Add(1)}, ch)
+	it := item{from: from, body: req, md: md, ref: n.nextRef.Add(1)}
+	if d, ok := ctx.Deadline(); ok {
+		it.deadline = unixNanos(d)
+	}
+	n.deliver(to, name, it, ch)
 	select {
 	case r := <-ch:
 		return r.body, r.err
@@ -785,6 +790,12 @@ func (n *Node) callRemote(ctx context.Context, from, to PID, name string, req pr
 	ref := n.nextRef.Add(1)
 	env := wire(grpcprocv1.Kind_KIND_CALL, from, to, name)
 	env.Ref, env.Metadata = ref, md
+	if d, ok := ctx.Deadline(); ok {
+		// Time left rather than the deadline, so that the peer's clock need
+		// not agree with this one's; at least 1ns, which still says "a
+		// deadline", for one that has just passed.
+		env.TimeoutNanos = max(int64(time.Until(d)), 1)
+	}
 	if err := encodeBody(env, req); err != nil {
 		return nil, err
 	}
@@ -1069,7 +1080,11 @@ func (n *Node) dispatch(peer string, env *grpcprocv1.Envelope) {
 			_ = n.reply(to, from, ref, nil, nil, grpcprocv1.Status_STATUS_TYPE, "", true)
 			return
 		}
-		n.deliver(to, name, item{from: from, body: body, md: env.GetMetadata(), ref: ref}, nil)
+		it := item{from: from, body: body, md: env.GetMetadata(), ref: ref}
+		if t := env.GetTimeoutNanos(); t > 0 {
+			it.deadline = unixNanos(time.Now().Add(time.Duration(t)))
+		}
+		n.deliver(to, name, it, nil)
 	case grpcprocv1.Kind_KIND_REPLY:
 		if to.Incarnation != n.id.Incarnation {
 			// A reply to a call of an earlier incarnation of this node,
@@ -1138,6 +1153,18 @@ func (n *Node) nodeDown(peer string, err error) {
 
 // wire starts an envelope from a process of this node to one of the node it
 // is sent to; the node names are the link's, not the envelope's.
+// unixNanos is a deadline in unix nanoseconds, held to what an int64 can
+// say: one past the year 2262 becomes the latest, which is as good as none
+// and, unlike an overflow, still in the future.
+func unixNanos(t time.Time) int64 {
+	if t.After(latest) {
+		return math.MaxInt64
+	}
+	return t.UnixNano()
+}
+
+var latest = time.Unix(0, math.MaxInt64)
+
 func wire(kind grpcprocv1.Kind, from, to PID, name string) *grpcprocv1.Envelope {
 	return &grpcprocv1.Envelope{
 		Kind:            kind,

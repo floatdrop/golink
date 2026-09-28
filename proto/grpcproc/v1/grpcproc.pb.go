@@ -291,7 +291,11 @@ type Envelope struct {
 	BodyType string `protobuf:"bytes,10,opt,name=body_type,json=bodyType,proto3" json:"body_type,omitempty"`
 	Body     []byte `protobuf:"bytes,11,opt,name=body,proto3" json:"body,omitempty"`
 	Hello    *Hello `protobuf:"bytes,12,opt,name=hello,proto3" json:"hello,omitempty"`
-	// Propagated context: trace headers, tenant, deadline. Never interpreted by
+	// A call's time left, in nanoseconds, when it was written: its caller
+	// waits that long for the reply. 0 for a caller with no deadline. A time
+	// left rather than a deadline, so that clocks need not agree.
+	TimeoutNanos int64 `protobuf:"varint,13,opt,name=timeout_nanos,json=timeoutNanos,proto3" json:"timeout_nanos,omitempty"`
+	// Propagated context: trace headers, tenant. Never interpreted by
 	// grpcproc itself.
 	Metadata      map[string]string `protobuf:"bytes,15,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
@@ -412,6 +416,13 @@ func (x *Envelope) GetHello() *Hello {
 	return nil
 }
 
+func (x *Envelope) GetTimeoutNanos() int64 {
+	if x != nil {
+		return x.TimeoutNanos
+	}
+	return 0
+}
+
 func (x *Envelope) GetMetadata() map[string]string {
 	if x != nil {
 		return x.Metadata
@@ -491,7 +502,7 @@ const file_grpcproc_v1_grpcproc_proto_rawDesc = "" +
 	"\x03PID\x12\x12\n" +
 	"\x04node\x18\x01 \x01(\tR\x04node\x12 \n" +
 	"\vincarnation\x18\x02 \x01(\x04R\vincarnation\x12\x0e\n" +
-	"\x02id\x18\x03 \x01(\x04R\x02id\"\xfa\x03\n" +
+	"\x02id\x18\x03 \x01(\x04R\x02id\"\x9f\x04\n" +
 	"\bEnvelope\x12%\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x11.grpcproc.v1.KindR\x04kind\x12)\n" +
 	"\x10from_incarnation\x18\x02 \x01(\x04R\x0ffromIncarnation\x12\x17\n" +
@@ -505,7 +516,8 @@ const file_grpcproc_v1_grpcproc_proto_rawDesc = "" +
 	"\tbody_type\x18\n" +
 	" \x01(\tR\bbodyType\x12\x12\n" +
 	"\x04body\x18\v \x01(\fR\x04body\x12(\n" +
-	"\x05hello\x18\f \x01(\v2\x12.grpcproc.v1.HelloR\x05hello\x12?\n" +
+	"\x05hello\x18\f \x01(\v2\x12.grpcproc.v1.HelloR\x05hello\x12#\n" +
+	"\rtimeout_nanos\x18\r \x01(\x03R\ftimeoutNanos\x12?\n" +
 	"\bmetadata\x18\x0f \x03(\v2#.grpcproc.v1.Envelope.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +

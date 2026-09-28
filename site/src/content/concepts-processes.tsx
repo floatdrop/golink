@@ -166,6 +166,19 @@ r, err := inventory.Reserve(ctx, p, reserve)`}</Code>
 					</p>
 					<Code caption="examples/actors/main.go">{region(actors, /^\/\/ HandleCall gets what was sent/, /^}/)}</Code>
 					<p>
+						The caller's deadline travels with the call. <C>m.Deadline()</C> says when the caller
+						stops waiting, and <C>m.Context(parent)</C> gives a context that ends then, so work for a
+						caller that gave up can stop, a deferred reply's above all. Between nodes it travels as
+						the time left, as gRPC's does, so clocks need not agree, and counts from when the call
+						arrives: the callee's deadline is the caller's, or a little after it. It is not applied
+						to the callee's own sends and calls unless it passes that context on, since a callee may
+						have to finish what it started for a caller that stopped waiting. Only the deadline
+						travels, not a caller's cancellation.
+					</p>
+					<Code>{`ctx, cancel := m.Context(p.Context())
+defer cancel()
+rows, err := db.QueryContext(ctx, query) // ends when nobody waits for the answer`}</Code>
+					<p>
 						A callee that exits before answering fails the call with <C>ErrNoProc</C>; a peer that
 						cannot be reached fails it with a <C>*LinkError</C>, which says whether the request ever
 						left the node. <A to="reference/errors/">Errors and exit reasons</A> lists them all.

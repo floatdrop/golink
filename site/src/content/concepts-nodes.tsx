@@ -107,6 +107,7 @@ defer node.Stop(ctx)      // before the server stops`}</Code>
   string body_type = 10;              // the body's message type, by full name
   bytes body = 11;                    // and its encoding
   Hello hello = 12;
+  int64 timeout_nanos = 13;           // a call's time left, so that clocks need not agree
   map<string, string> metadata = 15;  // trace context, tenant: never read by grpcproc
 }`}</Code>
 					<p>

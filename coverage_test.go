@@ -65,11 +65,18 @@ func TestMetadataMerge(t *testing.T) {
 		t.Fatalf("%v", md)
 	}
 	m := grpcproc.Msg[proto.Message]{Metadata: md}
-	if grpcproc.MetadataFrom(m.Context(t.Context()))["b"] != "2" {
+	withMD, cancel := m.Context(t.Context())
+	defer cancel()
+	if grpcproc.MetadataFrom(withMD)["b"] != "2" {
 		t.Fatal("Msg.Context")
 	}
-	if (grpcproc.Msg[proto.Message]{}).Context(ctx) != ctx {
-		t.Fatal("Msg.Context without metadata must return parent")
+	if _, ok := withMD.Deadline(); ok {
+		t.Fatal("a message that is not a call has no deadline")
+	}
+	plain, cancel := (grpcproc.Msg[proto.Message]{}).Context(ctx)
+	defer cancel()
+	if plain != ctx {
+		t.Fatal("Msg.Context without metadata or deadline must return parent")
 	}
 }
 

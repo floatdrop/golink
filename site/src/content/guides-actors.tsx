@@ -166,7 +166,8 @@ addr, err := node.Spawn(actor.Run(NewOrders(repo)), grpcproc.WithName("orders"))
 						caller that asked the actor to stop gets its answer. <C>actor.ErrNoReply</C> from{' '}
 						<C>HandleCall</C> sends nothing: the actor keeps the message and answers later with{' '}
 						<C>m.Reply(resp, err)</C>, from a later handler or from any goroutine. The caller waits
-						until then, or until its context ends.
+						until then, or until its context ends; <C>m.Deadline()</C> says when that is, so an
+						answer nobody waits for any more need not be worked out.
 					</p>
 				</>
 			)

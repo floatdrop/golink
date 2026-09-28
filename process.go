@@ -26,6 +26,9 @@ type item struct {
 	md     Metadata
 	ref    uint64 // call ref; 0 for a plain message
 	at     int64  // unix nanos, when it was queued; only when hooks want the wait
+	// deadline is when a call's caller stops waiting for the reply, in unix
+	// nanos; 0 for a caller with no deadline, and for a plain message.
+	deadline int64
 }
 
 type inspectReq struct {
@@ -160,18 +163,38 @@ type Msg[M proto.Message] struct {
 	Metadata Metadata
 	ref      uint64
 	taker    *proc // for a call: the process that took it, which holds it until it is answered
+	deadline int64 // unix nanos; see Deadline
 }
 
 // IsCall reports whether the sender waits for a Reply.
 func (m Msg[M]) IsCall() bool { return m.ref != 0 }
 
-// Context returns a context carrying the message's metadata, for Node.Send,
-// a Call, or any code taking a ctx, run on behalf of the message.
-func (m Msg[M]) Context(parent context.Context) context.Context {
-	if len(m.Metadata) == 0 {
-		return parent
+// Deadline reports when the caller of a call stops waiting for its Reply:
+// the deadline of the context it called with. ok is false for a plain
+// message and for a call whose context had no deadline. A remote call
+// carries the time its caller had left, so its deadline counts from when it
+// reached this node, a little after the caller's own; clocks need not agree.
+func (m Msg[M]) Deadline() (deadline time.Time, ok bool) {
+	if m.deadline == 0 {
+		return time.Time{}, false
 	}
-	return WithMetadata(parent, m.Metadata)
+	return time.Unix(0, m.deadline), true
+}
+
+// Context returns a context for code run on behalf of the message: it
+// carries the message's metadata, for Node.Send, a Call, or any code taking
+// a ctx, and for a call with a Deadline it ends then, when nobody waits for
+// the reply any more. Call cancel once that code is done, as with
+// context.WithDeadline.
+func (m Msg[M]) Context(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx := parent
+	if len(m.Metadata) > 0 {
+		ctx = WithMetadata(parent, m.Metadata)
+	}
+	if d, ok := m.Deadline(); ok {
+		return context.WithDeadline(ctx, d)
+	}
+	return ctx, func() {}
 }
 
 // Reply answers the message, if IsCall is true. The message holds all it
@@ -373,7 +396,7 @@ func (p *Process[M]) ReceiveTimeout(d time.Duration) (Msg[M], error) {
 }
 
 func toMsg[M proto.Message](taker *proc, it item) Msg[M] {
-	m := Msg[M]{From: it.from, Down: it.down, Exited: it.exited, Metadata: it.md, ref: it.ref}
+	m := Msg[M]{From: it.from, Down: it.down, Exited: it.exited, Metadata: it.md, ref: it.ref, deadline: it.deadline}
 	if it.ref != 0 {
 		m.taker = taker
 	}
