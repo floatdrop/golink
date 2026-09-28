@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/floatdrop/grpcproc"
@@ -75,71 +76,73 @@ func (f *fakeRegistrar) Register(_ context.Context, self grpcproc.Member) (func(
 }
 
 func TestMembershipDropsLinks(t *testing.T) {
-	m := &fakeMembership{events: make(chan grpcproc.MemberEvent)}
-	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithConfig(func(name string, cfg *grpcproc.Config) {
-		if name == "a" {
-			cfg.Membership = m
-		}
-	})}, "a", "b", "c")
-	a, b := c.Node("a"), c.Node("b")
-	w, ch := watcher(t, a)
-	silent, _ := b.Spawn[*testpb.Ping](func(p *grpcproc.Process[*testpb.Ping]) error {
-		for {
-			if _, err := p.Receive(); err != nil {
-				return err
+	synctest.Test(t, func(t *testing.T) {
+		m := &fakeMembership{events: make(chan grpcproc.MemberEvent)}
+		c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithConfig(func(name string, cfg *grpcproc.Config) {
+			if name == "a" {
+				cfg.Membership = m
 			}
+		})}, "a", "b", "c")
+		a, b := c.Node("a"), c.Node("b")
+		w, ch := watcher(t, a)
+		silent, _ := b.Spawn[*testpb.Ping](func(p *grpcproc.Process[*testpb.Ping]) error {
+			for {
+				if _, err := p.Receive(); err != nil {
+					return err
+				}
+			}
+		})
+		w.Monitor(silent)
+		if _, err := mustEcho(t, b).Call[*testpb.Pong](ctx(t), w, &testpb.Ping{N: 1}); err != nil {
+			t.Fatal(err)
 		}
+		inc := b.ID().Incarnation
+
+		// Events that settle nothing: about this node, about a node a has no
+		// link to, about another incarnation of b going away, about the one a
+		// links with, or an older one, being up.
+		m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "a", Incarnation: a.ID().Incarnation}}
+		m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "zzz", Incarnation: 9}}
+		m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: inc + 100}}
+		m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: inc}, Up: true}
+		m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: inc - 1}, Up: true}
+		time.Sleep(20 * time.Millisecond)
+		if len(a.Peers()) != 1 {
+			t.Fatalf("links dropped: %v", a.Peers())
+		}
+
+		// b leaves the cluster: its links go, and with them the monitor.
+		callErr := make(chan error, 1)
+		go func() { _, err := a.CallTo[*testpb.Pong](context.Background(), silent, &testpb.Ping{}); callErr <- err }()
+		time.Sleep(20 * time.Millisecond)
+		m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: inc}}
+		if d := recv(t, ch).Down; d == nil || d.Reason != grpcproc.ReasonNoConnection {
+			t.Fatalf("got %+v", d)
+		}
+		if err := <-callErr; !errors.Is(err, grpcproc.ErrNoConnection) || !strings.Contains(err.Error(), "left the cluster") {
+			t.Fatalf("pending call: %v", err)
+		}
+
+		// b is seen again as a new incarnation while a still links to the old one.
+		if _, err := mustEcho(t, b).Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 1}); err != nil {
+			t.Fatal(err)
+		}
+		m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: inc + 1}, Up: true}
+		waitNoPeer(t, a, "b")
+		// The b a linked with is now an old incarnation.
+		if _, err := mustEcho(t, b).Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 1}); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("b#%d is an old incarnation", inc)) {
+			t.Fatalf("a calls the old b: %v", err)
+		}
+
+		// A peer a only hears from (an inbound link, no outbound) leaves too.
+		cn := c.Node("c")
+		sink, got := collector(t, a)
+		_ = cn.SendTo(t.Context(), sink, &testpb.Ping{})
+		recv(t, got)
+		// Incarnation 0: whichever it was.
+		m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "c"}}
+		waitNoPeer(t, a, "c")
 	})
-	w.Monitor(silent)
-	if _, err := mustEcho(t, b).Call[*testpb.Pong](ctx(t), w, &testpb.Ping{N: 1}); err != nil {
-		t.Fatal(err)
-	}
-	inc := b.ID().Incarnation
-
-	// Events that settle nothing: about this node, about a node a has no
-	// link to, about another incarnation of b going away, about the one a
-	// links with, or an older one, being up.
-	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "a", Incarnation: a.ID().Incarnation}}
-	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "zzz", Incarnation: 9}}
-	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: inc + 100}}
-	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: inc}, Up: true}
-	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: inc - 1}, Up: true}
-	time.Sleep(20 * time.Millisecond)
-	if len(a.Peers()) != 1 {
-		t.Fatalf("links dropped: %v", a.Peers())
-	}
-
-	// b leaves the cluster: its links go, and with them the monitor.
-	callErr := make(chan error, 1)
-	go func() { _, err := a.CallTo[*testpb.Pong](context.Background(), silent, &testpb.Ping{}); callErr <- err }()
-	time.Sleep(20 * time.Millisecond)
-	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: inc}}
-	if d := recv(t, ch).Down; d == nil || d.Reason != grpcproc.ReasonNoConnection {
-		t.Fatalf("got %+v", d)
-	}
-	if err := <-callErr; !errors.Is(err, grpcproc.ErrNoConnection) || !strings.Contains(err.Error(), "left the cluster") {
-		t.Fatalf("pending call: %v", err)
-	}
-
-	// b is seen again as a new incarnation while a still links to the old one.
-	if _, err := mustEcho(t, b).Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 1}); err != nil {
-		t.Fatal(err)
-	}
-	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "b", Incarnation: inc + 1}, Up: true}
-	waitNoPeer(t, a, "b")
-	// The b a linked with is now an old incarnation.
-	if _, err := mustEcho(t, b).Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 1}); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("b#%d is an old incarnation", inc)) {
-		t.Fatalf("a calls the old b: %v", err)
-	}
-
-	// A peer a only hears from (an inbound link, no outbound) leaves too.
-	cn := c.Node("c")
-	sink, got := collector(t, a)
-	_ = cn.SendTo(t.Context(), sink, &testpb.Ping{})
-	recv(t, got)
-	// Incarnation 0: whichever it was.
-	m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: "c"}}
-	waitNoPeer(t, a, "c")
 }
 
 func waitNoPeer(t *testing.T, n *grpcproc.Node, peer string) {
@@ -163,88 +166,92 @@ func mustEcho(t *testing.T, n *grpcproc.Node) grpcproc.Addr[*testpb.Ping] {
 }
 
 func TestRegistrarLifecycle(t *testing.T) {
-	r := &fakeRegistrar{}
-	c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithConfig(func(name string, cfg *grpcproc.Config) {
-		if name == "a" {
-			cfg.Registrar = r
+	synctest.Test(t, func(t *testing.T) {
+		r := &fakeRegistrar{}
+		c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithConfig(func(name string, cfg *grpcproc.Config) {
+			if name == "a" {
+				cfg.Registrar = r
+			}
+		})}, "a", "b")
+		a, b := c.Node("a"), c.Node("b")
+		if err := a.Start(t.Context()); err != nil { // a second Start does nothing
+			t.Fatal(err)
 		}
-	})}, "a", "b")
-	a, b := c.Node("a"), c.Node("b")
-	if err := a.Start(t.Context()); err != nil { // a second Start does nothing
-		t.Fatal(err)
-	}
-	if len(r.members) != 1 || r.members[0] != (grpcproc.Member{Name: "a", Incarnation: a.ID().Incarnation, Addr: "a"}) {
-		t.Fatalf("registered %+v", r.members)
-	}
-	// Withdrawing comes last: by then a's processes are gone and b has seen
-	// their Down{shutdown}.
-	e, _ := a.Spawn(echo)
-	w, ch := watcher(t, b)
-	w.Monitor(e)
-	if _, err := e.Call[*testpb.Pong](ctx(t), w, &testpb.Ping{N: 1}); err != nil {
-		t.Fatal(err)
-	}
-	var procsAtWithdraw int
-	r.onWithdraw = func() { procsAtWithdraw = len(a.Processes()) }
-	c.Stop("a")
-	if d := recv(t, ch).Down; d == nil || d.Reason != grpcproc.ReasonShutdown {
-		t.Fatalf("got %+v", d)
-	}
-	if r.withdrawn != 1 || procsAtWithdraw != 0 {
-		t.Fatalf("withdrawn %d times, with %d processes left", r.withdrawn, procsAtWithdraw)
-	}
+		if len(r.members) != 1 || r.members[0] != (grpcproc.Member{Name: "a", Incarnation: a.ID().Incarnation, Addr: "a"}) {
+			t.Fatalf("registered %+v", r.members)
+		}
+		// Withdrawing comes last: by then a's processes are gone and b has seen
+		// their Down{shutdown}.
+		e, _ := a.Spawn(echo)
+		w, ch := watcher(t, b)
+		w.Monitor(e)
+		if _, err := e.Call[*testpb.Pong](ctx(t), w, &testpb.Ping{N: 1}); err != nil {
+			t.Fatal(err)
+		}
+		var procsAtWithdraw int
+		r.onWithdraw = func() { procsAtWithdraw = len(a.Processes()) }
+		c.Stop("a")
+		if d := recv(t, ch).Down; d == nil || d.Reason != grpcproc.ReasonShutdown {
+			t.Fatalf("got %+v", d)
+		}
+		if r.withdrawn != 1 || procsAtWithdraw != 0 {
+			t.Fatalf("withdrawn %d times, with %d processes left", r.withdrawn, procsAtWithdraw)
+		}
+	})
 }
 
 func TestStartAndStopErrors(t *testing.T) {
-	boom := errors.New("etcd down")
-	down := &fakeMembership{err: boom, events: make(chan grpcproc.MemberEvent)}
-	n, _ := grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Membership: down})
-	if err := n.Start(t.Context()); !errors.Is(err, boom) || !strings.Contains(err.Error(), "membership") {
-		t.Fatalf("got %v", err)
-	}
-	down.err = nil
-	if err := n.Start(t.Context()); err != nil || n.Info().StartedAt.IsZero() {
-		t.Fatalf("the retry: %v", err)
-	}
-	_ = n.Stop(t.Context())
-	n, _ = grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Registrar: &fakeRegistrar{err: boom}})
-	if err := n.Start(t.Context()); !errors.Is(err, boom) || !strings.Contains(err.Error(), "register") {
-		t.Fatalf("got %v", err)
-	}
-	// A Start that failed stops the watch it began, and the next Start tries
-	// again.
-	var watches []context.Context
-	watch := membershipFunc(func(ctx context.Context) (<-chan grpcproc.MemberEvent, error) {
-		watches = append(watches, ctx)
-		out := make(chan grpcproc.MemberEvent)
-		context.AfterFunc(ctx, func() { close(out) })
-		return out, nil
-	})
-	flaky := &fakeRegistrar{err: boom}
-	n, _ = grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Membership: watch, Registrar: flaky})
-	if err := n.Start(t.Context()); !errors.Is(err, boom) {
-		t.Fatalf("got %v", err)
-	}
-	if watches[0].Err() == nil {
-		t.Fatal("a failed Start left its watch running")
-	}
-	flaky.err = nil
-	if err := n.Start(t.Context()); err != nil || len(flaky.members) != 1 || len(watches) != 2 || watches[1].Err() != nil {
-		t.Fatalf("the second Start: %v, registered %d times, watched %d times", err, len(flaky.members), len(watches))
-	}
-	if n.Info().StartedAt.IsZero() {
-		t.Fatal("a started node has no start time")
-	}
-	_ = n.Stop(t.Context())
+	synctest.Test(t, func(t *testing.T) {
+		boom := errors.New("etcd down")
+		down := &fakeMembership{err: boom, events: make(chan grpcproc.MemberEvent)}
+		n, _ := grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Membership: down})
+		if err := n.Start(t.Context()); !errors.Is(err, boom) || !strings.Contains(err.Error(), "membership") {
+			t.Fatalf("got %v", err)
+		}
+		down.err = nil
+		if err := n.Start(t.Context()); err != nil || n.Info().StartedAt.IsZero() {
+			t.Fatalf("the retry: %v", err)
+		}
+		_ = n.Stop(t.Context())
+		n, _ = grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Registrar: &fakeRegistrar{err: boom}})
+		if err := n.Start(t.Context()); !errors.Is(err, boom) || !strings.Contains(err.Error(), "register") {
+			t.Fatalf("got %v", err)
+		}
+		// A Start that failed stops the watch it began, and the next Start tries
+		// again.
+		var watches []context.Context
+		watch := membershipFunc(func(ctx context.Context) (<-chan grpcproc.MemberEvent, error) {
+			watches = append(watches, ctx)
+			out := make(chan grpcproc.MemberEvent)
+			context.AfterFunc(ctx, func() { close(out) })
+			return out, nil
+		})
+		flaky := &fakeRegistrar{err: boom}
+		n, _ = grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Membership: watch, Registrar: flaky})
+		if err := n.Start(t.Context()); !errors.Is(err, boom) {
+			t.Fatalf("got %v", err)
+		}
+		if watches[0].Err() == nil {
+			t.Fatal("a failed Start left its watch running")
+		}
+		flaky.err = nil
+		if err := n.Start(t.Context()); err != nil || len(flaky.members) != 1 || len(watches) != 2 || watches[1].Err() != nil {
+			t.Fatalf("the second Start: %v, registered %d times, watched %d times", err, len(flaky.members), len(watches))
+		}
+		if n.Info().StartedAt.IsZero() {
+			t.Fatal("a started node has no start time")
+		}
+		_ = n.Stop(t.Context())
 
-	r := &fakeRegistrar{withdrawErr: boom}
-	n, _ = grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Registrar: r})
-	if err := n.Start(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if err := n.Stop(t.Context()); !errors.Is(err, boom) || !strings.Contains(err.Error(), "withdraw") {
-		t.Fatalf("got %v", err)
-	}
+		r := &fakeRegistrar{withdrawErr: boom}
+		n, _ = grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Registrar: r})
+		if err := n.Start(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if err := n.Stop(t.Context()); !errors.Is(err, boom) || !strings.Contains(err.Error(), "withdraw") {
+			t.Fatalf("got %v", err)
+		}
+	})
 }
 
 // membershipFunc adapts a function to grpcproc.Membership.
@@ -257,42 +264,46 @@ func (f membershipFunc) Watch(ctx context.Context) (<-chan grpcproc.MemberEvent,
 // Start after Stop refuses, and a registration that completes while Stop
 // runs is withdrawn by Start itself: Stop has already withdrawn what it knew.
 func TestStartAndStopTogether(t *testing.T) {
-	n, _ := grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}})
-	_ = n.Stop(t.Context())
-	if err := n.Start(t.Context()); !errors.Is(err, grpcproc.ErrNodeStopped) {
-		t.Fatalf("got %v", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		n, _ := grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}})
+		_ = n.Stop(t.Context())
+		if err := n.Start(t.Context()); !errors.Is(err, grpcproc.ErrNodeStopped) {
+			t.Fatalf("got %v", err)
+		}
 
-	entered, release := make(chan struct{}), make(chan struct{})
-	r := &fakeRegistrar{onRegister: func() { close(entered); <-release }}
-	n, _ = grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Registrar: r})
-	started := make(chan error, 1)
-	go func() { started <- n.Start(t.Context()) }()
-	<-entered
-	if err := n.Stop(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	close(release)
-	if err := <-started; !errors.Is(err, grpcproc.ErrNodeStopped) || r.withdrawn != 1 {
-		t.Fatalf("got %v, withdrawn %d times", err, r.withdrawn)
-	}
+		entered, release := make(chan struct{}), make(chan struct{})
+		r := &fakeRegistrar{onRegister: func() { close(entered); <-release }}
+		n, _ = grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Registrar: r})
+		started := make(chan error, 1)
+		go func() { started <- n.Start(t.Context()) }()
+		<-entered
+		if err := n.Stop(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		close(release)
+		if err := <-started; !errors.Is(err, grpcproc.ErrNodeStopped) || r.withdrawn != 1 {
+			t.Fatalf("got %v, withdrawn %d times", err, r.withdrawn)
+		}
+	})
 }
 
 // Start's ctx bounds Membership.Watch: a Watch that returns only after it
 // ended fails Start, and its watch is stopped.
 func TestStartBoundsTheWatch(t *testing.T) {
-	var watching context.Context
-	slow := membershipFunc(func(ctx context.Context) (<-chan grpcproc.MemberEvent, error) {
-		watching = ctx
-		<-ctx.Done() // ended by Start's deadline
-		out := make(chan grpcproc.MemberEvent)
-		close(out)
-		return out, nil
+	synctest.Test(t, func(t *testing.T) {
+		var watching context.Context
+		slow := membershipFunc(func(ctx context.Context) (<-chan grpcproc.MemberEvent, error) {
+			watching = ctx
+			<-ctx.Done() // ended by Start's deadline
+			out := make(chan grpcproc.MemberEvent)
+			close(out)
+			return out, nil
+		})
+		n, _ := grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Membership: slow})
+		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+		defer cancel()
+		if err := n.Start(ctx); !errors.Is(err, context.DeadlineExceeded) || watching.Err() == nil {
+			t.Fatalf("got %v", err)
+		}
 	})
-	n, _ := grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Membership: slow})
-	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-	defer cancel()
-	if err := n.Start(ctx); !errors.Is(err, context.DeadlineExceeded) || watching.Err() == nil {
-		t.Fatalf("got %v", err)
-	}
 }

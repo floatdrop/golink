@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -58,49 +59,53 @@ func within[T any](t *testing.T, ch <-chan T, what string) T {
 // has no link to yet, does not hold the peer's link while it dials:
 // Disconnect, which closes that link, does not wait out the dial.
 func TestDispatchAnswersDoNotWaitForADial(t *testing.T) {
-	c, entered, _ := dialsHeld(t)
-	a, b := c.Node("a"), c.Node("b")
-	called := make(chan error, 1)
-	go func() {
-		_, err := grpcproc.Named[*testpb.Ping]("a", "nobody").Call[*testpb.Ping](context.Background(), b, &testpb.Ping{})
-		called <- err
-	}()
-	within(t, entered, "dial")
-	start := time.Now()
-	a.Disconnect("b")
-	if waited := time.Since(start); waited > time.Second {
-		t.Fatalf("Disconnect waited %v for a dial", waited)
-	}
-	if err := within(t, called, "answer"); !errors.Is(err, grpcproc.ErrNoConnection) {
-		t.Fatalf("got %v", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		c, entered, _ := dialsHeld(t)
+		a, b := c.Node("a"), c.Node("b")
+		called := make(chan error, 1)
+		go func() {
+			_, err := grpcproc.Named[*testpb.Ping]("a", "nobody").Call[*testpb.Ping](context.Background(), b, &testpb.Ping{})
+			called <- err
+		}()
+		within(t, entered, "dial")
+		start := time.Now()
+		a.Disconnect("b")
+		if waited := time.Since(start); waited > time.Second {
+			t.Fatalf("Disconnect waited %v for a dial", waited)
+		}
+		if err := within(t, called, "answer"); !errors.Is(err, grpcproc.ErrNoConnection) {
+			t.Fatalf("got %v", err)
+		}
+	})
 }
 
 // Answers that wait for a dial go out in the order they were made, once the
 // link is up.
 func TestDispatchAnswersKeepTheirOrder(t *testing.T) {
-	c, entered, release := dialsHeld(t)
-	const n = 50
-	downs := make(chan string, n)
-	if _, err := c.Node("b").Spawn(func(p *grpcproc.Process[proto.Message]) error {
-		for i := range n {
-			p.Monitor(grpcproc.Name{Node: "a", Name: fmt.Sprint("x", i)})
-		}
-		for {
-			m, err := p.Receive()
-			if err != nil {
-				return err
+	synctest.Test(t, func(t *testing.T) {
+		c, entered, release := dialsHeld(t)
+		const n = 50
+		downs := make(chan string, n)
+		if _, err := c.Node("b").Spawn(func(p *grpcproc.Process[proto.Message]) error {
+			for i := range n {
+				p.Monitor(grpcproc.Name{Node: "a", Name: fmt.Sprint("x", i)})
 			}
-			downs <- m.Down.Name + " " + m.Down.Reason
+			for {
+				m, err := p.Receive()
+				if err != nil {
+					return err
+				}
+				downs <- m.Down.Name + " " + m.Down.Reason
+			}
+		}); err != nil {
+			t.Fatal(err)
 		}
-	}); err != nil {
-		t.Fatal(err)
-	}
-	within(t, entered, "dial")
-	release()
-	for i := range n {
-		if got, want := within(t, downs, "Down"), fmt.Sprint("x", i, " noproc"); got != want {
-			t.Fatalf("Down %d: got %q, want %q", i, got, want)
+		within(t, entered, "dial")
+		release()
+		for i := range n {
+			if got, want := within(t, downs, "Down"), fmt.Sprint("x", i, " noproc"); got != want {
+				t.Fatalf("Down %d: got %q, want %q", i, got, want)
+			}
 		}
-	}
+	})
 }
