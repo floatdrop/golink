@@ -61,8 +61,8 @@ func TestEventConversions(t *testing.T) {
 		if n := inspect.NodeInfo(inspect.NodeInfoToProto(grpcproc.NodeInfo{Links: []grpcproc.LinkInfo{{}}})); !n.StartedAt.IsZero() || !n.Links[0].EstablishedAt.IsZero() || !n.Links[0].RetryAt.IsZero() {
 			t.Fatalf("%+v", n)
 		}
-		down := grpcproc.LinkInfo{Peer: grpcproc.NodeID{Name: "b"}, Outbound: true, State: grpcproc.LinkDown, LastError: "refused", RetryAt: now, Queued: 5}
-		if n := inspect.NodeInfo(inspect.NodeInfoToProto(grpcproc.NodeInfo{Links: []grpcproc.LinkInfo{down}})); !n.Links[0].RetryAt.Equal(now) || n.Links[0].State != grpcproc.LinkDown || n.Links[0].Queued != 5 {
+		down := grpcproc.LinkInfo{Peer: grpcproc.NodeID{Name: "b"}, Outbound: true, State: grpcproc.LinkDown, LastError: "refused", RetryAt: now, Queued: 5, QueuedBytes: 7}
+		if n := inspect.NodeInfo(inspect.NodeInfoToProto(grpcproc.NodeInfo{Links: []grpcproc.LinkInfo{down}})); !n.Links[0].RetryAt.Equal(now) || n.Links[0].State != grpcproc.LinkDown || n.Links[0].Queued != 5 || n.Links[0].QueuedBytes != 7 {
 			t.Fatalf("%+v", n.Links[0])
 		}
 	})

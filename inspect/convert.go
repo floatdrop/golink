@@ -87,6 +87,7 @@ func nodeInfoTo(n grpcproc.NodeInfo) *inspectv1.NodeInfo {
 			LastError:     l.LastError,
 			RetryAt:       timeTo(l.RetryAt),
 			Queued:        uint32(l.Queued),
+			QueuedBytes:   uint64(l.QueuedBytes),
 		})
 	}
 	return out
@@ -161,6 +162,7 @@ func NodeInfo(n *inspectv1.NodeInfo) grpcproc.NodeInfo {
 			LastError:     l.GetLastError(),
 			RetryAt:       timeFrom(l.GetRetryAt()),
 			Queued:        int(l.GetQueued()),
+			QueuedBytes:   int(l.GetQueuedBytes()),
 		})
 	}
 	return out

@@ -157,6 +157,23 @@ type Config struct {
 	// up (not as an older incarnation than this node has seen), or
 	// Disconnect, ends the wait. Default 5s; negative dials again at once.
 	DialBackoff time.Duration
+	// MaxQueued bounds the link to each peer: while it holds this many
+	// envelopes not yet written (LinkInfo.Queued), a message or a call to
+	// the peer fails at once with a *LinkError whose Err is ErrLinkBusy and
+	// whose Unsent is set, so sending it again later cannot deliver it
+	// twice. Each peer has a link of its own, so a peer that cannot keep up
+	// refuses only what is sent to it. Replies, Downs, monitors and exits
+	// are queued regardless, and count: the peer waits for a reply or a
+	// Down, and a refused one would have to cut its link to this node. Zero,
+	// the default, is no bound: a send never fails for a slow peer, and the
+	// link holds whatever the peer has not yet taken.
+	MaxQueued int
+	// MaxQueuedBytes bounds the link to each peer as MaxQueued does, by the
+	// bytes of the message bodies it holds (LinkInfo.QueuedBytes, counted as
+	// Bytes is): a message or a call fails while they come to this much, so
+	// the last one taken can carry the link past it. Zero, the default, is no
+	// bound.
+	MaxQueuedBytes int
 }
 
 // Node hosts processes and links to peers. It is a plain value the
@@ -166,6 +183,8 @@ type Node struct {
 	id    NodeID
 	log   *slog.Logger
 	hooks Hooks
+
+	linkBound bound // Config.MaxQueued and MaxQueuedBytes, for messages and calls
 
 	ctx    context.Context // parent of every process; cancelled first by Stop
 	cancel context.CancelFunc
@@ -283,6 +302,7 @@ func NewNode(cfg Config) (*Node, error) {
 		settling: map[string]int{},
 	}
 	n.settled = sync.NewCond(&n.mu)
+	n.linkBound = bound{items: int64(cfg.MaxQueued), bytes: int64(cfg.MaxQueuedBytes)}
 	n.log = cfg.Logger.With("node", cfg.Name)
 	return n, nil
 }

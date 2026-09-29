@@ -62,6 +62,8 @@ message Link {
   google.protobuf.Timestamp retry_at = 9;
   // Outbound: envelopes waiting to be written.
   uint32 queued = 10;
+  // Outbound: the bytes of their message bodies.
+  uint64 queued_bytes = 11;
 }
 
 message NodeInfo {

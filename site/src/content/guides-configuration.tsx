@@ -35,6 +35,8 @@ export const guidesConfiguration: Doc = {
 						[<C>DialOptions</C>, 'None. Credentials, keepalive and interceptors for every outbound connection.'],
 						[<C>DialTimeout</C>, '5s. Bounds a dial: resolve, connect, handshake.'],
 						[<C>DialBackoff</C>, '5s. The longest wait before dialing a peer again after failed dials; negative dials again at once.'],
+						[<C>MaxQueued</C>, 'None. How many envelopes the link to a peer may hold before sends and calls to it fail at once.'],
+						[<C>MaxQueuedBytes</C>, 'None. The same bound, in bytes of message bodies.'],
 						[<C>Authorize</C>, 'None. Runs for every inbound link with the peer\'s credentials and claimed identity.'],
 						[<C>Logger</C>, 'slog.Default().'],
 						[<C>Hooks</C>, 'None. The observability tap.'],
@@ -125,6 +127,16 @@ export const guidesConfiguration: Doc = {
 						there gets <C>Down{'{'}noconnection{'}'}</C> at once. The first wait is a 32nd of it,
 						and each failure doubles it. Set it negative to dial again at once, which is what{' '}
 						<C>grpcproctest</C> does so that a test's call right after a heal reaches the peer.
+					</p>
+					<p>
+						<C>MaxQueued</C> and <C>MaxQueuedBytes</C> bound the link to each peer, which is
+						unbounded by default. While a link holds that many envelopes not yet written, or that
+						many bytes of message bodies, a send or a call to its peer fails at once with a{' '}
+						<C>*LinkError</C> whose <C>Err</C> is <C>ErrLinkBusy</C> and whose <C>Unsent</C> is set:
+						the peer cannot keep up, and the message is still on this node, for the sender to drop
+						or send again later. Only that peer's senders are refused. Replies, <C>Down</C>s,
+						monitors and exits are queued regardless. <C>LinkInfo.Queued</C> and{' '}
+						<C>QueuedBytes</C> show how close each link is to its bound.
 					</p>
 				</>
 			)

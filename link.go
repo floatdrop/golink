@@ -56,28 +56,39 @@ func (s *linkStats) fill(li *LinkInfo) {
 // ---------- outbound ----------
 
 type outLink struct {
-	node     *Node
-	peer     NodeID
-	cc       *grpc.ClientConn
-	stream   grpc.BidiStreamingClient[grpcprocv1.Frame, grpcprocv1.Frame]
-	cancel   context.CancelFunc
-	q        *queue[*grpcprocv1.Envelope]
-	done     chan struct{}
-	once     sync.Once
-	closing  atomic.Bool
-	inflight atomic.Int64 // envelopes the writer has taken and not yet written
+	node    *Node
+	peer    NodeID
+	cc      *grpc.ClientConn
+	stream  grpc.BidiStreamingClient[grpcprocv1.Frame, grpcprocv1.Frame]
+	cancel  context.CancelFunc
+	q       *queue[*grpcprocv1.Envelope]
+	done    chan struct{}
+	once    sync.Once
+	closing atomic.Bool
 	linkStats
 }
 
+// send queues env for the writer. A message or a call is refused while the
+// link holds as much as Config.MaxQueued and MaxQueuedBytes allow; the rest
+// is queued regardless.
 func (l *outLink) send(env *grpcprocv1.Envelope) error {
-	if !l.q.push(env) {
-		return &LinkError{Peer: l.peer.Name, Err: ErrNoConnection, Unsent: true}
+	var limit bound
+	if k := env.GetKind(); k == grpcprocv1.Kind_KIND_SEND || k == grpcprocv1.Kind_KIND_CALL {
+		limit = l.node.linkBound
 	}
-	return nil
+	ok, full := l.q.offer(env, int64(bodySize(env)), limit)
+	switch {
+	case ok:
+		return nil
+	case full:
+		return &LinkError{Peer: l.peer.Name, Err: ErrLinkBusy, Unsent: true}
+	}
+	return &LinkError{Peer: l.peer.Name, Err: ErrNoConnection, Unsent: true}
 }
 
 func (l *outLink) info() LinkInfo {
-	li := LinkInfo{Peer: l.peer, Outbound: true, Queued: l.q.len() + int(l.inflight.Load())}
+	li := LinkInfo{Peer: l.peer, Outbound: true}
+	li.Queued, li.QueuedBytes = l.q.holding()
 	l.fill(&li)
 	return li
 }
@@ -106,11 +117,13 @@ func (l *outLink) writeLoop() {
 		// Everything queued since the last write goes out together: under
 		// load, many envelopes share one gRPC message.
 		batch := l.q.drain()
-		l.inflight.Store(int64(len(batch)))
 		for len(batch) > 0 {
 			k, body := frameOf(batch)
-			if err := l.stream.Send(&grpcprocv1.Frame{Envelopes: batch[:k]}); err != nil {
-				l.inflight.Store(0)
+			err := l.stream.Send(&grpcprocv1.Frame{Envelopes: batch[:k]})
+			// Written or lost, the frame is off the link's hands: room for
+			// more (Config.MaxQueued).
+			l.q.release(int64(k), int64(body))
+			if err != nil {
 				// The frame may have gone out before the stream broke: its
 				// messages are dead letters, and its calls fail with the
 				// peer, as possibly handled. The rest of the batch never
@@ -125,7 +138,6 @@ func (l *outLink) writeLoop() {
 			}
 			l.messages.Add(uint64(k))
 			l.bytes.Add(uint64(body))
-			l.inflight.Add(-int64(k))
 			batch = batch[k:]
 		}
 		// Sealed as it half-closes: a send that comes later fails at once, as
@@ -367,8 +379,9 @@ func (n *Node) finishDial(peer string, d *dialOp) {
 			discard, l, err = l, nil, ErrNodeStopped
 		} else {
 			// Ahead of anything a sender queues once it sees the link.
+			// Replies and Downs, which no bound refuses.
 			for _, env := range answers {
-				l.q.push(env)
+				_ = l.send(env)
 			}
 			answers = nil
 			l.reconnects = n.dials[peer]
