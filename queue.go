@@ -9,7 +9,9 @@ import (
 
 // queue is an unbounded multi-producer, single-consumer queue. Unbounded is
 // deliberate: like Erlang, a send never blocks, which rules out distributed
-// deadlocks and keeps one slow process from stalling the link it shares.
+// deadlocks and keeps one slow process from stalling the link it shares. A
+// link's queue may be bounded all the same (see offer), since its link is
+// its own: a full one refuses an item rather than block its producer.
 //
 // Producers append to in under the mutex. The consumer owns out: when it
 // runs dry, it swaps in for it, so the consumer takes the lock once per batch
@@ -35,6 +37,12 @@ type queue[T any] struct {
 	pushed int64        // guarded by mu
 	popped atomic.Int64 // written by the consumer only
 	peak   atomic.Int64 // the most queued at a batch swap
+
+	// What offer counts: items offered and not yet released, which the
+	// consumer does once it is done with them rather than when it takes
+	// them, and the bytes they were offered with. Guarded by mu, which the
+	// consumer takes once per release.
+	held, heldBytes int64
 
 	stamped  bool
 	inSince  int64        // guarded by mu: when in stopped being empty
@@ -65,6 +73,59 @@ func (q *queue[T]) push(v T) bool {
 	default:
 	}
 	return true
+}
+
+// bound is how much a queue may hold before offer refuses more, in items
+// and in bytes. Zero is no bound.
+type bound struct{ items, bytes int64 }
+
+// full reports whether a queue holding items and bytes has reached b.
+func (b bound) full(items, bytes int64) bool {
+	return b.items > 0 && items >= b.items || b.bytes > 0 && bytes >= b.bytes
+}
+
+// offer queues v, of size bytes, as push does, and holds it until the
+// consumer releases it. It refuses v if the queue is closed, or if it is
+// full, holding as much as limit allows already: then full is set. So v may
+// carry the queue past limit's bytes, never past its items. What is offered
+// with no limit counts all the same. Not for stamped queues.
+func (q *queue[T]) offer(v T, size int64, limit bound) (ok, full bool) {
+	q.mu.Lock()
+	switch {
+	case q.closed:
+		q.mu.Unlock()
+		return false, false
+	case limit.full(q.held, q.heldBytes):
+		q.mu.Unlock()
+		return false, true
+	}
+	q.in = append(q.in, v)
+	q.pushed++
+	q.held++
+	q.heldBytes += size
+	q.mu.Unlock()
+	select {
+	case q.notify <- struct{}{}:
+	default:
+	}
+	return true, false
+}
+
+// release lets go of items that offer counted, of size bytes in all, once
+// the consumer is done with them. Consumer only.
+func (q *queue[T]) release(items, size int64) {
+	q.mu.Lock()
+	q.held -= items
+	q.heldBytes -= size
+	q.mu.Unlock()
+}
+
+// holding is what offer counts: the items offered and not yet released,
+// and their bytes.
+func (q *queue[T]) holding() (items, bytes int) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return int(q.held), int(q.heldBytes)
 }
 
 // len is how many items are queued, taken by neither tryPop nor drain.

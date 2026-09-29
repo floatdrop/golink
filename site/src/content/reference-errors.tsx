@@ -39,6 +39,14 @@ export const referenceErrors: Doc = {
 								</>
 							],
 							[
+								<C>ErrLinkBusy</C>,
+								<>
+									The link to the peer holds as much as <C>Config.MaxQueued</C> or{' '}
+									<C>MaxQueuedBytes</C> allow: the peer cannot keep up. It comes as a{' '}
+									<C>*LinkError</C> with <C>Unsent</C> set, and matches <C>ErrNoConnection</C> too.
+								</>
+							],
+							[
 								<C>ErrType</C>,
 								<>
 									The process does not accept this message type, or a <C>Call</C>'s reply is not the{' '}
@@ -131,8 +139,9 @@ if errors.Is(err, grpcproc.ErrNoConnection) {
 					<ul>
 						<li>
 							<strong>A <C>*LinkError</C> with <C>Unsent</C> set</strong> is the one error that
-							says no. The peer could not be reached, or dials to it are backed off, and the
-							message is still on this node. Sending it again cannot deliver it twice.
+							says no. The peer could not be reached, dials to it are backed off, or its link is
+							full, and the message is still on this node. Sending it again cannot deliver it
+							twice.
 						</li>
 						<li>
 							<strong>A <C>*LinkError</C> without it</strong> says the message may have been

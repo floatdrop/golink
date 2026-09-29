@@ -2,6 +2,7 @@ package grpcproc_test
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"net"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/floatdrop/grpcproc"
 	"github.com/floatdrop/grpcproc/grpcproctest"
@@ -400,6 +402,141 @@ func TestLinkErrorUnsent(t *testing.T) {
 		le, ok = errors.AsType[*grpcproc.LinkError](err)
 		if !ok || !le.Unsent || !errors.Is(err, grpcproc.ErrNoConnection) {
 			t.Fatalf("a call that never left: %v", err)
+		}
+	})
+}
+
+// stall makes a server's streams stop reading until resume is closed, as a
+// peer that cannot keep up does: what is sent to it waits in gRPC's flow
+// control, and then on the sender's link.
+func stall(resume <-chan struct{}) grpc.ServerOption {
+	return grpc.StreamInterceptor(func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		return handler(srv, stalledStream{ss, resume})
+	})
+}
+
+type stalledStream struct {
+	grpc.ServerStream
+	resume <-chan struct{}
+}
+
+func (s stalledStream) RecvMsg(m any) error {
+	select {
+	case <-s.resume:
+	case <-s.Context().Done():
+	}
+	return s.ServerStream.RecvMsg(m)
+}
+
+// mesh starts a node configured by cfg for each name, each behind an
+// in-memory listener whose server takes opts[name], all able to reach one
+// another.
+func mesh(t *testing.T, cfg grpcproc.Config, opts map[string][]grpc.ServerOption, names ...string) map[string]*grpcproc.Node {
+	t.Helper()
+	lns := map[string]*bufconn.Listener{}
+	for _, name := range names {
+		lns[name] = bufconn.Listen(1 << 20)
+	}
+	nodes := map[string]*grpcproc.Node{}
+	for _, name := range names {
+		cfg.Name = name
+		cfg.Resolver = grpcproc.ResolverFunc(func(_ context.Context, node string) (string, error) { return "passthrough:///" + node, nil })
+		cfg.DialOptions = []grpc.DialOption{
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) { return lns[addr].DialContext(ctx) }),
+		}
+		n, err := grpcproc.NewNode(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv := grpc.NewServer(opts[name]...)
+		n.Register(srv)
+		go func() { _ = srv.Serve(lns[name]) }()
+		t.Cleanup(func() {
+			stop, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = n.Stop(stop)
+			srv.Stop()
+		})
+		if err := n.Start(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		nodes[name] = n
+	}
+	return nodes
+}
+
+// A peer that cannot keep up fills the link to it, and then what is sent to
+// it fails at once, as unsent, while other peers are sent to as before. Once
+// it catches up, everything its link took arrives, in order, and nothing it
+// refused.
+func TestSlowPeerFillsItsOwnLink(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		resume := make(chan struct{})
+		nodes := mesh(t, grpcproc.Config{MaxQueuedBytes: 1 << 20}, map[string][]grpc.ServerOption{"b": {stall(resume)}}, "a", "b", "c")
+		a := nodes["a"]
+		slow, got := collector(t, nodes["b"])
+		fast := spawnEcho(t, nodes["c"])
+		send := func(i int) error {
+			body := make([]byte, 256<<10) // 4 of them fill the link
+			binary.BigEndian.PutUint64(body, uint64(i))
+			return slow.Send(ctx(t), a, &wrapperspb.BytesValue{Value: body})
+		}
+
+		// Flow control takes the first few; the link is full once the writer
+		// waits on it, not merely because it has yet to run.
+		sent := 0
+		var err error
+		for sent < 200 {
+			if err = send(sent); err != nil {
+				synctest.Wait()
+				if err = send(sent); err != nil {
+					break
+				}
+			}
+			sent++
+		}
+		le, ok := errors.AsType[*grpcproc.LinkError](err)
+		if !ok || !le.Unsent || !errors.Is(err, grpcproc.ErrLinkBusy) {
+			t.Fatalf("after %d sends: %v", sent, err)
+		}
+		if _, err := slow.Call[proto.Message](ctx(t), a, &testpb.Ping{}); !errors.Is(err, grpcproc.ErrLinkBusy) {
+			t.Fatalf("a call to the slow peer: %v", err)
+		}
+		link := func() grpcproc.LinkInfo {
+			t.Helper()
+			for _, l := range a.Info().Links {
+				if l.Peer.Name == "b" && l.Outbound {
+					return l
+				}
+			}
+			t.Fatal("no link to b")
+			panic("unreachable")
+		}
+		size := proto.Size(&wrapperspb.BytesValue{Value: make([]byte, 256<<10)})
+		if l := link(); l.Queued != 4 || l.QueuedBytes != 4*size {
+			t.Fatalf("queued %d, %d bytes", l.Queued, l.QueuedBytes)
+		}
+		if r, err := fast.Call[*testpb.Pong](ctx(t), a, &testpb.Ping{N: 1}); err != nil || r.N != 2 {
+			t.Fatalf("a call to another peer: %v %v", r, err)
+		}
+
+		close(resume)
+		for i := range sent {
+			m := recv(t, got)
+			if v := m.Body.(*wrapperspb.BytesValue).GetValue(); binary.BigEndian.Uint64(v) != uint64(i) {
+				t.Fatalf("got %d, want %d", binary.BigEndian.Uint64(v), i)
+			}
+		}
+		synctest.Wait()
+		if l := link(); l.Queued != 0 || l.QueuedBytes != 0 {
+			t.Fatalf("queued %d, %d bytes once caught up", l.Queued, l.QueuedBytes)
+		}
+		if err := send(sent); err != nil {
+			t.Fatal(err)
+		}
+		if v := recv(t, got).Body.(*wrapperspb.BytesValue).GetValue(); binary.BigEndian.Uint64(v) != uint64(sent) {
+			t.Fatalf("got %d after catching up", binary.BigEndian.Uint64(v))
 		}
 	})
 }

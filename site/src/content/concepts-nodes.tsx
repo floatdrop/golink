@@ -150,9 +150,10 @@ defer node.Stop(ctx)      // before the server stops`}</Code>
 					<p>
 						Every link failure is a <C>*LinkError</C>, which <C>errors.Is</C> matches to{' '}
 						<C>ErrNoConnection</C>. Its <C>Unsent</C> field is the one thing that makes a retry safe:
-						it says the message never left this node, because the peer could not be reached or dials
-						to it are backed off, so sending it again cannot deliver it twice. A <C>LinkError</C>{' '}
-						without <C>Unsent</C> claims nothing, and the message may have been handled.
+						it says the message never left this node, because the peer could not be reached, dials to
+						it are backed off, or its link is full, so sending it again cannot deliver it twice. A{' '}
+						<C>LinkError</C> without <C>Unsent</C> claims nothing, and the message may have been
+						handled.
 					</p>
 					<p>
 						A reply or a <C>Down</C> that cannot be routed back to a peer cuts that peer's stream to
@@ -262,7 +263,10 @@ defer node.Stop(ctx)      // before the server stops`}</Code>
 						bounds. Mailboxes are unbounded on purpose: a full mailbox in one
 						process would otherwise stall the shared stream for every other process behind it.
 						Backpressure is the application's, and the mailbox depth and each link's queue are
-						visible so it can be built.
+						visible so it can be built. A link's queue is its peer's alone, so it can be bounded
+						without stalling anyone else: with <C>MaxQueued</C> or <C>MaxQueuedBytes</C> set, a send
+						or a call to a peer that cannot keep up fails at once with <C>ErrLinkBusy</C>, as{' '}
+						<C>Unsent</C>.
 					</p>
 					<Aside title="Coming from Erlang">
 						<p>

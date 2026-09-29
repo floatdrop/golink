@@ -269,6 +269,63 @@ func TestLostEnvelopes(t *testing.T) {
 	})
 }
 
+// A full link refuses messages and calls to its peer at once, as unsent;
+// what the peer waits for, and what cannot be refused, is queued regardless,
+// and counted. Once the writer has written, there is room again.
+func TestLinkBound(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		n, err := NewNode(Config{Name: "a", Resolver: StaticResolver{}, Incarnation: 1, MaxQueued: 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = n.Stop(context.Background()) })
+		l := queuedLink(t, n, NodeID{Name: "b", Incarnation: 2})
+		type ping = grpcprocv1.Hello
+		from, to := PID{Node: "a", Incarnation: 1, ID: 1}, PID{Node: "b", Incarnation: 2, ID: 1}
+		peer := Addr[*ping]{pid: to}
+		for range 2 {
+			if err := peer.Send(t.Context(), n, &ping{}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		busy := func(what string, err error) {
+			t.Helper()
+			le, ok := errors.AsType[*LinkError](err)
+			if !ok || !le.Unsent || le.Peer != "b" || !errors.Is(err, ErrLinkBusy) || !errors.Is(err, ErrNoConnection) {
+				t.Fatalf("%s to a full link: %v", what, err)
+			}
+		}
+		busy("a send", peer.Send(t.Context(), n, &ping{}))
+		_, err = peer.Call[*ping](t.Context(), n, &ping{})
+		busy("a call", err)
+
+		for _, err := range []error{
+			n.reply(from, to, 1, nil, &ping{}, grpcprocv1.Status_STATUS_OK, "", false),
+			n.down(from, to, 2, ReasonNormal, false),
+			n.monitor(from, to, 3),
+			n.demonitor(from, to, 3),
+			n.exit(t.Context(), from, to, ReasonKilled),
+		} {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if q := l.info().Queued; q != 7 {
+			t.Fatalf("queued %d", q)
+		}
+
+		l.stream = &fakeClientStream{}
+		go l.writeLoop()
+		synctest.Wait()
+		if q := l.info().Queued; q != 0 {
+			t.Fatalf("queued %d once written", q)
+		}
+		if err := peer.Send(t.Context(), n, &ping{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
 func TestFrameSplitting(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		env := func(body, md int) *grpcprocv1.Envelope {

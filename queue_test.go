@@ -99,3 +99,61 @@ func TestQueueSealIfEmpty(t *testing.T) {
 		}
 	})
 }
+
+// A bound refuses what is offered under it once the queue holds as much as
+// it allows, by items or by bytes, counting everything offered until the
+// consumer releases it: taking it is not enough.
+func TestQueueBound(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		q := newQueue[int](false)
+		two := bound{items: 2}
+		for i := range 2 {
+			if ok, full := q.offer(i, 10, two); !ok || full {
+				t.Fatalf("offer %d refused", i)
+			}
+		}
+		if ok, full := q.offer(2, 10, two); ok || !full {
+			t.Fatal("a full queue took an item")
+		}
+		// No bound: taken, and counted.
+		if ok, _ := q.offer(3, 10, bound{}); !ok {
+			t.Fatal("an offer with no bound refused")
+		}
+		if items, bytes := q.holding(); items != 3 || bytes != 30 {
+			t.Fatalf("holding %d, %d bytes", items, bytes)
+		}
+		q.drain()
+		if ok, _ := q.offer(4, 10, two); ok {
+			t.Fatal("room before the consumer released anything")
+		}
+		q.release(2, 20)
+		if ok, _ := q.offer(4, 10, two); !ok {
+			t.Fatal("no room after a release")
+		}
+		if items, bytes := q.holding(); items != 2 || bytes != 20 {
+			t.Fatalf("holding %d, %d bytes", items, bytes)
+		}
+
+		// The item that reaches the bytes goes in; the next waits for room.
+		b := newQueue[int](false)
+		kb := bound{bytes: 1000}
+		for _, size := range []int64{600, 600} {
+			if ok, _ := b.offer(0, size, kb); !ok {
+				t.Fatalf("%d bytes refused", size)
+			}
+		}
+		if ok, full := b.offer(0, 1, kb); ok || !full {
+			t.Fatal("took an item past the bytes")
+		}
+		b.release(1, 600)
+		if ok, _ := b.offer(0, 1, kb); !ok {
+			t.Fatal("no room after a release")
+		}
+
+		// Closed is not full.
+		b.close()
+		if ok, full := b.offer(0, 0, bound{}); ok || full {
+			t.Fatal("a closed queue")
+		}
+	})
+}

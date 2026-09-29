@@ -87,6 +87,7 @@ type LinkInfo struct {
 	Messages      uint64 // envelopes: messages, calls, replies, monitors, downs
 	Bytes         uint64 // message bodies carried, not counting framing
 	Queued        int    // outbound: envelopes waiting to be written
+	QueuedBytes   int    // outbound: their bodies' bytes, as Bytes counts them
 	LastError     string // why dials to the peer failed; set with RetryAt
 	// RetryAt is set on an outbound link that is down because dials to the
 	// peer failed: sends to the peer fail at once until then, and the first

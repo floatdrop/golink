@@ -182,6 +182,21 @@ message Envelope {                                   // one flat message, decode
   it, and in a one-way partition every reply would otherwise wait out a dial
   again. `LinkInfo` shows the peer as a down outbound link with its
   `RetryAt`. Retries are not part of it, since delivery stays at-most-once.
+- **A link's queue can be bounded.** It is unbounded by default, as Erlang's
+  distribution buffer is. `Config.MaxQueued` and `Config.MaxQueuedBytes`
+  bound what a link holds, the envelopes queued or being written and the
+  bytes of their bodies, which is what `LinkInfo.Queued` and `QueuedBytes`
+  count. A message or a call to a peer whose link is full fails at once, as a `LinkError` whose
+  `Err` is `ErrLinkBusy` and whose `Unsent` is set, and the sender decides:
+  drop it, send it again later, or shed the load behind it. Each peer has a
+  link of its own, so this is not the bounded mailbox that was rejected: a
+  peer that cannot keep up refuses what is sent to it, and holds up no one
+  else. Erlang suspends a sender on a busy distribution port (`+zdbbl`);
+  grpcproc fails the send instead, since a sender that blocks on a peer can
+  deadlock with it. Replies, `Down`s, monitors and exits are queued
+  regardless, and count: a refused reply or `Down` would have to cut the
+  peer's link (below), and the others are few. Past the link, gRPC's flow
+  control bounds what the transport holds.
 - **A reply or a `Down` that cannot be routed cuts the peer's link.** The peer
   waits for those over its own link to this node, which stays up when this
   node cannot reach it back, so it would never learn that one was lost: a
@@ -323,7 +338,8 @@ processes too. Mailboxes are unbounded so that delivery never blocks a link
 (the Erlang choice; a bounded mailbox in one process would stall every other
 process behind it on the shared stream). Backpressure is an application
 concern; the mailbox depth, and each link's queue, are visible (see
-Observability) so it can be one.
+Observability) so it can be one. A link's queue is its peer's alone, so it
+can be bounded as well (`Config.MaxQueued`, under Wire protocol).
 
 Exit reasons: `normal`, `noproc`, `noconnection`, `shutdown`, `killed`, a
 panic (`panic: …` with the stack logged), or the error string the function
@@ -841,7 +857,7 @@ leader's singleton, and its state the singleton's.
 | One monitor = one stream | — | Loses message-before-Down ordering, costs a goroutine per monitor |
 | Priority mailbox queues | ergo (4 queues) | Inspection runs inside `Receive` instead; `Down` must stay in order with messages |
 | Two-way links | Erlang/OTP | A one-way link is a monitor on the wire and needs no agreement between nodes; see Links |
-| Bounded mailboxes | GoAkt | A full mailbox would stall the shared link for everyone |
+| Bounded mailboxes | GoAkt | A full mailbox would stall the shared link for everyone; a link's queue is per peer, and can be bounded (`Config.MaxQueued`) |
 | Metrics per PID by default | GoAkt | Cardinality; label is the key, PID is available on request |
 | Embedded web UI | ergo Observer | A UI is a client; the core exposes the gRPC surface it would need |
 | gob / custom codec | first prototype | protobuf is already the service's contract; a body travels as its full name and bytes, and generated types register themselves |

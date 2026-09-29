@@ -110,6 +110,7 @@ const (
 var (
 	ErrNoProc       = errors.New("grpcproc: no such process")
 	ErrNoConnection = errors.New("grpcproc: no connection to node")
+	ErrLinkBusy     = errors.New("grpcproc: link queue full") // see Config.MaxQueued
 	ErrNameTaken    = errors.New("grpcproc: name already registered")
 	ErrNotLocal     = errors.New("grpcproc: pid does not belong to this node")
 	ErrNodeStopped  = errors.New("grpcproc: node stopped")
@@ -147,14 +148,16 @@ type LinkError struct {
 	Peer string
 	Err  error
 	// Unsent reports that the message never left this node, so sending it
-	// again cannot deliver it twice: the peer could not be reached, or dials
-	// to it are backed off. Otherwise it may have been handled: a Call whose
-	// link broke while it waited for the reply.
+	// again cannot deliver it twice: the peer could not be reached, dials to
+	// it are backed off, or its link was full (ErrLinkBusy). Otherwise it
+	// may have been handled: a Call whose link broke while it waited for the
+	// reply.
 	Unsent bool
 }
 
 func (e *LinkError) Error() string { return fmt.Sprintf("grpcproc: link to %s: %v", e.Peer, e.Err) }
 func (e *LinkError) Unwrap() error { return e.Err }
 
-// Is reports true for ErrNoConnection: every link failure is one.
+// Is reports true for ErrNoConnection: every link failure is one, a full
+// link's included.
 func (*LinkError) Is(target error) bool { return target == ErrNoConnection }

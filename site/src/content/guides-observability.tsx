@@ -110,10 +110,11 @@ export const guidesObservability: Doc = {
 						A <C>LinkInfo</C> describes one direction of traffic with a peer: <C>Peer</C>, whether
 						this node opened the stream (<C>Outbound</C>), its <C>State</C>, when it was established
 						and how many times it reconnected, envelopes and bytes carried, envelopes <C>Queued</C>{' '}
-						to be written, and for a peer whose dials fail, the <C>LastError</C> and the{' '}
-						<C>RetryAt</C> before which every send to it fails at once. A <C>NodeInfo</C> holds the
-						node's identity and address, when it started, how many processes it runs and has
-						spawned and exited, its dead letters, and its links, ordered by peer name.
+						to be written and their <C>QueuedBytes</C>, and for a peer whose dials fail, the{' '}
+						<C>LastError</C> and the <C>RetryAt</C> before which every send to it fails at once. A{' '}
+						<C>NodeInfo</C> holds the node's identity and address, when it started, how many
+						processes it runs and has spawned and exited, its dead letters, and its links, ordered by
+						peer name.
 					</p>
 				</>
 			)
