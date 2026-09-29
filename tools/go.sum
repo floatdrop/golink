@@ -1,9 +1,9 @@
-github.com/floatdrop/grpcproc v0.1.0 h1:afEFoiL38xAIa1iBwJyTRCUckP6FhXCG5OTdngDdRzk=
-github.com/floatdrop/grpcproc v0.1.0/go.mod h1:lUNiPLRR97lqydfE+CturNB9EZHd0lJuVktmF408bc0=
-github.com/floatdrop/grpcproc/cron v0.1.0 h1:NpfDIX3DnWsN7dsgqKAUZojclPJCNhuk6Hp4xcnz110=
-github.com/floatdrop/grpcproc/cron v0.1.0/go.mod h1:PqIPBlEx66RxB6VJ9OrbbXdsfQ7zbEkWrEU0BQN1QX0=
-github.com/floatdrop/grpcproc/leader v0.1.0 h1:U9pt6S/S33kbrqotHUib+ty0xLfn3vXDKpNYnlTY7kQ=
-github.com/floatdrop/grpcproc/leader v0.1.0/go.mod h1:QBRoV4a9GYzui9nhJn2b06skcczZ2f47ulS8w1iUA9Y=
+github.com/floatdrop/grpcproc v0.2.0 h1:4/teOOKfwzu5UK9xIEJFn/7rubLE0sAChPODq4uxXdQ=
+github.com/floatdrop/grpcproc v0.2.0/go.mod h1:lUNiPLRR97lqydfE+CturNB9EZHd0lJuVktmF408bc0=
+github.com/floatdrop/grpcproc/cron v0.2.0 h1:lmhBRH+aC0XKNFeFgNaSJM0moFVBmbluZCB0DO3lpLo=
+github.com/floatdrop/grpcproc/cron v0.2.0/go.mod h1:ayKA9YV1PDzNhywwAl5gLTm0Mg4A8XblFPvzyuxFYlw=
+github.com/floatdrop/grpcproc/leader v0.2.1 h1:q/FBVY3BJAXoM8HdOCGOsX5QpMbvOKNQOo5z9C0Rs28=
+github.com/floatdrop/grpcproc/leader v0.2.1/go.mod h1:OBpC9gwSNbhkHIFvrVl4JAXl+awpWwfV1pw95HSrDvs=
 github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=
 github.com/golang-jwt/jwt/v5 v5.3.1/go.mod h1:fxCRLWMO43lRc8nhHWY6LGqRcf+1gQWArsqaEUEa5bE=
 github.com/golang/protobuf v1.5.4 h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=

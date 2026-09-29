@@ -30,7 +30,8 @@ type LinkView struct {
 	Reconnects  uint64 `json:"reconnects"`
 	Messages    uint64 `json:"messages"`
 	Bytes       uint64 `json:"bytes"`
-	Queued      int    `json:"queued,omitzero" jsonschema:"on an out link: messages waiting to be written to the peer; a growing queue means the peer or the network cannot keep up"`
+	Queued      int    `json:"queued,omitzero" jsonschema:"on an out link: messages waiting to be written to the peer; a growing queue means the peer or the network cannot keep up, and with Config.MaxQueued set, sends to the peer fail at once while it holds that many"`
+	QueuedBytes int    `json:"queued_bytes,omitzero" jsonschema:"on an out link: the bytes of the queued messages' bodies, which Config.MaxQueuedBytes bounds"`
 	RetryIn     string `json:"retry_in,omitempty" jsonschema:"on a down out link, whose dials failed: how long sends to the peer keep failing at once; empty when the next send dials again. Measured against this tool's clock"`
 	LastError   string `json:"last_error,omitempty"`
 }
@@ -116,7 +117,7 @@ func (c *Client) nodeView(n grpcproc.NodeInfo) NodeView {
 		v.Links = append(v.Links, LinkView{
 			Peer: l.Peer.Name, Incarnation: l.Peer.Incarnation, Direction: dir, State: l.State.String(),
 			Age: c.since(l.EstablishedAt), Reconnects: l.Reconnects, Messages: l.Messages, Bytes: l.Bytes,
-			Queued: l.Queued, RetryIn: short(l.RetryAt.Sub(c.now())), LastError: l.LastError,
+			Queued: l.Queued, QueuedBytes: l.QueuedBytes, RetryIn: short(l.RetryAt.Sub(c.now())), LastError: l.LastError,
 		})
 	}
 	return v

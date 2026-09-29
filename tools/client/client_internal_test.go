@@ -33,7 +33,7 @@ func (f *fake) GetNode(_ context.Context, req *inspectv1.GetNodeRequest, _ ...gr
 		return &inspectv1.GetNodeResponse{Node: &inspectv1.NodeInfo{
 			Id: &inspectv1.NodeID{Name: "a", Incarnation: 1},
 			Links: []*inspectv1.Link{
-				{Peer: &inspectv1.NodeID{Name: "b"}, Outbound: true, State: inspectv1.LinkState_LINK_STATE_UP, Queued: 3},
+				{Peer: &inspectv1.NodeID{Name: "b"}, Outbound: true, State: inspectv1.LinkState_LINK_STATE_UP, Queued: 3, QueuedBytes: 7},
 				{Peer: &inspectv1.NodeID{Name: "c"}, Outbound: true, State: inspectv1.LinkState_LINK_STATE_DOWN, LastError: "refused",
 					RetryAt: timestamppb.New(time.Now().Add(time.Hour))},
 				{Peer: &inspectv1.NodeID{Name: "d"}, Outbound: true, State: inspectv1.LinkState_LINK_STATE_DOWN, LastError: "refused",
@@ -84,7 +84,7 @@ func TestFailuresAndOddities(t *testing.T) {
 	}
 	// An outbound link's queue, and when a down one is dialed again: not
 	// at all once that time has passed.
-	if up, down, due := nodes[0].Links[0], nodes[0].Links[1], nodes[0].Links[2]; up.Queued != 3 || up.RetryIn != "" || down.State != "down" || down.RetryIn == "" || due.RetryIn != "" {
+	if up, down, due := nodes[0].Links[0], nodes[0].Links[1], nodes[0].Links[2]; up.Queued != 3 || up.QueuedBytes != 7 || up.RetryIn != "" || down.State != "down" || down.RetryIn == "" || due.RetryIn != "" {
 		t.Fatalf("%+v %+v %+v", up, down, due)
 	}
 	if _, err := c.Node(ctx, "b"); !errors.Is(err, errFake) {
