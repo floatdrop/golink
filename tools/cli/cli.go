@@ -289,14 +289,14 @@ func cmdNode(ctx context.Context, a *app, args []string) error {
 		n.Name, n.Incarnation, n.Advertise, n.Uptime, n.Processes, n.Spawned, n.Exited, n.DeadLetters)
 	rows := make([][]string, 0, len(n.Links))
 	for _, l := range n.Links {
-		queued := "" // only an out link has a queue
+		queued, queuedBytes := "", "" // only an out link has a queue
 		if l.Direction == "out" {
-			queued = strconv.Itoa(l.Queued)
+			queued, queuedBytes = strconv.Itoa(l.Queued), strconv.Itoa(l.QueuedBytes)
 		}
-		rows = append(rows, []string{l.Peer + "#" + u(l.Incarnation), l.Direction, l.State, l.Age, queued,
+		rows = append(rows, []string{l.Peer + "#" + u(l.Incarnation), l.Direction, l.State, l.Age, queued, queuedBytes,
 			u(l.Messages), u(l.Bytes), u(l.Reconnects), l.RetryIn, l.LastError})
 	}
-	return a.table("PEER\tDIR\tSTATE\tAGE\tQUEUED\tMESSAGES\tBYTES\tRECONNECTS\tRETRY IN\tLAST ERROR", rows)
+	return a.table("PEER\tDIR\tSTATE\tAGE\tQUEUED\tQUEUED BYTES\tMESSAGES\tBYTES\tRECONNECTS\tRETRY IN\tLAST ERROR", rows)
 }
 
 func cmdNodes(ctx context.Context, a *app, args []string) error {

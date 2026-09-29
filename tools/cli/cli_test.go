@@ -75,7 +75,7 @@ func has(t *testing.T, s string, parts ...string) {
 
 func TestReadCommands(t *testing.T) {
 	f := testcluster.Start(t)
-	has(t, ok(t, run(t, f, "node")), "node:          a#", "PEER", "QUEUED", "RETRY IN", "b#", "out", "in", "up")
+	has(t, ok(t, run(t, f, "node")), "node:          a#", "PEER", "QUEUED", "QUEUED BYTES", "RETRY IN", "b#", "out", "in", "up")
 	has(t, ok(t, run(t, f, "node", "b")), "node:          b#")
 	has(t, ok(t, run(t, f, "nodes")), "NODE", "PEERS", "a ", "b ")
 	has(t, ok(t, run(t, f, "ps")), "PID", "sup", "w1", "stuck", "talker", "supervisor")

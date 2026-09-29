@@ -92,9 +92,9 @@ monitors:              2
 					<p>
 						<C>nodes</C> walks the cluster from the node it asks, following links, and says which
 						peers it could not reach. <C>node [name]</C> shows one: its processes, dead letters, and
-						each link with its traffic, the envelopes queued on it, and its last error. A down
-						outbound link with a <C>RETRY IN</C> is a peer whose dials failed: sends to it fail at
-						once until then.
+						each link with its traffic, the envelopes queued on it and their bytes, and its last
+						error. A down outbound link with a <C>RETRY IN</C> is a peer whose dials failed: sends to
+						it fail at once until then.
 					</p>
 				</>
 			)
