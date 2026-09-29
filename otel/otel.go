@@ -274,6 +274,8 @@ func ErrorType(err error) string {
 		return "noproc"
 	case errors.Is(err, grpcproc.ErrType):
 		return "type"
+	case errors.Is(err, grpcproc.ErrLinkBusy): // before noconnection, which it also is
+		return "busy"
 	case errors.Is(err, grpcproc.ErrNoConnection):
 		return "noconnection"
 	case errors.Is(err, context.DeadlineExceeded):

@@ -358,8 +358,9 @@ func TestClassification(t *testing.T) {
 	}
 	errs := map[error]string{
 		grpcproc.ErrNoProc: "noproc", grpcproc.ErrType: "type",
-		&grpcproc.LinkError{Peer: "b", Err: errors.New("x")}: "noconnection",
-		context.DeadlineExceeded:                             "timeout", context.Canceled: "canceled",
+		&grpcproc.LinkError{Peer: "b", Err: errors.New("x")}:                    "noconnection",
+		&grpcproc.LinkError{Peer: "b", Err: grpcproc.ErrLinkBusy, Unsent: true}: "busy",
+		context.DeadlineExceeded:                                                "timeout", context.Canceled: "canceled",
 		fmt.Errorf("wrapped: %w", &grpcproc.RemoteError{Msg: "m"}): "remote",
 		errors.New("encode"): "other",
 	}
