@@ -16,7 +16,6 @@ import (
 
 	"github.com/floatdrop/grpcproc"
 	actorv1 "github.com/floatdrop/grpcproc/proto/grpcproc/actor/v1"
-	grpcprocv1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 )
 
 // Strategy says which children a supervisor restarts when one exits.
@@ -304,6 +303,13 @@ var (
 // empty Name, are how a supervisor keeps a pool of workers, each started
 // as it is needed.
 //
+// If sup has a child of spec's name running already, StartChild starts
+// nothing and returns that child's PID with ErrAlreadyStarted, so a caller
+// that means to start a named child unless it runs takes the PID either
+// way. A child of that name that has exited, and whose exit sup has yet to
+// handle, is waited for: sup restarts it, which is then the child that
+// runs, or forgets it and starts spec.
+//
 // The spec is checked as in Spec, and a child that fails to start is an
 // error, which sup does not count as a restart. sup's errors come back as
 // *grpcproc.RemoteError, which is ErrBusy to errors.Is when sup was busy. If
@@ -316,12 +322,20 @@ func StartChild(ctx context.Context, from grpcproc.Caller, sup grpcproc.Target, 
 	id := requestID.Add(1)
 	requests.Store(id, spec)
 	defer requests.Delete(id)
-	pid, err := grpcproc.AddrOf[proto.Message](sup).Call[*grpcprocv1.PID](ctx, from, &actorv1.Control{Op: &actorv1.Control_Start{Start: id}})
+	r, err := grpcproc.AddrOf[proto.Message](sup).Call[*actorv1.Started](ctx, from, &actorv1.Control{Op: &actorv1.Control_Start{Start: id}})
 	if err != nil {
 		return grpcproc.PID{}, err
 	}
-	return grpcproc.PIDFromProto(pid), nil
+	if r.GetAlready() {
+		return grpcproc.PIDFromProto(r.GetPid()), ErrAlreadyStarted
+	}
+	return grpcproc.PIDFromProto(r.GetPid()), nil
 }
+
+// ErrAlreadyStarted is StartChild's error when the supervisor has a child of
+// the spec's name running already. StartChild returns that child's PID with
+// it.
+var ErrAlreadyStarted = errors.New("actor: StartChild: a child of that name is running already")
 
 // StopChild stops child, a running child of the supervisor sup, and makes
 // sup forget it: it is not restarted, whatever its Restart, and a strategy
@@ -332,6 +346,52 @@ func StartChild(ctx context.Context, from grpcproc.Caller, sup grpcproc.Target, 
 func StopChild(ctx context.Context, from grpcproc.Caller, sup grpcproc.Target, child grpcproc.PID) error {
 	_, err := grpcproc.AddrOf[proto.Message](sup).Call[*emptypb.Empty](ctx, from, &actorv1.Control{Op: &actorv1.Control_Stop{Stop: child.Proto()}})
 	return err
+}
+
+// ChildInfo is one of a supervisor's children, as Children reports it.
+type ChildInfo struct {
+	// Name is the child's name in the supervisor, and on the node; empty
+	// for an anonymous child.
+	Name string
+	// PID is the child's process while it runs, and zero while it does not:
+	// it has ended for good, or it is Restarting.
+	PID grpcproc.PID
+	// Restarting reports that a restart owes the child a start, which waits
+	// for a previous process, the child's own or an earlier child's, to exit.
+	Restarting bool
+	Restart    Restart
+	// Restarts is how many times the supervisor has restarted the child.
+	Restarts int
+	// Supervisor reports that the child is a supervisor itself.
+	Supervisor bool
+}
+
+// Children asks the supervisor sup which children it has, in the order it
+// starts them: those of its Spec, then those StartChild added, until they
+// end for good. It reports them as sup knows them when it answers, so a
+// child that has just exited may still be listed as running until sup has
+// handled its exit, and the list is out of date as soon as it is taken: to
+// start a named child unless it runs, call StartChild, which answers
+// ErrAlreadyStarted with the running child's PID. sup may run on another
+// node. from is who asks, as for StartChild; from a process, pass
+// p.Context() as StartChild says.
+func Children(ctx context.Context, from grpcproc.Caller, sup grpcproc.Target) ([]ChildInfo, error) {
+	r, err := grpcproc.AddrOf[proto.Message](sup).Call[*actorv1.Children](ctx, from, &actorv1.Control{Op: &actorv1.Control_WhichChildren{WhichChildren: &emptypb.Empty{}}})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ChildInfo, 0, len(r.GetChildren()))
+	for _, c := range r.GetChildren() {
+		out = append(out, ChildInfo{
+			Name:       c.GetName(),
+			PID:        grpcproc.PIDFromProto(c.GetPid()), // the zero PID unless it runs
+			Restarting: c.GetRestarting(),
+			Restart:    Restart(c.GetRestart() - 1),
+			Restarts:   int(c.GetRestarts()),
+			Supervisor: c.GetSupervisor(),
+		})
+	}
+	return out, nil
 }
 
 type kid struct {
@@ -360,8 +420,16 @@ type supervisor struct {
 	kids    []*kid
 	history []time.Time                   // restarts within the window
 	saved   []grpcproc.Msg[proto.Message] // taken from the mailbox while waiting (see drain)
+	held    []heldStart                   // StartChild calls waiting for a child's Down (see startChild)
 	ready   chan error
 	once    sync.Once
+}
+
+// heldStart is a StartChild call the supervisor answers once it has
+// handled a Down.
+type heldStart struct {
+	m    grpcproc.Msg[proto.Message]
+	spec ChildSpec
 }
 
 var errAborted = errors.New("actor: supervisor exited while starting")
@@ -391,6 +459,11 @@ func (s *supervisor) run(p *grpcproc.Process[proto.Message]) error {
 				return err
 			}
 			s.forget()
+			held := s.held
+			s.held = nil
+			for _, h := range held {
+				s.startChild(h.m, h.spec)
+			}
 		case m.IsCall():
 			s.control(m)
 		}
@@ -436,9 +509,9 @@ func (s *supervisor) drain(busy bool) {
 // answers the calls it holds with ErrBusy.
 const busyAfter = 100 * time.Millisecond
 
-// ErrBusy is what a supervisor answers a call with, StartChild or StopChild
-// included, once it has waited past busyAfter for a child to exit: try
-// again.
+// ErrBusy is what a supervisor answers a call with, StartChild, StopChild
+// and Children included, once it has waited past busyAfter for a child to
+// exit: try again.
 var ErrBusy = errors.New("actor: the supervisor is waiting for a child to exit; try again")
 
 func (s *supervisor) start(k *kid) error {
@@ -450,7 +523,8 @@ func (s *supervisor) start(k *kid) error {
 	return nil
 }
 
-// control answers StartChild and StopChild, the calls a supervisor takes.
+// control answers StartChild, StopChild and Children, the calls a
+// supervisor takes.
 func (s *supervisor) control(m grpcproc.Msg[proto.Message]) {
 	c, _ := m.Body.(*actorv1.Control)
 	switch op := c.GetOp().(type) {
@@ -459,25 +533,47 @@ func (s *supervisor) control(m grpcproc.Msg[proto.Message]) {
 			_ = m.Reply(nil, errors.New("actor: StartChild: only from the supervisor's node"))
 			return
 		}
-		pid, err := s.startChild(op.Start)
-		if err != nil {
-			_ = m.Reply(nil, err)
+		v, ok := requests.LoadAndDelete(op.Start)
+		if !ok {
+			_ = m.Reply(nil, errors.New("actor: StartChild: no such request here; its caller gave up, or is on another node"))
 			return
 		}
-		_ = m.Reply(pid.Proto(), nil)
+		s.startChild(m, v.(ChildSpec))
 	case *actorv1.Control_Stop:
 		_ = m.Reply(&emptypb.Empty{}, s.stopChild(grpcproc.PIDFromProto(op.Stop)))
+	case *actorv1.Control_WhichChildren:
+		_ = m.Reply(s.children(), nil)
 	default:
-		_ = m.Reply(nil, errors.New("actor: a supervisor takes no calls but StartChild and StopChild"))
+		_ = m.Reply(nil, errors.New("actor: a supervisor takes no calls but StartChild, StopChild and Children"))
 	}
 }
 
-func (s *supervisor) startChild(id uint64) (grpcproc.PID, error) {
-	v, ok := requests.LoadAndDelete(id)
-	if !ok {
-		return grpcproc.PID{}, errors.New("actor: StartChild: no such request here; its caller gave up, or is on another node")
+// startChild answers the StartChild call m for spec. A child of spec's name
+// that runs is the answer. One that has exited, and whose Down the
+// supervisor has yet to handle, has freed its name already: the call is
+// held until the supervisor has handled a Down, then answered afresh, when
+// the child has been restarted, or forgotten. The Down comes, since the
+// supervisor monitors every child that runs.
+func (s *supervisor) startChild(m grpcproc.Msg[proto.Message], spec ChildSpec) {
+	if i := slices.IndexFunc(s.kids, func(k *kid) bool { return k.running && spec.Name != "" && k.spec.Name == spec.Name }); i >= 0 {
+		k := s.kids[i]
+		if _, alive := s.p.Node().Process(k.pid); !alive {
+			s.held = append(s.held, heldStart{m, spec})
+			return
+		}
+		_ = m.Reply(&actorv1.Started{Pid: k.pid.Proto(), Already: true}, nil)
+		return
 	}
-	spec := v.(ChildSpec)
+	pid, err := s.add(spec)
+	if err != nil {
+		_ = m.Reply(nil, err)
+		return
+	}
+	_ = m.Reply(&actorv1.Started{Pid: pid.Proto()}, nil)
+}
+
+// add starts spec as a child StartChild adds.
+func (s *supervisor) add(spec ChildSpec) (grpcproc.PID, error) {
 	if slices.ContainsFunc(s.kids, func(k *kid) bool { return k.pending }) {
 		// Started now, it would come before children the restart owes a
 		// start.
@@ -496,6 +592,29 @@ func (s *supervisor) startChild(id uint64) (grpcproc.PID, error) {
 	}
 	s.kids = append(s.kids, k)
 	return k.pid, nil
+}
+
+// children is what Children answers: every child but those StopChild
+// stopped whose process is still exiting (see forget).
+func (s *supervisor) children() *actorv1.Children {
+	out := &actorv1.Children{}
+	for _, k := range s.kids {
+		if k.dynamic && !k.running && !k.pending {
+			continue
+		}
+		c := &actorv1.Child{
+			Name:       k.spec.Name,
+			Restarting: k.pending,
+			Restart:    actorv1.Restart(k.spec.Restart) + 1,
+			Restarts:   uint32(k.restarts),
+			Supervisor: k.spec.supervisor,
+		}
+		if k.running {
+			c.Pid = k.pid.Proto()
+		}
+		out.Children = append(out.Children, c)
+	}
+	return out
 }
 
 func (s *supervisor) stopChild(pid grpcproc.PID) error {

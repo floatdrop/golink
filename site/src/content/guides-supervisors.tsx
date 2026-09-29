@@ -229,6 +229,25 @@ export const guidesSupervisors: Doc = {
 						since the new one would start before those owed a start.
 					</p>
 					<p>
+						A name belongs to one child. <C>StartChild</C> of a name the supervisor runs a child
+						under starts nothing, and returns that child's PID with{' '}
+						<C>actor.ErrAlreadyStarted</C>, whether the supervisor started it from its spec or an
+						earlier <C>StartChild</C> did, and whether or not it has been restarted since. So code
+						that starts a child per key keeps no map of its own, which the first restart would leave
+						pointing at a process that is gone:
+					</p>
+					<Code>{`room, err := actor.StartChild(ctx, node, rooms, actor.Child("room:"+id, newRoom).WithRestart(actor.Transient))
+if err != nil && !errors.Is(err, actor.ErrAlreadyStarted) {
+	return err
+}
+// room runs, started now or before.`}</Code>
+					<p>
+						A child of that name that has just exited, and whose exit the supervisor has yet to
+						handle, has freed the name already. The call waits for the supervisor to handle it, and
+						gets the child's restart, or, if the supervisor forgets the child, a fresh start of the
+						spec.
+					</p>
+					<p>
 						<C>actor.StopChild(ctx, from, sup, child)</C> stops a child for good: it is not
 						restarted, whatever its <C>Restart</C>, and a strategy no longer counts it, until the
 						supervisor itself is started again from its <C>Spec</C>. It carries a PID, so the
@@ -274,6 +293,14 @@ export const guidesSupervisors: Doc = {
 						it, and so does <C>grpcprocctl</C> through the <A to="guides/inspector/">Inspector</A>:
 					</p>
 					<Code lang="txt" caption="grpcprocctl inspect orders-sup">{inspectOutput}</Code>
+					<p>
+						A program asks with <C>actor.Children(ctx, from, sup)</C>, which answers the same as data,
+						from any node: the children in the order the supervisor starts them, each with its name,
+						its PID while it runs, whether a restart owes it a start, its restart policy and its
+						restarts, and whether it is a supervisor. It is what the supervisor knows when it
+						answers, and out of date as soon as it is taken; to start a child unless it runs, call{' '}
+						<C>StartChild</C>.
+					</p>
 					<p>
 						Restarts are the number to watch. A count that keeps climbing without reaching the
 						limit is a child that fails, waits out the window and fails again: it is never healthy,

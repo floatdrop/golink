@@ -3,6 +3,7 @@ package actor_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -238,8 +239,8 @@ func TestStartAndStopChild(t *testing.T) {
 		if pid, _ := n.Whereis("dyn"); pid != dyn {
 			t.Fatalf("dyn is %v", pid)
 		}
-		if _, err := actor.StartChild(t.Context(), n, sup, actor.ChildFunc("dyn", worker)); err == nil {
-			t.Fatal("two children named dyn")
+		if pid, err := actor.StartChild(t.Context(), n, sup, actor.ChildFunc("dyn", worker)); !errors.Is(err, actor.ErrAlreadyStarted) || pid != dyn {
+			t.Fatalf("a second dyn: %v, %v", pid, err)
 		}
 		downs := watch(t, n, dyn)
 		if err := actor.StopChild(t.Context(), n, sup, dyn); err != nil {
@@ -260,6 +261,86 @@ func TestStartAndStopChild(t *testing.T) {
 		}
 		if _, alive := n.Process(pool[1]); alive {
 			t.Fatal("still running")
+		}
+	})
+}
+
+// A StartChild of a name that runs starts nothing and answers with the
+// process that runs it, whether the supervisor started it from its Spec or
+// StartChild did, and when it is a restart: a caller that keeps no record
+// of its own children is not misled by one. Once the child has ended for
+// good, the name starts afresh.
+func TestStartChildOfARunningName(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		n := grpcproctest.New(t, "a").Node("a")
+		sup, err := actor.Supervise(n, actor.Spec{Children: []actor.ChildSpec{actor.ChildFunc("static", worker)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pid, err := actor.StartChild(t.Context(), n, sup, actor.ChildFunc("static", worker)); !errors.Is(err, actor.ErrAlreadyStarted) || pid != pidOf(t, n, "static") {
+			t.Fatalf("static: %v, %v", pid, err)
+		}
+
+		room := actor.ChildFunc("room", worker).WithRestart(actor.Transient)
+		first, err := actor.StartChild(t.Context(), n, sup, room)
+		if err != nil {
+			t.Fatal(err)
+		}
+		send(t, n, "room", -1) // a crash: the supervisor restarts it
+		synctest.Wait()
+		again := restarted(t, n, "room", first)
+		if pid, err := actor.StartChild(t.Context(), n, sup, room); !errors.Is(err, actor.ErrAlreadyStarted) || pid != again {
+			t.Fatalf("a restarted room: %v, %v", pid, err)
+		}
+		send(t, n, "room", 0) // ends for good: forgotten
+		synctest.Wait()
+		fresh, err := actor.StartChild(t.Context(), n, sup, room)
+		if err != nil || fresh == again || fresh != pidOf(t, n, "room") {
+			t.Fatalf("a room started afresh: %v, %v", fresh, err)
+		}
+		if kids, err := actor.Children(t.Context(), n, sup); err != nil || len(kids) != 2 {
+			t.Fatalf("children %v, %v", kids, err)
+		}
+	})
+}
+
+// Children lists a supervisor's children in the order it starts them, as
+// it knows them: each one's name and PID, its restart policy and how often
+// it was restarted, and whether it is a supervisor; one that ended for good
+// is listed with no PID. A caller on another node gets the same.
+func TestChildren(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := grpcproctest.New(t, "a", "b")
+		n := c.Node("a")
+		sup, err := actor.Supervise(n, actor.Spec{Children: []actor.ChildSpec{
+			actor.ChildFunc("w", worker),
+			actor.ChildSupervisor("inner", actor.Spec{Children: []actor.ChildSpec{actor.ChildFunc("i", worker)}}),
+			actor.ChildFunc("done", worker).WithRestart(actor.Transient),
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		anon, err := actor.StartChild(t.Context(), n, sup, actor.ChildFunc("", worker).WithRestart(actor.Temporary))
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := pidOf(t, n, "w")
+		send(t, n, "w", -1)
+		send(t, n, "done", 0)
+		synctest.Wait()
+		want := []actor.ChildInfo{
+			{Name: "w", PID: restarted(t, n, "w", w), Restart: actor.Permanent, Restarts: 1},
+			{Name: "inner", PID: pidOf(t, n, "inner"), Restart: actor.Permanent, Supervisor: true},
+			{Name: "done", Restart: actor.Transient},
+			{PID: anon, Restart: actor.Temporary},
+		}
+		for _, from := range []*grpcproc.Node{n, c.Node("b")} {
+			if got, err := actor.Children(t.Context(), from, sup); err != nil || !slices.Equal(got, want) {
+				t.Fatalf("from %s: %+v, %v", from.Name(), got, err)
+			}
+		}
+		if _, err := actor.Children(t.Context(), n, anon); err == nil {
+			t.Fatal("a worker listed its children")
 		}
 	})
 }
@@ -394,6 +475,10 @@ func TestRestartWaitsForAStuckChild(t *testing.T) {
 		if kids := children(t, n, sup); !strings.HasPrefix(kids["crasher"], "stopped") || !strings.HasPrefix(kids["stuck"], "waiting "+stuck.String()) {
 			t.Fatalf("started before the child before it: %v", kids) // and the supervisor answered
 		}
+		kids, err := actor.Children(t.Context(), n, sup)
+		if err != nil || len(kids) != 2 || !kids[0].Restarting || !kids[0].PID.IsZero() || !kids[1].Restarting || !kids[1].PID.IsZero() {
+			t.Fatalf("children while the restart waits: %+v, %v", kids, err)
+		}
 		if _, err := actor.StartChild(t.Context(), n, sup, actor.ChildFunc("", worker)); err == nil || !strings.Contains(err.Error(), "restart is waiting") {
 			t.Fatalf("StartChild while a restart waits: %v", err)
 		}
@@ -450,6 +535,10 @@ func TestStopAStuckChild(t *testing.T) {
 		}
 		if kids := children(t, n, sup); !strings.HasPrefix(kids["stuck"], "stopped") {
 			t.Fatalf("%v", kids)
+		}
+		// Stopped for good, it is no child of the supervisor's any more.
+		if kids, err := actor.Children(t.Context(), n, sup); err != nil || len(kids) != 0 {
+			t.Fatalf("children %+v, %v", kids, err)
 		}
 		until(t, "the supervisor forgets it", func() bool { return len(children(t, n, sup)) == 0 })
 	})

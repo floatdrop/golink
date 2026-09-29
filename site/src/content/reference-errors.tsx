@@ -90,6 +90,14 @@ export const referenceErrors: Doc = {
 								</>
 							],
 							[
+								<C>actor.ErrAlreadyStarted</C>,
+								<>
+									A <C>StartChild</C> of a name the supervisor already runs a child under. It comes
+									with that child's PID, so a caller that starts a child unless it runs takes the PID
+									either way.
+								</>
+							],
+							[
 								<C>actor.ErrNoReply</C>,
 								<>
 									Returned from <C>HandleCall</C>: the actor answers later, with <C>m.Reply</C>, from any
