@@ -66,5 +66,6 @@ message type) is the unit, and every other attribute is bounded.
 | `grpcproc.mailbox.oldest` | gauge (Observe), s | `grpcproc.label`, maximum |
 | `grpcproc.link.messages`, `grpcproc.link.bytes` | counter (Observe) | `grpcproc.peer`, `grpcproc.direction` |
 
-`error.type` is one of `noproc`, `type`, `noconnection`, `timeout`,
-`canceled`, `remote` (the handler returned an error), `other`.
+`error.type` is one of `noproc`, `type`, `busy` (the link to the peer was
+full: `Config.MaxQueued`), `noconnection`, `timeout`, `canceled`, `remote`
+(the handler returned an error), `other`.
