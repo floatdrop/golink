@@ -3,7 +3,7 @@ module github.com/floatdrop/grpcproc/leader
 go 1.27.1
 
 require (
-	github.com/floatdrop/grpcproc v0.2.0
+	github.com/floatdrop/grpcproc v0.3.0
 	google.golang.org/protobuf v1.36.12
 )
 
