@@ -257,6 +257,14 @@ if t.Stop() {
 									Both together are Erlang's <C>spawn_link</C>. Only for <C>p.Spawn</C> and{' '}
 									<C>p.SpawnMonitor</C>: a <C>Node.Spawn</C> has no parent.
 								</>
+							],
+							[
+								<C>WatchedBy(m)</C>,
+								<>
+									Place the monitor or link the caller of the call <C>m</C> asked for on the child,
+									before the child runs: the caller may be on another node. See{' '}
+									<A to="concepts/monitors-and-links/#spawn-monitor">Monitoring from before the start</A>.
+								</>
 							]
 						]}
 					/>

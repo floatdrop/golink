@@ -2,6 +2,7 @@ package grpcproc
 
 import (
 	"context"
+	"errors"
 	"maps"
 
 	"google.golang.org/protobuf/proto"
@@ -76,8 +77,73 @@ func (a Addr[M]) target() (PID, string) { return a.pid, a.name }
 //	reserved, err := stock.Reserve(ctx, p, &Reserve{Sku: "apple", Qty: 2})
 func (a Addr[M]) Call[R proto.Message](ctx context.Context, from Caller, req M) (R, error) {
 	o := from.origin(ctx)
-	return typed[R](o.n.doCall(ctx, o.from, o.p, a.dest(), req, o.md))
+	return typed[R](o.n.doCall(ctx, o.from, o.p, a.dest(), req, o.md, 0))
 }
+
+// CallMonitor is Call, from a process that monitors the process the callee
+// answers with: one the callee spawns to answer, which it monitors from
+// before that process runs (see WatchedBy), or one that runs (Msg.Watch). It
+// is the remote spawn_monitor: however soon that process exits, from receives
+// its Down, with the returned Ref and the real reason, never noproc, after
+// the answer and in order with what that process sent it. A callee that
+// places no monitor answers with none, and the Down comes at once, with
+// noproc.
+//
+// Only an answer that is not an error brings the monitor. A call that fails,
+// the callee's error, a ctx that ends, a link that breaks, leaves from
+// monitoring nothing, and no Down comes of it, whatever the callee spawned:
+// so that error, a RemoteError say, tells a spawn that failed from a process
+// that started and exited, which is a Down. If the link to the callee's node
+// breaks once the answer has come, the Down comes, with noconnection.
+//
+// from must be a process, which can receive a Down; from the Node, the call
+// is not made, and the error says why. A process that has exited calls
+// nothing: the error is ErrNoProc.
+func (a Addr[M]) CallMonitor[R proto.Message](ctx context.Context, from Caller, req M) (R, Ref, error) {
+	var resp R
+	ref, err := from.origin(ctx).callWatch(ctx, a.dest(), req, false, func(r callResult) (err error) {
+		resp, err = typed[R](r)
+		return err
+	})
+	return resp, ref, err
+}
+
+// CallLink is CallMonitor with a link for the monitor: once it returns
+// without an error, from is linked to the process the callee answers with, as
+// LinkChild links a parent, and that process's exit ends from, with its
+// reason, or reaches it as an Exited if from traps exits (see
+// Process.SetTrapExit). A link to it already is the same link.
+func (a Addr[M]) CallLink[R proto.Message](ctx context.Context, from Caller, req M) (R, error) {
+	var resp R
+	_, err := from.origin(ctx).callWatch(ctx, a.dest(), req, true, func(r callResult) (err error) {
+		resp, err = typed[R](r)
+		return err
+	})
+	return resp, err
+}
+
+// callWatch calls to as a process that watches what the callee places the
+// watch on, a monitor or a link. take takes the answer, which it may still
+// refuse, a reply of another type say: only one it takes brings the watch.
+func (o origin) callWatch(ctx context.Context, to dest, req proto.Message, link bool, take func(callResult) error) (Ref, error) {
+	p := o.p
+	if p == nil {
+		return Ref{}, errWatchFromNode
+	}
+	n := o.n
+	ref := Ref{Node: n.id.Name, ID: n.nextRef.Add(1)}
+	if !p.awaitWatch(ref, to.pid.Node, link) {
+		return Ref{}, ErrNoProc
+	}
+	err := take(n.doCall(ctx, o.from, p, to, req, o.md, ref.ID))
+	p.settleWatch(ref, err == nil)
+	if err != nil {
+		return Ref{}, err
+	}
+	return ref, nil
+}
+
+var errWatchFromNode = errors.New("grpcproc: only a process can monitor or link: call as one")
 
 // Send delivers m to the address, local or remote, from the Node or a
 // Process, and returns once m is queued. From a process, m carries the
@@ -132,12 +198,12 @@ func destOf(t Target) dest {
 // typed asserts a reply to the type the caller asked for. A reply of another
 // type is ErrType, the same error a caller gets when the callee rejects the
 // request's type.
-func typed[R proto.Message](resp proto.Message, err error) (R, error) {
+func typed[R proto.Message](res callResult) (R, error) {
 	var zero R
-	if err != nil {
-		return zero, err
+	if res.err != nil {
+		return zero, res.err
 	}
-	r, ok := resp.(R)
+	r, ok := res.body.(R)
 	if !ok {
 		return zero, ErrType
 	}

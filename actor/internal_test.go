@@ -39,7 +39,7 @@ func TestFailedRestartEndsSupervisor(t *testing.T) {
 		c := grpcproctest.New(t, "a")
 		n := c.Node("a")
 		starts := 0
-		flaky := ChildSpec{Name: "flaky", start: func(sup *grpcproc.Process[proto.Message]) (grpcproc.PID, grpcproc.Ref, error) {
+		flaky := ChildSpec{Name: "flaky", start: func(sup *grpcproc.Process[proto.Message], _ []grpcproc.SpawnOption) (grpcproc.PID, grpcproc.Ref, error) {
 			starts++
 			if starts > 1 {
 				return grpcproc.PID{}, grpcproc.Ref{}, errors.New("cannot start")
@@ -137,11 +137,11 @@ func TestFailedRestartBringsBackTheWholeGroup(t *testing.T) {
 				n := grpcproctest.New(t, "a").Node("a")
 				flaky := ChildFunc("flaky", crash)
 				start, starts := flaky.start, 0
-				flaky.start = func(sup *grpcproc.Process[proto.Message]) (grpcproc.PID, grpcproc.Ref, error) {
+				flaky.start = func(sup *grpcproc.Process[proto.Message], extra []grpcproc.SpawnOption) (grpcproc.PID, grpcproc.Ref, error) {
 					if starts++; starts == 2 {
 						return grpcproc.PID{}, grpcproc.Ref{}, errors.New("cannot start, once")
 					}
-					return start(sup)
+					return start(sup, extra)
 				}
 				if _, err := Supervise(n, Spec{Strategy: tc.strategy, MaxRestarts: 5, Children: tc.children(flaky)}); err != nil {
 					t.Fatal(err)
@@ -207,7 +207,7 @@ func TestStartChildWaitsForTheDownOfItsName(t *testing.T) {
 			// The supervisor is busy starting a child, while a StartChild of
 			// room waits behind it, and room exits.
 			gate := make(chan struct{})
-			slow := ChildSpec{start: func(sup *grpcproc.Process[proto.Message]) (grpcproc.PID, grpcproc.Ref, error) {
+			slow := ChildSpec{start: func(sup *grpcproc.Process[proto.Message], _ []grpcproc.SpawnOption) (grpcproc.PID, grpcproc.Ref, error) {
 				<-gate
 				a, ref, err := sup.SpawnMonitor[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
 					_, err := p.Receive()

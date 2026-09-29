@@ -92,9 +92,17 @@ export const referenceErrors: Doc = {
 							[
 								<C>actor.ErrAlreadyStarted</C>,
 								<>
-									A <C>StartChild</C> of a name the supervisor already runs a child under. It comes
-									with that child's PID, so a caller that starts a child unless it runs takes the PID
-									either way.
+									A <C>StartChild</C> or <C>StartChildFrom</C> of a name the supervisor already runs a
+									child under. It comes with that child's PID, so a caller that starts a child unless it
+									runs takes the PID either way; from <C>StartChildFrom</C>, with the monitor it asked
+									for, on that child.
+								</>
+							],
+							[
+								<C>actor.ErrNoFactory</C>,
+								<>
+									A <C>StartChildFrom</C> of a factory the supervisor's <C>Spec.Factories</C> does not
+									have. A refusal of the factory's own is its error, as it returned it.
 								</>
 							],
 							[

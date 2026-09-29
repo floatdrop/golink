@@ -63,6 +63,14 @@ message Envelope {
   // Propagated context: trace headers, tenant. Never interpreted by
   // grpcproc itself.
   map<string, string> metadata = 15;
+  // A call's: its caller watches, monitors or is linked to, the process the
+  // callee places the watch on, under the call's ref. The callee places it
+  // before it answers: on a process it spawns, before that process runs, or
+  // on one that runs. A peer that does not know it places none.
+  bool watch = 16;
+  // A reply's: the process of the replying node the call's watch was placed
+  // on. 0 when none was.
+  uint64 watched_id = 17;
 }
 
 enum Kind {

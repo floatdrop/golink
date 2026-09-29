@@ -25,7 +25,10 @@ type item struct {
 	exited *Exited
 	md     Metadata
 	ref    uint64 // call ref; 0 for a plain message
-	at     int64  // unix nanos, when it was queued; only when hooks want the wait
+	// watch is set on a call whose caller asked for a watch, with
+	// CallMonitor or CallLink: see WatchedBy.
+	watch bool
+	at    int64 // unix nanos, when it was queued; only when hooks want the wait
 	// deadline is when a call's caller stops waiting for the reply, in unix
 	// nanos; 0 for a caller with no deadline, and for a plain message.
 	deadline int64
@@ -67,19 +70,45 @@ type proc struct {
 	levelSet                atomic.Bool
 	trapExit                atomic.Bool
 
-	// mu guards what follows. Taken inside Node.mu, never around it.
+	// mu guards what follows. Taken inside Node.mu, never around it; two
+	// processes' locks are held at once only under Node.mu held exclusively
+	// (see WatchedBy).
 	mu       sync.Mutex
 	exited   bool
-	watchers map[Ref]PID                    // who monitors me, or is linked to me
-	monitors map[Ref]monitorTarget          // whom I monitor
-	links    map[Ref]monitorTarget          // whom I am linked to: one per target
-	open     map[openCall]chan<- callResult // calls queued or taken, not yet answered: what a caller of this node waits on, nil for a peer's
-	timers   map[*Timer]struct{}            // SendAfter timers not yet fired
+	watchers map[Ref]PID           // who monitors me, or is linked to me
+	monitors map[Ref]monitorTarget // whom I monitor
+	links    map[Ref]monitorTarget // whom I am linked to: one per target
+	awaiting map[Ref]*awaited      // watches my calls asked for, until they are answered
+	open     map[openCall]answerTo // calls queued or taken, not yet answered
+	timers   map[*Timer]struct{}   // SendAfter timers not yet fired
 }
 
 type openCall struct {
 	from PID
 	ref  uint64
+}
+
+// answerTo is how an open call is answered: ch is what a caller of this node
+// waits on, nil for a peer's; watched is the process its caller's watch was
+// placed on, if it was (see WatchedBy), which the answer names.
+type answerTo struct {
+	ch      chan<- callResult
+	watched PID
+}
+
+// awaited is a watch a call of the process asked for, with CallMonitor or
+// CallLink, until the call has its answer, which says what it watches.
+type awaited struct {
+	node string // the callee's, where the watched process runs
+	link bool
+	// watched is the process the answer names, set just before the answer
+	// reaches the caller: the answer itself carries no more than a call's.
+	watched PID
+	// down is set by a Down that came before the answer: the watched process
+	// exited at once, or node became unreachable. It waits for the answer,
+	// which says whether the call worked, and so whether it is delivered.
+	down   bool
+	reason string
 }
 
 type monitorTarget struct {
@@ -99,6 +128,7 @@ type spawnOpts struct {
 	label                 string
 	inspect               func() map[string]string
 	linkParent, linkChild bool
+	watchedBy             *heldCall
 }
 
 // WithName registers the process under name on its node before it runs.
@@ -131,7 +161,52 @@ func LinkParent() SpawnOption { return func(o *spawnOpts) { o.linkParent = true 
 // linked both ways, as Erlang's spawn_link does. Node.Spawn refuses it.
 func LinkChild() SpawnOption { return func(o *spawnOpts) { o.linkChild = true } }
 
-var errNoParent = errors.New("grpcproc: LinkParent and LinkChild need a parent: spawn with Process.Spawn")
+// WatchedBy places the watch m's caller asked for, a monitor or a link (see
+// Addr.CallMonitor and Addr.CallLink), on the child, before it runs, as
+// SpawnMonitor places its monitor: however soon the child exits, the caller
+// hears of it with the real reason, never noproc. The answer to m names the
+// child to the caller, and brings the watch only if it is not an error: a call
+// that fails leaves no watch behind. For a caller that asked for none,
+// WatchedBy does nothing.
+//
+// m must be a call a process of the spawning node holds and has not answered
+// yet, whose watch is not placed yet (see Msg.Watch); otherwise the spawn
+// fails, with ErrNotCall for a message that is not a call.
+func WatchedBy[M proto.Message](m Msg[M]) SpawnOption {
+	h := m.held()
+	return func(o *spawnOpts) {
+		if h.c.ref == 0 || h.watch {
+			o.watchedBy = &h
+		}
+	}
+}
+
+// heldCall is a call as WatchedBy and Msg.Watch see it: who made it, its ref,
+// which is its watch's too, and the process that holds it.
+type heldCall struct {
+	c     openCall
+	watch bool
+	taker *proc
+}
+
+// check is what makes a call's watch impossible to place on a process of n
+// before any lock is taken.
+func (h *heldCall) check(n *Node) error {
+	switch {
+	case h.c.ref == 0:
+		return ErrNotCall
+	case h.taker.n != n:
+		return errHeldElsewhere
+	}
+	return nil
+}
+
+var (
+	errNoParent      = errors.New("grpcproc: LinkParent and LinkChild need a parent: spawn with Process.Spawn")
+	errHeldElsewhere = errors.New("grpcproc: the call's watch goes on a process of the node that holds it")
+	errAnswered      = errors.New("grpcproc: the call is answered already, so its watch cannot be placed")
+	errWatchPlaced   = errors.New("grpcproc: the call's watch is placed already")
+)
 
 func parentPID(p *proc) PID {
 	if p == nil {
@@ -162,6 +237,7 @@ type Msg[M proto.Message] struct {
 	Exited   *Exited
 	Metadata Metadata
 	ref      uint64
+	watch    bool  // the caller asked for a watch: see WatchedBy
 	taker    *proc // for a call: the process that took it, which holds it until it is answered
 	deadline int64 // unix nanos; see Deadline
 }
@@ -202,7 +278,8 @@ func (m Msg[M]) Context(parent context.Context) (context.Context, context.Cancel
 // or process, and answered from there. A call is answered once: a second
 // Reply is dropped, and so is one after the process that received m exited
 // (which answers ErrNoProc) or its node's Stop gave up on it
-// (ErrNodeStopped).
+// (ErrNodeStopped). An error answer takes back the watch the caller asked
+// for, if it was placed (see WatchedBy).
 func (m Msg[M]) Reply(resp proto.Message, err error) error {
 	if m.ref == 0 {
 		return ErrNotCall
@@ -212,13 +289,51 @@ func (m Msg[M]) Reply(resp proto.Message, err error) error {
 	// process's node, the way the call came in.
 	t, c := m.taker, openCall{m.From, m.ref}
 	t.mu.Lock()
-	ch := t.open[c]
+	a := t.open[c]
 	delete(t.open, c)
 	t.mu.Unlock()
 	if err != nil {
-		return t.n.reply(t.pid, m.From, m.ref, ch, resp, grpcprocv1.Status_STATUS_ERROR, err.Error(), false)
+		return t.n.reply(t.pid, m.From, m.ref, a, resp, grpcprocv1.Status_STATUS_ERROR, err.Error(), false)
 	}
-	return t.n.reply(t.pid, m.From, m.ref, ch, resp, grpcprocv1.Status_STATUS_OK, "", false)
+	return t.n.reply(t.pid, m.From, m.ref, a, resp, grpcprocv1.Status_STATUS_OK, "", false)
+}
+
+// Watch places the watch m's caller asked for, a monitor or a link (see
+// Addr.CallMonitor and Addr.CallLink), on pid, a process of this node that
+// runs: for a call answered with a process that was running already, as
+// WatchedBy places it on one spawned for the call. From then on, the caller
+// hears of pid's exit, if the answer to m is not an error. For a caller that
+// asked for none, Watch does nothing.
+//
+// It is ErrNotCall for a message that is not a call, and ErrNoProc when pid
+// has exited, or is not of the node that holds m. A call answered already, or
+// whose watch is placed already, is an error too.
+func (m Msg[M]) Watch(pid PID) error {
+	switch {
+	case m.ref == 0:
+		return ErrNotCall
+	case !m.watch:
+		return nil
+	}
+	t := m.taker
+	n := t.n
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	w := n.procs[pid.ID]
+	if w == nil || w.pid != pid {
+		return ErrNoProc
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if w != t {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+	}
+	return t.watchFor(openCall{m.From, m.ref}, w)
+}
+
+func (m Msg[M]) held() heldCall {
+	return heldCall{c: openCall{m.From, m.ref}, watch: m.watch, taker: m.taker}
 }
 
 // Spawn starts fn as a process that accepts messages of type M. The process
@@ -253,7 +368,7 @@ func (p *Process[M]) SpawnMonitor[N proto.Message](fn func(*Process[N]) error, o
 
 // spawn starts fn on n. parent, when set, is recorded as the child's parent,
 // and monitors the child from before it runs if monitor is set; so are the
-// links LinkParent and LinkChild ask for.
+// links LinkParent and LinkChild ask for, and the watch WatchedBy places.
 func spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts []SpawnOption, parent *proc, monitor bool) (Addr[M], Ref, error) {
 	monitor = monitor && parent != nil
 	var o spawnOpts
@@ -262,6 +377,17 @@ func spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts []SpawnOpt
 	}
 	if parent == nil && (o.linkParent || o.linkChild) {
 		return Addr[M]{}, Ref{}, errNoParent
+	}
+	// The process holding the call WatchedBy places a watch for is locked
+	// beside the parent, when it is another one.
+	var taker *proc
+	if w := o.watchedBy; w != nil {
+		if err := w.check(n); err != nil {
+			return Addr[M]{}, Ref{}, err
+		}
+		if w.taker != parent {
+			taker = w.taker
+		}
 	}
 	typ := typeString[M]()
 	if o.label == "" {
@@ -291,10 +417,14 @@ func spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts []SpawnOpt
 	// lock inside it (n.mu first, then a process's lock: the one order), a
 	// parent's exit either precedes the spawn, which then fails, or finds the
 	// child registered and its monitor and links in place. They exist before
-	// the child runs, so no exit on either side is missed.
+	// the child runs, so no exit on either side is missed. So does the watch
+	// of a call's caller, which the call's answer then names.
 	n.mu.Lock()
 	if parent != nil {
 		parent.mu.Lock()
+	}
+	if taker != nil {
+		taker.mu.Lock()
 	}
 	var err error
 	switch {
@@ -304,6 +434,11 @@ func spawn[M proto.Message](n *Node, fn func(*Process[M]) error, opts []SpawnOpt
 		err = ErrNodeStopped
 	case o.name != "" && n.names[o.name] != nil:
 		err = ErrNameTaken
+	case o.watchedBy != nil:
+		err = o.watchedBy.taker.watchFor(o.watchedBy.c, p) // p runs nowhere yet: it needs no lock
+	}
+	if taker != nil {
+		taker.mu.Unlock()
 	}
 	var ref Ref
 	if err == nil && parent != nil {
@@ -396,7 +531,7 @@ func (p *Process[M]) ReceiveTimeout(d time.Duration) (Msg[M], error) {
 }
 
 func toMsg[M proto.Message](taker *proc, it item) Msg[M] {
-	m := Msg[M]{From: it.from, Down: it.down, Exited: it.exited, Metadata: it.md, ref: it.ref, deadline: it.deadline}
+	m := Msg[M]{From: it.from, Down: it.down, Exited: it.exited, Metadata: it.md, ref: it.ref, watch: it.watch, deadline: it.deadline}
 	if it.ref != 0 {
 		m.taker = taker
 	}
@@ -425,7 +560,7 @@ func (p *proc) SendTo(to Target, msg proto.Message) error {
 // CallTo calls an untyped target, such as a Msg's From, from the process, as
 // Addr.Call does a typed one, and types the reply as R.
 func (p *Process[M]) CallTo[R proto.Message](ctx context.Context, to Target, req proto.Message) (R, error) {
-	return typed[R](p.n.doCall(ctx, p.pid, p.proc, destOf(to), req, p.outgoing(MetadataFrom(ctx))))
+	return typed[R](p.n.doCall(ctx, p.pid, p.proc, destOf(to), req, p.outgoing(MetadataFrom(ctx)), 0))
 }
 
 // SendAfter sends m to a typed address after d, as this process. The timer
@@ -624,27 +759,139 @@ func (p *proc) queueCall(it item, reply chan<- callResult) bool {
 		return false
 	}
 	if p.open == nil {
-		p.open = map[openCall]chan<- callResult{}
+		p.open = map[openCall]answerTo{}
 	}
-	p.open[openCall{it.from, it.ref}] = reply
+	p.open[openCall{it.from, it.ref}] = answerTo{ch: reply}
 	return true
 }
 
 // failLocalCalls answers the open calls of this node's callers with err, for
 // Stop, when the process outlives it. A later Reply finds them gone.
 func (p *proc) failLocalCalls(err error) {
-	var chs []chan<- callResult
+	failed := map[openCall]answerTo{}
 	p.mu.Lock()
-	for c, ch := range p.open {
-		if ch != nil { // a peer's caller hears of it from its link
-			chs = append(chs, ch)
+	for c, a := range p.open {
+		if a.ch != nil { // a peer's caller hears of it from its link
+			failed[c] = a
 			delete(p.open, c)
 		}
 	}
 	p.mu.Unlock()
-	for _, ch := range chs {
-		answer(ch, callResult{err: err})
+	for c, a := range failed {
+		p.n.unwatch(c, a.watched)
+		answer(a.ch, callResult{err: err})
 	}
+}
+
+// watchFor places the watch the open call c asked for on w, for c's caller,
+// and records it on the call, whose answer names w. Called with n.mu held
+// exclusively, and the locks of p, which holds c, and of w, unless w runs
+// nowhere yet.
+func (p *proc) watchFor(c openCall, w *proc) error {
+	a, open := p.open[c]
+	switch {
+	case !open:
+		return errAnswered
+	case !a.watched.IsZero():
+		return errWatchPlaced
+	case w.exited:
+		return ErrNoProc
+	}
+	if w.watchers == nil {
+		w.watchers = map[Ref]PID{}
+	}
+	w.watchers[Ref{Node: c.from.Node, ID: c.ref}] = c.from
+	a.watched = w.pid
+	p.open[c] = a
+	return nil
+}
+
+// awaitWatch records the watch a call of p asks for under ref, before the
+// call leaves, so that a Down that comes before the answer waits for it. It
+// reports false if p has exited.
+func (p *proc) awaitWatch(ref Ref, node string, link bool) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.exited {
+		return false
+	}
+	if p.awaiting == nil {
+		p.awaiting = map[Ref]*awaited{}
+	}
+	p.awaiting[ref] = &awaited{node: node, link: link}
+	return true
+}
+
+// noteWatched records that the answer to p's call under ref names watched,
+// the process the callee placed the watch on.
+func (p *proc) noteWatched(ref Ref, watched PID) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if a := p.awaiting[ref]; a != nil {
+		a.watched = watched
+	}
+}
+
+// settleWatch settles the watch a call of p asked for under ref, once the
+// call has its answer: ok if the call worked. A call that worked leaves p
+// watching the process its answer names from then on, and a Down that came
+// before the answer is delivered now, after it; a callee that placed none
+// makes it Down at once, with noproc. A call that failed leaves no watch,
+// and its Down, if one came, is dropped.
+//
+// A call that ended before its answer came (its ctx did), or whose caller
+// exited meanwhile, cannot know the process the answer names: the watch the
+// callee placed stays on that process until it exits, and its Down is then
+// dropped.
+func (p *proc) settleWatch(ref Ref, ok bool) {
+	p.mu.Lock()
+	a := p.awaiting[ref]
+	delete(p.awaiting, ref)
+	if a == nil { // p exited while the call waited
+		p.mu.Unlock()
+		return
+	}
+	t := monitorTarget{pid: a.watched}
+	reason := ""
+	switch {
+	case !ok || a.link && !t.pid.IsZero() && p.hasLink(t):
+		// The call failed, or p was linked to the process already: "a
+		// second link to the same target is the same link". A watch the
+		// callee placed all the same is taken back.
+		p.mu.Unlock()
+		if !t.pid.IsZero() {
+			_ = p.n.demonitor(p.pid, t, ref.ID)
+		}
+		return
+	case t.pid.IsZero():
+		t.pid, reason = PID{Node: a.node}, ReasonNoProc
+	case a.down:
+		reason = a.reason
+	case a.link:
+		if p.links == nil {
+			p.links = map[Ref]monitorTarget{}
+		}
+		p.links[ref] = t
+	default:
+		if p.monitors == nil {
+			p.monitors = map[Ref]monitorTarget{}
+		}
+		p.monitors[ref] = t
+	}
+	p.mu.Unlock()
+	switch {
+	case reason == "":
+	case a.link:
+		p.exitSignal(t.pid, "", reason)
+	default:
+		p.push(item{from: t.pid, down: &Down{Ref: ref, PID: t.pid, Reason: reason}})
+	}
+}
+
+// hasLink reports whether p is linked to t. Called with p.mu held.
+func (p *proc) hasLink(t monitorTarget) bool {
+	_, linked := p.linkTo(t)
+	return linked
 }
 
 // outgoing is the metadata a send from this process carries: md over what
@@ -833,10 +1080,15 @@ func (p *proc) removeWatcher(ref Ref) {
 	p.mu.Unlock()
 }
 
-// dropWatch removes the monitor or link ref: link says which it was.
-func (p *proc) dropWatch(ref Ref) (t monitorTarget, link, ok bool) {
+// dropWatch removes the monitor or link ref: link says which it was. The
+// Down of a watch that waits for its call's answer waits with it, with
+// reason, and ok is false.
+func (p *proc) dropWatch(ref Ref, reason string) (t monitorTarget, link, ok bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if a := p.awaiting[ref]; a != nil && !a.down {
+		a.down, a.reason = true, reason
+	}
 	if t, ok = p.monitors[ref]; ok {
 		delete(p.monitors, ref)
 		return t, false, true
@@ -876,6 +1128,13 @@ func (p *proc) peerDown(peer string) (downs []Down, exits []Exited) {
 	for ref := range p.watchers {
 		if ref.Node == peer {
 			delete(p.watchers, ref)
+		}
+	}
+	// A watch whose call has yet to take its answer: if the answer came
+	// before the link went, the watch worked, and this is its Down.
+	for _, a := range p.awaiting {
+		if a.node == peer && !a.down {
+			a.down, a.reason = true, ReasonNoConnection
 		}
 	}
 	return downs, exits
@@ -924,7 +1183,7 @@ func (p *proc) terminate(reason string) {
 	p.mu.Lock()
 	p.exited = true
 	watchers, monitors, links, open, timers := p.watchers, p.monitors, p.links, p.open, p.timers
-	p.watchers, p.monitors, p.links, p.open, p.timers = nil, nil, nil, nil, nil
+	p.watchers, p.monitors, p.links, p.awaiting, p.open, p.timers = nil, nil, nil, nil, nil, nil
 	p.mu.Unlock()
 	for tm := range timers {
 		tm.t.Stop()
@@ -948,8 +1207,8 @@ func (p *proc) terminate(reason string) {
 			n.deadLetter(it.from, p.pid, it.body, ReasonNoProc)
 		}
 	}
-	for c, ch := range open { // queued or taken
-		_ = n.reply(p.pid, c.from, c.ref, ch, nil, grpcprocv1.Status_STATUS_NOPROC, "", false)
+	for c, a := range open { // queued or taken
+		_ = n.reply(p.pid, c.from, c.ref, a, nil, grpcprocv1.Status_STATUS_NOPROC, "", false)
 	}
 	// The exit is reported before its watchers hear of it, so an observer
 	// sees it before anything it causes: a supervisor's restart, say.

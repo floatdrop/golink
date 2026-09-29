@@ -5,13 +5,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"reflect"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/floatdrop/grpcproc"
@@ -113,8 +117,10 @@ type ChildSpec struct {
 	// permanent child cannot be significant, nor can the child of a
 	// supervisor whose AutoShutdown is NoAutoShutdown.
 	Significant bool
-	start       func(sup *grpcproc.Process[proto.Message]) (grpcproc.PID, grpcproc.Ref, error)
-	supervisor  bool
+	// start spawns the child from sup, with extra spawn options of the
+	// start's own: the watch of the call that asked for it (see startChild).
+	start      func(sup *grpcproc.Process[proto.Message], extra []grpcproc.SpawnOption) (grpcproc.PID, grpcproc.Ref, error)
+	supervisor bool
 }
 
 // WithRestart returns a copy of c with restart policy r.
@@ -139,8 +145,8 @@ func (c ChildSpec) WithSignificant(significant bool) ChildSpec {
 // ChildFunc is a child that runs fn, registered as name unless name is
 // empty. opts are for the child; grpcproc.LinkChild is not one of them.
 func ChildFunc[M proto.Message](name string, fn func(*grpcproc.Process[M]) error, opts ...grpcproc.SpawnOption) ChildSpec {
-	return ChildSpec{Name: name, start: func(sup *grpcproc.Process[proto.Message]) (grpcproc.PID, grpcproc.Ref, error) {
-		a, ref, err := sup.SpawnMonitor[M](fn, childOpts(name, opts)...)
+	return ChildSpec{Name: name, start: func(sup *grpcproc.Process[proto.Message], extra []grpcproc.SpawnOption) (grpcproc.PID, grpcproc.Ref, error) {
+		a, ref, err := sup.SpawnMonitor[M](fn, append(childOpts(name, opts), extra...)...)
 		return a.PID(), ref, err
 	}}
 }
@@ -156,8 +162,8 @@ func Child[M proto.Message, H Handler[M]](name string, newHandler func() H, opts
 // ChildSupervisor is a child that is itself a supervisor. Its Shutdown is
 // Infinity unless set: stopping it waits for its whole subtree.
 func ChildSupervisor(name string, spec Spec, opts ...grpcproc.SpawnOption) ChildSpec {
-	return ChildSpec{Name: name, supervisor: true, start: func(sup *grpcproc.Process[proto.Message]) (grpcproc.PID, grpcproc.Ref, error) {
-		return startSupervisor(spec, childOpts(name, opts), func(fn func(*grpcproc.Process[proto.Message]) error, o []grpcproc.SpawnOption) (grpcproc.PID, grpcproc.Ref, error) {
+	return ChildSpec{Name: name, supervisor: true, start: func(sup *grpcproc.Process[proto.Message], extra []grpcproc.SpawnOption) (grpcproc.PID, grpcproc.Ref, error) {
+		return startSupervisor(spec, append(childOpts(name, opts), extra...), func(fn func(*grpcproc.Process[proto.Message]) error, o []grpcproc.SpawnOption) (grpcproc.PID, grpcproc.Ref, error) {
 			a, ref, err := sup.SpawnMonitor[proto.Message](fn, o...)
 			return a.PID(), ref, err
 		})
@@ -196,9 +202,49 @@ type Spec struct {
 	// AutoShutdown says whether the supervisor ends itself when its
 	// significant children end.
 	AutoShutdown AutoShutdown
-	// Children start in order and stop in reverse order. StartChild adds
-	// more, after them.
+	// Children start in order and stop in reverse order. StartChild and
+	// StartChildFrom add more, after them.
 	Children []ChildSpec
+	// Factories are the children StartChildFrom can ask the supervisor for,
+	// from any node, by name: each builds a child spec from an argument that
+	// crossed the wire, with Go functions and dependencies of this node. They
+	// are part of the Spec so that what a supervisor can be asked to start is
+	// declared where what it starts is, and outlasts restarts of either node
+	// as the Spec does.
+	Factories map[string]Factory
+}
+
+// Factory builds a child spec from an argument, on the supervisor's node, for
+// StartChildFrom. Build it with ChildFactory, and name it in Spec.Factories.
+type Factory struct {
+	build func(arg proto.Message) (ChildSpec, error)
+}
+
+// ChildFactory is a Factory whose argument is an A: fn builds the spec of the
+// child to start from it, as Child, ChildFunc or ChildSupervisor would, or
+// refuses with an error. StartChildFrom returns that error as its own, a
+// *grpcproc.RemoteError that is fn's error to errors.Is, so fn is where
+// admission goes, with an error per reason a caller tells apart:
+//
+//	actor.Spec{Factories: map[string]actor.Factory{
+//		"peer": actor.ChildFactory(func(j *roomspb.Join) (actor.ChildSpec, error) {
+//			if media.Full() {
+//				return actor.ChildSpec{}, ErrFull // the caller tries another node
+//			}
+//			return actor.Child("peer:"+j.GetPeer(), func() *Peer { return &Peer{join: j, media: media} }).
+//				WithRestart(actor.Temporary), nil
+//		}),
+//	}}
+//
+// An argument of another type is refused.
+func ChildFactory[A proto.Message](fn func(A) (ChildSpec, error)) Factory {
+	return Factory{build: func(arg proto.Message) (ChildSpec, error) {
+		a, ok := arg.(A)
+		if !ok {
+			return ChildSpec{}, fmt.Errorf("actor: StartChildFrom: the factory takes %v, not %s", reflect.TypeFor[A](), proto.MessageName(arg))
+		}
+		return fn(a)
+	}}
 }
 
 func (s Spec) validate() error {
@@ -214,6 +260,14 @@ func (s Spec) validate() error {
 	for i, c := range s.Children {
 		if err := s.validateChild(c, seen); err != nil {
 			return fmt.Errorf("actor: child %d: %w", i, err)
+		}
+	}
+	for name, f := range s.Factories {
+		switch {
+		case name == "":
+			return errors.New("actor: a factory with no name")
+		case f.build == nil:
+			return fmt.Errorf("actor: factory %q: build it with ChildFactory", name)
 		}
 	}
 	return nil
@@ -336,6 +390,96 @@ func StartChild(ctx context.Context, from grpcproc.Caller, sup grpcproc.Target, 
 // the spec's name running already. StartChild returns that child's PID with
 // it.
 var ErrAlreadyStarted = errors.New("actor: StartChild: a child of that name is running already")
+
+// StartChildFrom asks the supervisor sup, which may run on another node, to
+// start the child its factory named factory builds from arg (see
+// Spec.Factories), after the children sup has already, and returns once the
+// child has started. It is StartChild for a caller that cannot hand sup a
+// spec, Go functions that no message carries: arg is data, and the factory,
+// on sup's node, turns it into a spec there. The child is sup's as one
+// StartChild added is, forgotten once it ends for good.
+//
+// With WithMonitor, the caller monitors the child from before it runs, as
+// Process.SpawnMonitor does a child of its own node: however soon the child
+// exits, its Down comes after StartChildFrom returns, with the Ref it
+// returned and the real reason, never noproc. WithLink links the caller to
+// the child instead, as grpcproc.LinkChild does. Either needs from to be a
+// process, the only kind of caller a Down or an exit reaches. A start that
+// fails leaves no monitor or link behind, and no Down comes of it: the error
+// says it failed, which a Down never does. Once StartChildFrom has returned
+// the child, a link to sup's node that breaks is its Down, with
+// noconnection.
+//
+// As with StartChild, a child of the spec's name that runs already is not
+// started again: StartChildFrom returns its PID with ErrAlreadyStarted, and
+// the monitor or link, on that child. So when an answer is lost, a link that
+// broke or a ctx that ended, a named child may have started unwatched, and
+// starting it again finds it, with a watch. An anonymous child has no name to
+// be found by: sup lists it (Children), and it runs until it ends. The watch
+// is of the child's process: a restart sup makes is a new one, which
+// StartChildFrom of the name watches again.
+//
+//	pid, ref, err := actor.StartChildFrom(p.Context(), p, sup, "peer", &roomspb.Join{Peer: id}, actor.WithMonitor())
+//	switch {
+//	case errors.Is(err, ErrFull):
+//		// try another node
+//	case err != nil && !errors.Is(err, actor.ErrAlreadyStarted):
+//		return err
+//	}
+//	// A Down with ref comes when pid exits, however soon.
+//
+// The factory's refusal is the error, as the factory returned it, which
+// errors.Is tells apart; ErrNoFactory when sup has no factory of that name.
+// The other errors are StartChild's.
+func StartChildFrom(ctx context.Context, from grpcproc.Caller, sup grpcproc.Target, factory string, arg proto.Message, opts ...StartOption) (grpcproc.PID, grpcproc.Ref, error) {
+	var o startOpts
+	for _, opt := range opts {
+		opt(&o)
+	}
+	a, err := anypb.New(arg)
+	if err != nil {
+		return grpcproc.PID{}, grpcproc.Ref{}, fmt.Errorf("actor: StartChildFrom: %w", err)
+	}
+	req := &actorv1.Control{Op: &actorv1.Control_StartFrom{StartFrom: &actorv1.StartFrom{Factory: factory, Arg: a}}}
+	to := grpcproc.AddrOf[proto.Message](sup)
+	var r *actorv1.Started
+	var ref grpcproc.Ref
+	switch {
+	case o.monitor && o.link:
+		err = errors.New("actor: StartChildFrom: WithMonitor or WithLink, not both")
+	case o.monitor:
+		r, ref, err = to.CallMonitor[*actorv1.Started](ctx, from, req)
+	case o.link:
+		r, err = to.CallLink[*actorv1.Started](ctx, from, req)
+	default:
+		r, err = to.Call[*actorv1.Started](ctx, from, req)
+	}
+	if err != nil {
+		return grpcproc.PID{}, grpcproc.Ref{}, err
+	}
+	if r.GetAlready() {
+		return grpcproc.PIDFromProto(r.GetPid()), ref, ErrAlreadyStarted
+	}
+	return grpcproc.PIDFromProto(r.GetPid()), ref, nil
+}
+
+// StartOption configures StartChildFrom.
+type StartOption func(*startOpts)
+
+type startOpts struct{ monitor, link bool }
+
+// WithMonitor has the caller of StartChildFrom monitor the child from before
+// it runs: StartChildFrom returns the monitor's Ref.
+func WithMonitor() StartOption { return func(o *startOpts) { o.monitor = true } }
+
+// WithLink links the caller of StartChildFrom to the child from before it
+// runs, as grpcproc.LinkChild links a parent: the child's exit ends the
+// caller, with its reason, or reaches it as an Exited if it traps exits.
+func WithLink() StartOption { return func(o *startOpts) { o.link = true } }
+
+// ErrNoFactory is StartChildFrom's error when the supervisor has no factory
+// of that name.
+var ErrNoFactory = errors.New("actor: StartChildFrom: the supervisor has no factory of that name")
 
 // StopChild stops child, a running child of the supervisor sup, and makes
 // sup forget it: it is not restarted, whatever its Restart, and a strategy
@@ -514,8 +658,8 @@ const busyAfter = 100 * time.Millisecond
 // exit: try again.
 var ErrBusy = errors.New("actor: the supervisor is waiting for a child to exit; try again")
 
-func (s *supervisor) start(k *kid) error {
-	pid, ref, err := k.spec.start(s.p)
+func (s *supervisor) start(k *kid, extra ...grpcproc.SpawnOption) error {
+	pid, ref, err := k.spec.start(s.p, extra)
 	if err != nil {
 		return err
 	}
@@ -523,8 +667,8 @@ func (s *supervisor) start(k *kid) error {
 	return nil
 }
 
-// control answers StartChild, StopChild and Children, the calls a
-// supervisor takes.
+// control answers StartChild, StartChildFrom, StopChild and Children, the
+// calls a supervisor takes.
 func (s *supervisor) control(m grpcproc.Msg[proto.Message]) {
 	c, _ := m.Body.(*actorv1.Control)
 	switch op := c.GetOp().(type) {
@@ -539,32 +683,55 @@ func (s *supervisor) control(m grpcproc.Msg[proto.Message]) {
 			return
 		}
 		s.startChild(m, v.(ChildSpec))
+	case *actorv1.Control_StartFrom:
+		spec, err := s.build(op.StartFrom)
+		if err != nil {
+			_ = m.Reply(nil, err)
+			return
+		}
+		s.startChild(m, spec)
 	case *actorv1.Control_Stop:
 		_ = m.Reply(&emptypb.Empty{}, s.stopChild(grpcproc.PIDFromProto(op.Stop)))
 	case *actorv1.Control_WhichChildren:
 		_ = m.Reply(s.children(), nil)
 	default:
-		_ = m.Reply(nil, errors.New("actor: a supervisor takes no calls but StartChild, StopChild and Children"))
+		_ = m.Reply(nil, errors.New("actor: a supervisor takes no calls but StartChild, StartChildFrom, StopChild and Children"))
 	}
 }
 
-// startChild answers the StartChild call m for spec. A child of spec's name
-// that runs is the answer. One that has exited, and whose Down the
-// supervisor has yet to handle, has freed its name already: the call is
-// held until the supervisor has handled a Down, then answered afresh, when
-// the child has been restarted, or forgotten. The Down comes, since the
-// supervisor monitors every child that runs.
+// build is the spec a StartChildFrom asks for, which its factory builds. The
+// factory's error is the answer as it is, for its caller to tell apart.
+func (s *supervisor) build(r *actorv1.StartFrom) (ChildSpec, error) {
+	f, ok := s.spec.Factories[r.GetFactory()]
+	if !ok {
+		return ChildSpec{}, ErrNoFactory
+	}
+	arg, err := r.GetArg().UnmarshalNew()
+	if err != nil {
+		return ChildSpec{}, fmt.Errorf("actor: StartChildFrom: %w", err)
+	}
+	return f.build(arg)
+}
+
+// startChild answers the StartChild or StartChildFrom call m for spec. A
+// child of spec's name that runs is the answer. One that has exited, and
+// whose Down the supervisor has yet to handle, has freed its name already:
+// the call is held until the supervisor has handled a Down, then answered
+// afresh, when the child has been restarted, or forgotten. The Down comes,
+// since the supervisor monitors every child that runs. The monitor or link
+// m's caller asked for goes on the child that answers it, before the answer
+// leaves: one that starts has it before it runs.
 func (s *supervisor) startChild(m grpcproc.Msg[proto.Message], spec ChildSpec) {
 	if i := slices.IndexFunc(s.kids, func(k *kid) bool { return k.running && spec.Name != "" && k.spec.Name == spec.Name }); i >= 0 {
 		k := s.kids[i]
-		if _, alive := s.p.Node().Process(k.pid); !alive {
+		if _, alive := s.p.Node().Process(k.pid); !alive || m.Watch(k.pid) != nil {
 			s.held = append(s.held, heldStart{m, spec})
 			return
 		}
 		_ = m.Reply(&actorv1.Started{Pid: k.pid.Proto(), Already: true}, nil)
 		return
 	}
-	pid, err := s.add(spec)
+	pid, err := s.add(spec, grpcproc.WatchedBy(m))
 	if err != nil {
 		_ = m.Reply(nil, err)
 		return
@@ -572,8 +739,8 @@ func (s *supervisor) startChild(m grpcproc.Msg[proto.Message], spec ChildSpec) {
 	_ = m.Reply(&actorv1.Started{Pid: pid.Proto()}, nil)
 }
 
-// add starts spec as a child StartChild adds.
-func (s *supervisor) add(spec ChildSpec) (grpcproc.PID, error) {
+// add starts spec as a child StartChild adds, with extra spawn options.
+func (s *supervisor) add(spec ChildSpec, extra ...grpcproc.SpawnOption) (grpcproc.PID, error) {
 	if slices.ContainsFunc(s.kids, func(k *kid) bool { return k.pending }) {
 		// Started now, it would come before children the restart owes a
 		// start.
@@ -587,7 +754,7 @@ func (s *supervisor) add(spec ChildSpec) (grpcproc.PID, error) {
 		return grpcproc.PID{}, fmt.Errorf("actor: StartChild: %w", err)
 	}
 	k := &kid{spec: spec, dynamic: true}
-	if err := s.start(k); err != nil {
+	if err := s.start(k, extra...); err != nil {
 		return grpcproc.PID{}, fmt.Errorf("actor: StartChild, %s: %w", labelOf(spec.Name), err)
 	}
 	s.kids = append(s.kids, k)
@@ -822,6 +989,9 @@ func (s *supervisor) inspect() map[string]string {
 	}
 	if s.spec.AutoShutdown != NoAutoShutdown {
 		out["auto_shutdown"] = s.spec.AutoShutdown.String()
+	}
+	if len(s.spec.Factories) > 0 {
+		out["factories"] = strings.Join(slices.Sorted(maps.Keys(s.spec.Factories)), " ")
 	}
 	for _, k := range s.kids {
 		state := "stopped"

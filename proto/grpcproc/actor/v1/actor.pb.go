@@ -12,6 +12,7 @@ import (
 	v1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	anypb "google.golang.org/protobuf/types/known/anypb"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	reflect "reflect"
 	sync "sync"
@@ -86,6 +87,7 @@ type Control struct {
 	//	*Control_Start
 	//	*Control_Stop
 	//	*Control_WhichChildren
+	//	*Control_StartFrom
 	Op            isControl_Op `protobuf_oneof:"op"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -155,6 +157,15 @@ func (x *Control) GetWhichChildren() *emptypb.Empty {
 	return nil
 }
 
+func (x *Control) GetStartFrom() *StartFrom {
+	if x != nil {
+		if x, ok := x.Op.(*Control_StartFrom); ok {
+			return x.StartFrom
+		}
+	}
+	return nil
+}
+
 type isControl_Op interface {
 	isControl_Op()
 }
@@ -176,11 +187,73 @@ type Control_WhichChildren struct {
 	WhichChildren *emptypb.Empty `protobuf:"bytes,3,opt,name=which_children,json=whichChildren,proto3,oneof"`
 }
 
+type Control_StartFrom struct {
+	// A child one of the supervisor's factories builds, from any node.
+	// Answered with Started.
+	StartFrom *StartFrom `protobuf:"bytes,4,opt,name=start_from,json=startFrom,proto3,oneof"`
+}
+
 func (*Control_Start) isControl_Op() {}
 
 func (*Control_Stop) isControl_Op() {}
 
 func (*Control_WhichChildren) isControl_Op() {}
+
+func (*Control_StartFrom) isControl_Op() {}
+
+// StartFrom names a factory of the supervisor's Spec, and the argument it
+// builds a child spec from.
+type StartFrom struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Factory       string                 `protobuf:"bytes,1,opt,name=factory,proto3" json:"factory,omitempty"`
+	Arg           *anypb.Any             `protobuf:"bytes,2,opt,name=arg,proto3" json:"arg,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartFrom) Reset() {
+	*x = StartFrom{}
+	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartFrom) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartFrom) ProtoMessage() {}
+
+func (x *StartFrom) ProtoReflect() protoreflect.Message {
+	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartFrom.ProtoReflect.Descriptor instead.
+func (*StartFrom) Descriptor() ([]byte, []int) {
+	return file_grpcproc_actor_v1_actor_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *StartFrom) GetFactory() string {
+	if x != nil {
+		return x.Factory
+	}
+	return ""
+}
+
+func (x *StartFrom) GetArg() *anypb.Any {
+	if x != nil {
+		return x.Arg
+	}
+	return nil
+}
 
 // Started answers a start with the child's PID.
 type Started struct {
@@ -195,7 +268,7 @@ type Started struct {
 
 func (x *Started) Reset() {
 	*x = Started{}
-	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[1]
+	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -207,7 +280,7 @@ func (x *Started) String() string {
 func (*Started) ProtoMessage() {}
 
 func (x *Started) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[1]
+	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -220,7 +293,7 @@ func (x *Started) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Started.ProtoReflect.Descriptor instead.
 func (*Started) Descriptor() ([]byte, []int) {
-	return file_grpcproc_actor_v1_actor_proto_rawDescGZIP(), []int{1}
+	return file_grpcproc_actor_v1_actor_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Started) GetPid() *v1.PID {
@@ -248,7 +321,7 @@ type Children struct {
 
 func (x *Children) Reset() {
 	*x = Children{}
-	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[2]
+	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -260,7 +333,7 @@ func (x *Children) String() string {
 func (*Children) ProtoMessage() {}
 
 func (x *Children) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[2]
+	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -273,7 +346,7 @@ func (x *Children) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Children.ProtoReflect.Descriptor instead.
 func (*Children) Descriptor() ([]byte, []int) {
-	return file_grpcproc_actor_v1_actor_proto_rawDescGZIP(), []int{2}
+	return file_grpcproc_actor_v1_actor_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Children) GetChildren() []*Child {
@@ -302,7 +375,7 @@ type Child struct {
 
 func (x *Child) Reset() {
 	*x = Child{}
-	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[3]
+	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -314,7 +387,7 @@ func (x *Child) String() string {
 func (*Child) ProtoMessage() {}
 
 func (x *Child) ProtoReflect() protoreflect.Message {
-	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[3]
+	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -327,7 +400,7 @@ func (x *Child) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Child.ProtoReflect.Descriptor instead.
 func (*Child) Descriptor() ([]byte, []int) {
-	return file_grpcproc_actor_v1_actor_proto_rawDescGZIP(), []int{3}
+	return file_grpcproc_actor_v1_actor_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Child) GetName() string {
@@ -376,12 +449,17 @@ var File_grpcproc_actor_v1_actor_proto protoreflect.FileDescriptor
 
 const file_grpcproc_actor_v1_actor_proto_rawDesc = "" +
 	"\n" +
-	"\x1dgrpcproc/actor/v1/actor.proto\x12\x11grpcproc.actor.v1\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1agrpcproc/v1/grpcproc.proto\"\x90\x01\n" +
+	"\x1dgrpcproc/actor/v1/actor.proto\x12\x11grpcproc.actor.v1\x1a\x19google/protobuf/any.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1agrpcproc/v1/grpcproc.proto\"\xcf\x01\n" +
 	"\aControl\x12\x16\n" +
 	"\x05start\x18\x01 \x01(\x04H\x00R\x05start\x12&\n" +
 	"\x04stop\x18\x02 \x01(\v2\x10.grpcproc.v1.PIDH\x00R\x04stop\x12?\n" +
-	"\x0ewhich_children\x18\x03 \x01(\v2\x16.google.protobuf.EmptyH\x00R\rwhichChildrenB\x04\n" +
-	"\x02op\"G\n" +
+	"\x0ewhich_children\x18\x03 \x01(\v2\x16.google.protobuf.EmptyH\x00R\rwhichChildren\x12=\n" +
+	"\n" +
+	"start_from\x18\x04 \x01(\v2\x1c.grpcproc.actor.v1.StartFromH\x00R\tstartFromB\x04\n" +
+	"\x02op\"M\n" +
+	"\tStartFrom\x12\x18\n" +
+	"\afactory\x18\x01 \x01(\tR\afactory\x12&\n" +
+	"\x03arg\x18\x02 \x01(\v2\x14.google.protobuf.AnyR\x03arg\"G\n" +
 	"\aStarted\x12\"\n" +
 	"\x03pid\x18\x01 \x01(\v2\x10.grpcproc.v1.PIDR\x03pid\x12\x18\n" +
 	"\aalready\x18\x02 \x01(\bR\aalready\"@\n" +
@@ -417,28 +495,32 @@ func file_grpcproc_actor_v1_actor_proto_rawDescGZIP() []byte {
 }
 
 var file_grpcproc_actor_v1_actor_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_grpcproc_actor_v1_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_grpcproc_actor_v1_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_grpcproc_actor_v1_actor_proto_goTypes = []any{
 	(Restart)(0),          // 0: grpcproc.actor.v1.Restart
 	(*Control)(nil),       // 1: grpcproc.actor.v1.Control
-	(*Started)(nil),       // 2: grpcproc.actor.v1.Started
-	(*Children)(nil),      // 3: grpcproc.actor.v1.Children
-	(*Child)(nil),         // 4: grpcproc.actor.v1.Child
-	(*v1.PID)(nil),        // 5: grpcproc.v1.PID
-	(*emptypb.Empty)(nil), // 6: google.protobuf.Empty
+	(*StartFrom)(nil),     // 2: grpcproc.actor.v1.StartFrom
+	(*Started)(nil),       // 3: grpcproc.actor.v1.Started
+	(*Children)(nil),      // 4: grpcproc.actor.v1.Children
+	(*Child)(nil),         // 5: grpcproc.actor.v1.Child
+	(*v1.PID)(nil),        // 6: grpcproc.v1.PID
+	(*emptypb.Empty)(nil), // 7: google.protobuf.Empty
+	(*anypb.Any)(nil),     // 8: google.protobuf.Any
 }
 var file_grpcproc_actor_v1_actor_proto_depIdxs = []int32{
-	5, // 0: grpcproc.actor.v1.Control.stop:type_name -> grpcproc.v1.PID
-	6, // 1: grpcproc.actor.v1.Control.which_children:type_name -> google.protobuf.Empty
-	5, // 2: grpcproc.actor.v1.Started.pid:type_name -> grpcproc.v1.PID
-	4, // 3: grpcproc.actor.v1.Children.children:type_name -> grpcproc.actor.v1.Child
-	5, // 4: grpcproc.actor.v1.Child.pid:type_name -> grpcproc.v1.PID
-	0, // 5: grpcproc.actor.v1.Child.restart:type_name -> grpcproc.actor.v1.Restart
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	6, // 0: grpcproc.actor.v1.Control.stop:type_name -> grpcproc.v1.PID
+	7, // 1: grpcproc.actor.v1.Control.which_children:type_name -> google.protobuf.Empty
+	2, // 2: grpcproc.actor.v1.Control.start_from:type_name -> grpcproc.actor.v1.StartFrom
+	8, // 3: grpcproc.actor.v1.StartFrom.arg:type_name -> google.protobuf.Any
+	6, // 4: grpcproc.actor.v1.Started.pid:type_name -> grpcproc.v1.PID
+	5, // 5: grpcproc.actor.v1.Children.children:type_name -> grpcproc.actor.v1.Child
+	6, // 6: grpcproc.actor.v1.Child.pid:type_name -> grpcproc.v1.PID
+	0, // 7: grpcproc.actor.v1.Child.restart:type_name -> grpcproc.actor.v1.Restart
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_grpcproc_actor_v1_actor_proto_init() }
@@ -450,6 +532,7 @@ func file_grpcproc_actor_v1_actor_proto_init() {
 		(*Control_Start)(nil),
 		(*Control_Stop)(nil),
 		(*Control_WhichChildren)(nil),
+		(*Control_StartFrom)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -457,7 +540,7 @@ func file_grpcproc_actor_v1_actor_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_grpcproc_actor_v1_actor_proto_rawDesc), len(file_grpcproc_actor_v1_actor_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
