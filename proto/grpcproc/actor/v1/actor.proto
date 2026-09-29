@@ -3,18 +3,57 @@ syntax = "proto3";
 
 package grpcproc.actor.v1;
 
+import "google/protobuf/empty.proto";
 import "grpcproc/v1/grpcproc.proto";
 
 option go_package = "github.com/floatdrop/grpcproc/proto/grpcproc/actor/v1;actorv1";
 
-// Control asks a supervisor to start a child, or to stop one.
+// Control asks a supervisor to start a child, to stop one, or which
+// children it has.
 message Control {
   oneof op {
     // A child spec its caller registered in the actor package under this
     // id. A spec holds Go functions, so only a supervisor on the caller's
-    // node can start it.
+    // node can start it. Answered with Started.
     uint64 start = 1;
     // A running child to stop and forget.
     grpcproc.v1.PID stop = 2;
+    // Answered with Children.
+    google.protobuf.Empty which_children = 3;
   }
+}
+
+// Started answers a start with the child's PID.
+message Started {
+  grpcproc.v1.PID pid = 1;
+  // A child of the spec's name was running already: pid is that child's,
+  // and the spec was not started.
+  bool already = 2;
+}
+
+// Children answers which_children: the supervisor's children, in the order
+// it starts them.
+message Children {
+  repeated Child children = 1;
+}
+
+message Child {
+  // Empty for an anonymous child.
+  string name = 1;
+  // Unset unless the child runs.
+  grpcproc.v1.PID pid = 2;
+  // A restart owes the child a start, which waits for a process to exit.
+  bool restarting = 3;
+  Restart restart = 4;
+  // How many times the supervisor has restarted it.
+  uint32 restarts = 5;
+  // The child is a supervisor itself.
+  bool supervisor = 6;
+}
+
+enum Restart {
+  RESTART_UNSPECIFIED = 0;
+  RESTART_PERMANENT = 1;
+  RESTART_TRANSIENT = 2;
+  RESTART_TEMPORARY = 3;
 }

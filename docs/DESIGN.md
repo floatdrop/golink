@@ -661,7 +661,9 @@ them. Two primitives went into the core because they need process internals:
   A child that never exits holds its restart for good: the alternative was
   to end the tree, which cannot free the name either. A restart that cannot
   start for another reason counts against the intensity, so it ends rather
-  than loops. The supervisor's state is published through `WithInspect`.
+  than loops. The supervisor's state is published through `WithInspect`,
+  and answered as data to `actor.Children`, OTP's `which_children`, from
+  any node.
 - `actor.StartChild` adds a child to a running supervisor, and
   `actor.StopChild` stops one for good. A spec holds Go functions, so
   `StartChild` registers it in the actor package and calls the supervisor
@@ -675,6 +677,16 @@ them. Two primitives went into the core because they need process internals:
   `simple_one_for_one`: a pool is a `OneForOne` supervisor whose children
   `StartChild` adds. `StartChild` is refused while a restart waits, since
   the new child would start before the ones owed a start.
+- **`StartChild` of a name that runs answers with that child.** It starts
+  nothing and returns the running child's PID with `ErrAlreadyStarted`, as
+  OTP's `{error, {already_started, Pid}}` does. Code that starts a child per
+  key and keeps a map of them goes stale at the first restart, which the
+  supervisor makes without telling it; with this it keeps no map. A child
+  that has exited, but whose `Down` the supervisor has yet to handle, has
+  freed its name already, since a process frees its name before its `Down`
+  goes. So the call is held until the supervisor has handled a `Down`, and
+  answered afresh: with the child's restart, or, once the supervisor has
+  forgotten it, with a start of the spec.
 - **A supervisor that waits long for a child answers calls with
   `ErrBusy`.** It waits outside `Receive`, and so do the supervisors above
   it, each waiting for its subtree; a child that calls its supervisor while

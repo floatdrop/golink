@@ -178,3 +178,72 @@ func TestFailedRestartBringsBackTheWholeGroup(t *testing.T) {
 		})
 	}
 }
+
+// A StartChild for the name of a child that has exited, but whose Down the
+// supervisor has yet to handle, finds the name free, and the child still
+// running as far as the supervisor knows: it waits for the Down. The child
+// has then been restarted, and is the answer, or forgotten, and the spec
+// starts.
+func TestStartChildWaitsForTheDownOfItsName(t *testing.T) {
+	for _, crash := range []bool{false, true} {
+		synctest.Test(t, func(t *testing.T) {
+			n := grpcproctest.New(t, "a").Node("a")
+			sup, err := Supervise(n, Spec{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			room := ChildFunc("room", func(p *grpcproc.Process[proto.Message]) error {
+				_, err := p.Receive()
+				if err == nil && crash {
+					err = errors.New("crash")
+				}
+				return err
+			}).WithRestart(Transient)
+			first, err := StartChild(t.Context(), n, sup, room)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// The supervisor is busy starting a child, while a StartChild of
+			// room waits behind it, and room exits.
+			gate := make(chan struct{})
+			slow := ChildSpec{start: func(sup *grpcproc.Process[proto.Message]) (grpcproc.PID, grpcproc.Ref, error) {
+				<-gate
+				a, ref, err := sup.SpawnMonitor[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
+					_, err := p.Receive()
+					return err
+				})
+				return a.PID(), ref, err
+			}}
+			go func() { _, _ = StartChild(t.Context(), n, sup, slow) }()
+			synctest.Wait()
+			type answer struct {
+				pid grpcproc.PID
+				err error
+			}
+			answered := make(chan answer, 1)
+			go func() {
+				pid, err := StartChild(t.Context(), n, sup, room)
+				answered <- answer{pid, err}
+			}()
+			synctest.Wait()
+			_ = n.SendTo(t.Context(), first, &emptypb.Empty{})
+			synctest.Wait()
+			if _, ok := n.Whereis("room"); ok {
+				t.Fatal("room still holds its name")
+			}
+			close(gate)
+
+			a := <-answered
+			now, ok := n.Whereis("room")
+			switch {
+			case !ok || a.pid != now || a.pid == first:
+				t.Fatalf("crash %v: StartChild answered %v; room is %v", crash, a.pid, now)
+			case crash && !errors.Is(a.err, ErrAlreadyStarted):
+				t.Fatalf("a restarted room: %v", a.err)
+			case !crash && a.err != nil:
+				t.Fatalf("a room that ended: %v", a.err)
+			}
+		})
+	}
+}

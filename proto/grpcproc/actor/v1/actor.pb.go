@@ -12,6 +12,7 @@ import (
 	v1 "github.com/floatdrop/grpcproc/proto/grpcproc/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -24,13 +25,67 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// Control asks a supervisor to start a child, or to stop one.
+type Restart int32
+
+const (
+	Restart_RESTART_UNSPECIFIED Restart = 0
+	Restart_RESTART_PERMANENT   Restart = 1
+	Restart_RESTART_TRANSIENT   Restart = 2
+	Restart_RESTART_TEMPORARY   Restart = 3
+)
+
+// Enum value maps for Restart.
+var (
+	Restart_name = map[int32]string{
+		0: "RESTART_UNSPECIFIED",
+		1: "RESTART_PERMANENT",
+		2: "RESTART_TRANSIENT",
+		3: "RESTART_TEMPORARY",
+	}
+	Restart_value = map[string]int32{
+		"RESTART_UNSPECIFIED": 0,
+		"RESTART_PERMANENT":   1,
+		"RESTART_TRANSIENT":   2,
+		"RESTART_TEMPORARY":   3,
+	}
+)
+
+func (x Restart) Enum() *Restart {
+	p := new(Restart)
+	*p = x
+	return p
+}
+
+func (x Restart) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Restart) Descriptor() protoreflect.EnumDescriptor {
+	return file_grpcproc_actor_v1_actor_proto_enumTypes[0].Descriptor()
+}
+
+func (Restart) Type() protoreflect.EnumType {
+	return &file_grpcproc_actor_v1_actor_proto_enumTypes[0]
+}
+
+func (x Restart) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Restart.Descriptor instead.
+func (Restart) EnumDescriptor() ([]byte, []int) {
+	return file_grpcproc_actor_v1_actor_proto_rawDescGZIP(), []int{0}
+}
+
+// Control asks a supervisor to start a child, to stop one, or which
+// children it has.
 type Control struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Op:
 	//
 	//	*Control_Start
 	//	*Control_Stop
+	//	*Control_WhichChildren
 	Op            isControl_Op `protobuf_oneof:"op"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -91,6 +146,15 @@ func (x *Control) GetStop() *v1.PID {
 	return nil
 }
 
+func (x *Control) GetWhichChildren() *emptypb.Empty {
+	if x != nil {
+		if x, ok := x.Op.(*Control_WhichChildren); ok {
+			return x.WhichChildren
+		}
+	}
+	return nil
+}
+
 type isControl_Op interface {
 	isControl_Op()
 }
@@ -98,7 +162,7 @@ type isControl_Op interface {
 type Control_Start struct {
 	// A child spec its caller registered in the actor package under this
 	// id. A spec holds Go functions, so only a supervisor on the caller's
-	// node can start it.
+	// node can start it. Answered with Started.
 	Start uint64 `protobuf:"varint,1,opt,name=start,proto3,oneof"`
 }
 
@@ -107,19 +171,238 @@ type Control_Stop struct {
 	Stop *v1.PID `protobuf:"bytes,2,opt,name=stop,proto3,oneof"`
 }
 
+type Control_WhichChildren struct {
+	// Answered with Children.
+	WhichChildren *emptypb.Empty `protobuf:"bytes,3,opt,name=which_children,json=whichChildren,proto3,oneof"`
+}
+
 func (*Control_Start) isControl_Op() {}
 
 func (*Control_Stop) isControl_Op() {}
+
+func (*Control_WhichChildren) isControl_Op() {}
+
+// Started answers a start with the child's PID.
+type Started struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Pid   *v1.PID                `protobuf:"bytes,1,opt,name=pid,proto3" json:"pid,omitempty"`
+	// A child of the spec's name was running already: pid is that child's,
+	// and the spec was not started.
+	Already       bool `protobuf:"varint,2,opt,name=already,proto3" json:"already,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Started) Reset() {
+	*x = Started{}
+	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Started) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Started) ProtoMessage() {}
+
+func (x *Started) ProtoReflect() protoreflect.Message {
+	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Started.ProtoReflect.Descriptor instead.
+func (*Started) Descriptor() ([]byte, []int) {
+	return file_grpcproc_actor_v1_actor_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *Started) GetPid() *v1.PID {
+	if x != nil {
+		return x.Pid
+	}
+	return nil
+}
+
+func (x *Started) GetAlready() bool {
+	if x != nil {
+		return x.Already
+	}
+	return false
+}
+
+// Children answers which_children: the supervisor's children, in the order
+// it starts them.
+type Children struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Children      []*Child               `protobuf:"bytes,1,rep,name=children,proto3" json:"children,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Children) Reset() {
+	*x = Children{}
+	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Children) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Children) ProtoMessage() {}
+
+func (x *Children) ProtoReflect() protoreflect.Message {
+	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Children.ProtoReflect.Descriptor instead.
+func (*Children) Descriptor() ([]byte, []int) {
+	return file_grpcproc_actor_v1_actor_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *Children) GetChildren() []*Child {
+	if x != nil {
+		return x.Children
+	}
+	return nil
+}
+
+type Child struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Empty for an anonymous child.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Unset unless the child runs.
+	Pid *v1.PID `protobuf:"bytes,2,opt,name=pid,proto3" json:"pid,omitempty"`
+	// A restart owes the child a start, which waits for a process to exit.
+	Restarting bool    `protobuf:"varint,3,opt,name=restarting,proto3" json:"restarting,omitempty"`
+	Restart    Restart `protobuf:"varint,4,opt,name=restart,proto3,enum=grpcproc.actor.v1.Restart" json:"restart,omitempty"`
+	// How many times the supervisor has restarted it.
+	Restarts uint32 `protobuf:"varint,5,opt,name=restarts,proto3" json:"restarts,omitempty"`
+	// The child is a supervisor itself.
+	Supervisor    bool `protobuf:"varint,6,opt,name=supervisor,proto3" json:"supervisor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Child) Reset() {
+	*x = Child{}
+	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Child) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Child) ProtoMessage() {}
+
+func (x *Child) ProtoReflect() protoreflect.Message {
+	mi := &file_grpcproc_actor_v1_actor_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Child.ProtoReflect.Descriptor instead.
+func (*Child) Descriptor() ([]byte, []int) {
+	return file_grpcproc_actor_v1_actor_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *Child) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *Child) GetPid() *v1.PID {
+	if x != nil {
+		return x.Pid
+	}
+	return nil
+}
+
+func (x *Child) GetRestarting() bool {
+	if x != nil {
+		return x.Restarting
+	}
+	return false
+}
+
+func (x *Child) GetRestart() Restart {
+	if x != nil {
+		return x.Restart
+	}
+	return Restart_RESTART_UNSPECIFIED
+}
+
+func (x *Child) GetRestarts() uint32 {
+	if x != nil {
+		return x.Restarts
+	}
+	return 0
+}
+
+func (x *Child) GetSupervisor() bool {
+	if x != nil {
+		return x.Supervisor
+	}
+	return false
+}
 
 var File_grpcproc_actor_v1_actor_proto protoreflect.FileDescriptor
 
 const file_grpcproc_actor_v1_actor_proto_rawDesc = "" +
 	"\n" +
-	"\x1dgrpcproc/actor/v1/actor.proto\x12\x11grpcproc.actor.v1\x1a\x1agrpcproc/v1/grpcproc.proto\"O\n" +
+	"\x1dgrpcproc/actor/v1/actor.proto\x12\x11grpcproc.actor.v1\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1agrpcproc/v1/grpcproc.proto\"\x90\x01\n" +
 	"\aControl\x12\x16\n" +
 	"\x05start\x18\x01 \x01(\x04H\x00R\x05start\x12&\n" +
-	"\x04stop\x18\x02 \x01(\v2\x10.grpcproc.v1.PIDH\x00R\x04stopB\x04\n" +
-	"\x02opB?Z=github.com/floatdrop/grpcproc/proto/grpcproc/actor/v1;actorv1b\x06proto3"
+	"\x04stop\x18\x02 \x01(\v2\x10.grpcproc.v1.PIDH\x00R\x04stop\x12?\n" +
+	"\x0ewhich_children\x18\x03 \x01(\v2\x16.google.protobuf.EmptyH\x00R\rwhichChildrenB\x04\n" +
+	"\x02op\"G\n" +
+	"\aStarted\x12\"\n" +
+	"\x03pid\x18\x01 \x01(\v2\x10.grpcproc.v1.PIDR\x03pid\x12\x18\n" +
+	"\aalready\x18\x02 \x01(\bR\aalready\"@\n" +
+	"\bChildren\x124\n" +
+	"\bchildren\x18\x01 \x03(\v2\x18.grpcproc.actor.v1.ChildR\bchildren\"\xd1\x01\n" +
+	"\x05Child\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\"\n" +
+	"\x03pid\x18\x02 \x01(\v2\x10.grpcproc.v1.PIDR\x03pid\x12\x1e\n" +
+	"\n" +
+	"restarting\x18\x03 \x01(\bR\n" +
+	"restarting\x124\n" +
+	"\arestart\x18\x04 \x01(\x0e2\x1a.grpcproc.actor.v1.RestartR\arestart\x12\x1a\n" +
+	"\brestarts\x18\x05 \x01(\rR\brestarts\x12\x1e\n" +
+	"\n" +
+	"supervisor\x18\x06 \x01(\bR\n" +
+	"supervisor*g\n" +
+	"\aRestart\x12\x17\n" +
+	"\x13RESTART_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11RESTART_PERMANENT\x10\x01\x12\x15\n" +
+	"\x11RESTART_TRANSIENT\x10\x02\x12\x15\n" +
+	"\x11RESTART_TEMPORARY\x10\x03B?Z=github.com/floatdrop/grpcproc/proto/grpcproc/actor/v1;actorv1b\x06proto3"
 
 var (
 	file_grpcproc_actor_v1_actor_proto_rawDescOnce sync.Once
@@ -133,18 +416,29 @@ func file_grpcproc_actor_v1_actor_proto_rawDescGZIP() []byte {
 	return file_grpcproc_actor_v1_actor_proto_rawDescData
 }
 
-var file_grpcproc_actor_v1_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_grpcproc_actor_v1_actor_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_grpcproc_actor_v1_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_grpcproc_actor_v1_actor_proto_goTypes = []any{
-	(*Control)(nil), // 0: grpcproc.actor.v1.Control
-	(*v1.PID)(nil),  // 1: grpcproc.v1.PID
+	(Restart)(0),          // 0: grpcproc.actor.v1.Restart
+	(*Control)(nil),       // 1: grpcproc.actor.v1.Control
+	(*Started)(nil),       // 2: grpcproc.actor.v1.Started
+	(*Children)(nil),      // 3: grpcproc.actor.v1.Children
+	(*Child)(nil),         // 4: grpcproc.actor.v1.Child
+	(*v1.PID)(nil),        // 5: grpcproc.v1.PID
+	(*emptypb.Empty)(nil), // 6: google.protobuf.Empty
 }
 var file_grpcproc_actor_v1_actor_proto_depIdxs = []int32{
-	1, // 0: grpcproc.actor.v1.Control.stop:type_name -> grpcproc.v1.PID
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	5, // 0: grpcproc.actor.v1.Control.stop:type_name -> grpcproc.v1.PID
+	6, // 1: grpcproc.actor.v1.Control.which_children:type_name -> google.protobuf.Empty
+	5, // 2: grpcproc.actor.v1.Started.pid:type_name -> grpcproc.v1.PID
+	4, // 3: grpcproc.actor.v1.Children.children:type_name -> grpcproc.actor.v1.Child
+	5, // 4: grpcproc.actor.v1.Child.pid:type_name -> grpcproc.v1.PID
+	0, // 5: grpcproc.actor.v1.Child.restart:type_name -> grpcproc.actor.v1.Restart
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_grpcproc_actor_v1_actor_proto_init() }
@@ -155,19 +449,21 @@ func file_grpcproc_actor_v1_actor_proto_init() {
 	file_grpcproc_actor_v1_actor_proto_msgTypes[0].OneofWrappers = []any{
 		(*Control_Start)(nil),
 		(*Control_Stop)(nil),
+		(*Control_WhichChildren)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_grpcproc_actor_v1_actor_proto_rawDesc), len(file_grpcproc_actor_v1_actor_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   1,
+			NumEnums:      1,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_grpcproc_actor_v1_actor_proto_goTypes,
 		DependencyIndexes: file_grpcproc_actor_v1_actor_proto_depIdxs,
+		EnumInfos:         file_grpcproc_actor_v1_actor_proto_enumTypes,
 		MessageInfos:      file_grpcproc_actor_v1_actor_proto_msgTypes,
 	}.Build()
 	File_grpcproc_actor_v1_actor_proto = out.File
