@@ -132,6 +132,7 @@ message Envelope {                                   // one flat message, decode
   Hello hello = 12;
   int64 timeout_nanos = 13;                          // a call's time left, not its deadline
   map<string,string> metadata = 15;                  // trace context, tenant …
+  bool watch = 16; uint64 watched_id = 17;           // a call's watch, and what its reply placed it on
 }
 ```
 
@@ -372,7 +373,8 @@ ended `normal` or `shutdown` ended normally too, and is not restarted.
   `LinkChild()` the parent to the child, both inside the critical section
   that admits the child, as `SpawnMonitor` does its monitor, so neither
   side's exit is missed however soon it comes. Both together are Erlang's
-  `spawn_link`.
+  `spawn_link`. A process of another node links to a child as `LinkChild`
+  does with `CallLink` (see Remote spawn).
 - **The parent's exit ends an actor even when it traps exits**, as it ends a
   gen_server and an ergo actor. That rule is in `actor.Run`, not the core: a
   raw process that traps exits decides for itself.
@@ -618,6 +620,10 @@ them. Two primitives went into the core because they need process internals:
   reported with its real reason instead of `noproc`. A supervisor that
   monitored after spawning would misread a transient child's instant normal
   exit as abnormal and restart it in a loop.
+- `Addr.CallMonitor` / `Addr.CallLink`, `WatchedBy(m)` and `m.Watch(pid)`:
+  the same for a child of another node, which the call's callee spawns (see
+  Remote spawn). The monitor is placed where the child is admitted, which
+  only the core can reach.
 
 `grpcproc/actor`:
 
@@ -664,6 +670,9 @@ them. Two primitives went into the core because they need process internals:
   than loops. The supervisor's state is published through `WithInspect`,
   and answered as data to `actor.Children`, OTP's `which_children`, from
   any node.
+- `actor.StartChildFrom` asks a supervisor on any node for a child that
+  one of its `Spec.Factories` builds from an argument, monitored or linked
+  from before it runs with `WithMonitor` or `WithLink` (see Remote spawn).
 - `actor.StartChild` adds a child to a running supervisor, and
   `actor.StopChild` stops one for good. A spec holds Go functions, so
   `StartChild` registers it in the actor package and calls the supervisor
@@ -699,6 +708,82 @@ them. Two primitives went into the core because they need process internals:
   `AllSignificant`; `NoAutoShutdown` by default) are OTP's: a supervisor ends itself, with `shutdown`,
   when its significant children end by themselves for good; one it stops
   does not count. A permanent child cannot be significant.
+
+## Remote spawn (done)
+
+Locally, `SpawnMonitor` places the monitor in the critical section that
+admits the child. Across nodes an application could only place a child, by
+a call to something on the other node, and monitor it after the answer: a
+child that exited in between was `noproc`, the answer given for a process
+that never was, for a wrong node, and for a node that restarted since.
+The caller could not tell a child that failed from one that was never
+there, which is when the reason matters: a placement that failed for a bad
+codec is retried elsewhere, a name that does not exist is not. A monitor is
+placed by its watcher, so the node starting the child could not place the
+caller's, and a proxy process watching on the caller's behalf would cost a
+process per child, could itself die, and would not produce a `Down` of the
+caller's.
+
+Erlang had the same gap until OTP 23: `spawn_opt(Node, …, [monitor])` was
+`badarg`, since a remote `spawn_link` made its link atomically and monitors
+had no equivalent. `spawn_request/5` settled it, an asynchronous request
+taking `monitor` and `link` and answered with a `spawn_reply` message.
+grpcproc has no such asymmetry to reconcile: on the wire a link is a monitor,
+so remote spawn with a monitor and with a link are one feature.
+
+- **A call is the request.** The core has no factories and no spawn
+  service: whatever answers a call on the target node spawns, a supervisor,
+  or an application's own placement actor, where capacity and admission
+  belong. The caller asks for a watch with `Addr.CallMonitor` or
+  `Addr.CallLink`, which sets `watch` on the call; its ref is the call's, a
+  ref of the caller's node like any monitor's. The callee spawns with
+  `WatchedBy(m)`, which places the watcher on the child inside the critical
+  section that admits it, before it runs, as `SpawnMonitor` places its own,
+  and records it on the open call; or places it on a process that runs,
+  with `m.Watch(pid)`. The reply names the process, `watched_id`, which the
+  caller's node turns into a monitor, or a link, of it.
+- **A Down that comes before the answer waits for it.** The child can exit
+  before the answer is sent, so its `Down` can come first on the same link.
+  The caller's node keeps it with the pending watch, and delivers it once
+  the answer is taken, after it: in order with what the child sent, and with
+  the real reason. So is a link that breaks between the answer and the
+  caller's taking it: the watch worked, and its `Down` is `noconnection`.
+- **Only an answer that is not an error brings the watch.** The callee
+  takes its watcher back when it answers with an error, exits with the call
+  open, or its node stops; the caller drops a pending watch when the call
+  fails, its ctx ends, or the answer is of a type it cannot take, and a
+  `Down` that came meanwhile with it. A spawn that failed and a child that
+  started and exited are then told apart: the first is an error, the second
+  a `Down`. A callee that places no watch answers with none, and the monitor
+  is `Down` at once with `noproc`, as a monitor of nothing is.
+- **Only a process can watch.** `CallMonitor` from the `Node` fails before
+  it sends: nothing receives a `Down` for a node.
+- **The call is at most once, and synchronous.** A caller whose answer is
+  lost, a link that broke or a ctx that ended, holds no watch, and the child
+  may have started; its watcher then stays on the child until it exits,
+  when its `Down` is dropped. `spawn_request`'s asynchrony answers this in
+  Erlang, at the cost of a message to match; here a named child is found
+  again: `StartChildFrom` of its name answers `ErrAlreadyStarted` with its
+  PID and places the watch on it, as `StartChild` answers with the child
+  that runs. An anonymous child has no such handle, and runs until it ends,
+  listed by `actor.Children`. Remote spawn is not named-only: a pool of
+  anonymous workers asked for from another node is as useful as one asked
+  for locally, and the lost answer is the same one a `StartChild` whose ctx
+  ends leaves.
+- **Factories are a supervisor's.** A spec holds Go functions, so
+  `StartChild` works on the supervisor's node only. `Spec.Factories` names
+  what a supervisor can be asked for from anywhere: a `ChildFactory[A]` turns
+  an argument of type `A`, which travels as an `Any`, into a `ChildSpec` on
+  the supervisor's node, closing over its dependencies there. Declared in
+  the `Spec`, what a supervisor can be asked to start is visible where what
+  it starts is, and outlasts restarts of either node as the `Spec` does,
+  with an argument type per name. The factory is where admission goes: its
+  error is `StartChildFrom`'s, as it is, so `errors.Is` matches it on the
+  caller's node.
+- **The monitor is of a process, not of the child's place.** A restart the
+  supervisor makes is a new process, which a monitor from before does not
+  follow: its `Down` says the old one ended, and `StartChildFrom` of the
+  name monitors the new one.
 
 ## Pub/sub (`grpcproc/pubsub`, done)
 
@@ -859,7 +944,9 @@ leader's singleton, and its state the singleton's.
   etcd, with a lease as fencing token), on top of `grpcproc/etcd`.
 - Delivery beyond at-most-once, in order per sender. Explicitly out of scope;
   build it above `grpcproc`, as OTP does.
-- Virtual actors / placement, persistence, remote spawn. Out of scope.
+- Virtual actors, placement, persistence. Out of scope: where a child
+  goes is the application's to decide, and remote spawn (above) is how it
+  starts it there.
 
 ## What was rejected, and why
 

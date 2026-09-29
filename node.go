@@ -726,7 +726,7 @@ func (n *Node) SendTo(ctx context.Context, to Target, m proto.Message) error {
 // CallTo calls an untyped target from the node, as Addr.Call does a typed
 // one, and types the reply as R.
 func (n *Node) CallTo[R proto.Message](ctx context.Context, to Target, req proto.Message) (R, error) {
-	return typed[R](n.doCall(ctx, n.PID(), nil, destOf(to), req, MetadataFrom(ctx)))
+	return typed[R](n.doCall(ctx, n.PID(), nil, destOf(to), req, MetadataFrom(ctx), 0))
 }
 
 // Exit asks a process anywhere to terminate with reason. As for SendTo, ctx
@@ -775,14 +775,17 @@ func (n *Node) send(ctx context.Context, from PID, sender *proc, to dest, body p
 	return n.route(ctx, pid.Node, env)
 }
 
-func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to dest, req proto.Message, md Metadata) (_ proto.Message, err error) {
+// doCall calls to and waits for the answer. watch, unless 0, is the ref the
+// call goes by, and asks the callee to place its caller's watch under (see
+// WatchedBy).
+func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to dest, req proto.Message, md Metadata, watch uint64) (r callResult) {
 	pid, name := to.pid, to.name
 	md, done := n.hookSend(from, caller, pid, name, req, md, true)
 	if done != nil {
-		defer func() { done(err) }()
+		defer func() { done(r.err) }()
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err // sends nothing: a ctx error from a call is otherwise ambiguous
+		return callResult{err: err} // sends nothing: a ctx error from a call is otherwise ambiguous
 	}
 	if caller != nil {
 		caller.sent.Add(1)
@@ -791,9 +794,18 @@ func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to dest, req 
 		defer func() { caller.callsInFlight.Add(-1); caller.setState(StateRunning) }()
 	}
 	if pid.Node == n.id.Name {
-		return n.callLocal(ctx, from, pid, name, req, md)
+		return n.callLocal(ctx, from, pid, name, req, md, watch)
 	}
-	return n.callRemote(ctx, from, pid, name, req, md)
+	return n.callRemote(ctx, from, pid, name, req, md, watch)
+}
+
+// callRef is the ref a call goes by: watch, the ref of the watch it asks for,
+// or a new one.
+func (n *Node) callRef(watch uint64) uint64 {
+	if watch != 0 {
+		return watch
+	}
+	return n.nextRef.Add(1)
 }
 
 // callLocal calls a process of this node. Its caller waits on a channel of
@@ -802,30 +814,30 @@ func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to dest, req 
 // its exit, or Stop, if the process outlives it. deliver answers a call it
 // cannot queue. No one else can, so nothing needs to find the call by its
 // ref, and the caller waits on nothing else but its ctx.
-func (n *Node) callLocal(ctx context.Context, from, to PID, name string, req proto.Message, md Metadata) (proto.Message, error) {
+func (n *Node) callLocal(ctx context.Context, from, to PID, name string, req proto.Message, md Metadata, watch uint64) callResult {
 	if n.cfg.CopyLocal {
 		req = proto.Clone(req)
 	}
 	ch := make(chan callResult, 1)
-	it := item{from: from, body: req, md: md, ref: n.nextRef.Add(1)}
+	it := item{from: from, body: req, md: md, ref: n.callRef(watch), watch: watch != 0}
 	if d, ok := ctx.Deadline(); ok {
 		it.deadline = unixNanos(d)
 	}
 	n.deliver(to, name, it, ch)
 	select {
 	case r := <-ch:
-		return r.body, r.err
+		return r
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return callResult{err: ctx.Err()}
 	}
 }
 
 // callRemote calls a process of a peer, which answers by ref: the call
 // waits in n.pending.
-func (n *Node) callRemote(ctx context.Context, from, to PID, name string, req proto.Message, md Metadata) (proto.Message, error) {
-	ref := n.nextRef.Add(1)
+func (n *Node) callRemote(ctx context.Context, from, to PID, name string, req proto.Message, md Metadata, watch uint64) callResult {
+	ref := n.callRef(watch)
 	env := wire(grpcprocv1.Kind_KIND_CALL, from, to, name)
-	env.Ref, env.Metadata = ref, md
+	env.Ref, env.Metadata, env.Watch = ref, md, watch != 0
 	if d, ok := ctx.Deadline(); ok {
 		// Time left rather than the deadline, so that the peer's clock need
 		// not agree with this one's; at least 1ns, which still says "a
@@ -833,7 +845,7 @@ func (n *Node) callRemote(ctx context.Context, from, to PID, name string, req pr
 		env.TimeoutNanos = max(int64(time.Until(d)), 1)
 	}
 	if err := encodeBody(env, req); err != nil {
-		return nil, err
+		return callResult{err: err}
 	}
 	pc := &pendingCall{node: to.Node, ch: make(chan callResult, 1)}
 	n.pendingMu.Lock()
@@ -851,31 +863,38 @@ func (n *Node) callRemote(ctx context.Context, from, to PID, name string, req pr
 		}
 	}()
 	if err := n.route(ctx, to.Node, env); err != nil {
-		return nil, err
+		return callResult{err: err}
 	}
 	select {
 	case r := <-pc.ch:
 		answered = true
-		return r.body, r.err
+		return r
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return callResult{err: ctx.Err()}
 	}
 }
 
-// reply answers a call: a caller of this node on ch, the channel it waits
-// on, one of a peer's by ref. dispatching is set when the answer comes from
-// dispatch, on the link the call arrived by; see routeOrCut.
-func (n *Node) reply(from, to PID, ref uint64, ch chan<- callResult, body proto.Message, status grpcprocv1.Status, errText string, dispatching bool) error {
+// reply answers a call: a caller of this node on a.ch, the channel it waits
+// on, one of a peer's by ref. Only an answer that is not an error brings the
+// watch placed for the caller, a.watched; another takes it back. dispatching
+// is set when the answer comes from dispatch, on the link the call arrived by;
+// see routeOrCut.
+func (n *Node) reply(from, to PID, ref uint64, a answerTo, body proto.Message, status grpcprocv1.Status, errText string, dispatching bool) error {
+	if status != grpcprocv1.Status_STATUS_OK {
+		n.unwatch(openCall{to, ref}, a.watched)
+		a.watched = PID{}
+	}
 	if to.Node == n.id.Name {
 		// With no ch, the call was answered already: this is a second Reply,
 		// or one after the process's exit, or Stop, answered for it.
-		if ch != nil {
-			answer(ch, outcome(body, status, errText))
+		if a.ch != nil {
+			n.noteWatched(to, ref, a.watched)
+			answer(a.ch, outcome(body, status, errText))
 		}
 		return nil
 	}
 	env := wire(grpcprocv1.Kind_KIND_REPLY, from, to, "")
-	env.Ref, env.Status, env.Reason = ref, status, errText
+	env.Ref, env.Status, env.Reason, env.WatchedId = ref, status, errText, a.watched.ID
 	if body != nil {
 		if err := encodeBody(env, body); err != nil {
 			return err
@@ -929,6 +948,26 @@ func (n *Node) routeOrCut(node string, env *grpcprocv1.Envelope, dispatching boo
 		}
 	}
 	return err
+}
+
+// noteWatched tells caller, a process of this node, that the answer to its
+// call ref names watched, if it does, before the answer reaches it (see
+// proc.settleWatch).
+func (n *Node) noteWatched(caller PID, ref uint64, watched PID) {
+	if watched.IsZero() {
+		return
+	}
+	if p := n.lookup(caller, ""); p != nil {
+		p.noteWatched(Ref{Node: n.id.Name, ID: ref}, watched)
+	}
+}
+
+// unwatch takes back the watch placed on watched, if any, for the caller of
+// the call c, whose answer will not bring it.
+func (n *Node) unwatch(c openCall, watched PID) {
+	if w := n.local(watched); w != nil {
+		w.removeWatcher(Ref{Node: c.from.Node, ID: c.ref})
+	}
 }
 
 func (n *Node) monitor(from PID, to Target, ref uint64) error {
@@ -1003,14 +1042,14 @@ func (n *Node) deliver(to PID, name string, it item, reply chan<- callResult) {
 	if p == nil {
 		n.deadLetter(it.from, to, it.body, ReasonNoProc)
 		if it.ref != 0 {
-			_ = n.reply(to, it.from, it.ref, reply, nil, grpcprocv1.Status_STATUS_NOPROC, "", true)
+			_ = n.reply(to, it.from, it.ref, answerTo{ch: reply}, nil, grpcprocv1.Status_STATUS_NOPROC, "", true)
 		}
 		return
 	}
 	if !p.accept(it.body) {
 		n.deadLetter(it.from, p.pid, it.body, ReasonType)
 		if it.ref != 0 {
-			_ = n.reply(p.pid, it.from, it.ref, reply, nil, grpcprocv1.Status_STATUS_TYPE, "", true)
+			_ = n.reply(p.pid, it.from, it.ref, answerTo{ch: reply}, nil, grpcprocv1.Status_STATUS_TYPE, "", true)
 		}
 		return
 	}
@@ -1026,7 +1065,7 @@ func (n *Node) deliver(to PID, name string, it item, reply chan<- callResult) {
 	if !queued {
 		n.deadLetter(it.from, p.pid, it.body, ReasonNoProc)
 		if it.ref != 0 {
-			_ = n.reply(p.pid, it.from, it.ref, reply, nil, grpcprocv1.Status_STATUS_NOPROC, "", true)
+			_ = n.reply(p.pid, it.from, it.ref, answerTo{ch: reply}, nil, grpcprocv1.Status_STATUS_NOPROC, "", true)
 		}
 	}
 }
@@ -1069,7 +1108,7 @@ func (n *Node) deliverDown(from, to PID, ref uint64, reason string) {
 		return
 	}
 	r := Ref{Node: n.id.Name, ID: ref}
-	switch t, link, ok := p.dropWatch(r); {
+	switch t, link, ok := p.dropWatch(r, reason); {
 	case !ok: // demonitored or unlinked meanwhile
 	case link:
 		p.exitSignal(from, t.name, reason)
@@ -1114,10 +1153,10 @@ func (n *Node) dispatch(peer string, env *grpcprocv1.Envelope) {
 		body, err := decodeBody(env)
 		if err != nil {
 			n.log.Warn("undecodable call", "err", err)
-			_ = n.reply(to, from, ref, nil, nil, grpcprocv1.Status_STATUS_TYPE, "", true)
+			_ = n.reply(to, from, ref, answerTo{}, nil, grpcprocv1.Status_STATUS_TYPE, "", true)
 			return
 		}
-		it := item{from: from, body: body, md: env.GetMetadata(), ref: ref}
+		it := item{from: from, body: body, md: env.GetMetadata(), ref: ref, watch: env.GetWatch()}
 		if t := env.GetTimeoutNanos(); t > 0 {
 			it.deadline = unixNanos(time.Now().Add(time.Duration(t)))
 		}
@@ -1127,6 +1166,9 @@ func (n *Node) dispatch(peer string, env *grpcprocv1.Envelope) {
 			// A reply to a call of an earlier incarnation of this node,
 			// whose refs this one reuses: its caller is gone.
 			return
+		}
+		if id := env.GetWatchedId(); id != 0 {
+			n.noteWatched(to, ref, PID{Node: peer, Incarnation: env.GetFromIncarnation(), ID: id})
 		}
 		var body proto.Message
 		if env.GetBodyType() != "" {

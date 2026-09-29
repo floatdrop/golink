@@ -113,7 +113,8 @@ your `*grpc.Server` next to your other services, start and stop.
   links, exit reasons: the core, which depends on gRPC and protobuf only.
   [Concepts](https://floatdrop.github.io/grpcproc/concepts/actors/)
 - **Actors and supervision trees** in `grpcproc/actor`: a struct with a
-  method per kind of message, restarted by a supervisor when it fails.
+  method per kind of message, restarted by a supervisor when it fails, and
+  started from any node, monitored from before it runs.
   [Supervision](https://floatdrop.github.io/grpcproc/concepts/supervision/)
 - **Pub/sub** in `grpcproc/pubsub`: topics a process publishes to and any
   node subscribes to, with the last few events kept for whoever comes late,

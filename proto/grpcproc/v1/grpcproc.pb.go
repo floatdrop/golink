@@ -297,7 +297,15 @@ type Envelope struct {
 	TimeoutNanos int64 `protobuf:"varint,13,opt,name=timeout_nanos,json=timeoutNanos,proto3" json:"timeout_nanos,omitempty"`
 	// Propagated context: trace headers, tenant. Never interpreted by
 	// grpcproc itself.
-	Metadata      map[string]string `protobuf:"bytes,15,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Metadata map[string]string `protobuf:"bytes,15,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// A call's: its caller watches, monitors or is linked to, the process the
+	// callee places the watch on, under the call's ref. The callee places it
+	// before it answers: on a process it spawns, before that process runs, or
+	// on one that runs. A peer that does not know it places none.
+	Watch bool `protobuf:"varint,16,opt,name=watch,proto3" json:"watch,omitempty"`
+	// A reply's: the process of the replying node the call's watch was placed
+	// on. 0 when none was.
+	WatchedId     uint64 `protobuf:"varint,17,opt,name=watched_id,json=watchedId,proto3" json:"watched_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -430,6 +438,20 @@ func (x *Envelope) GetMetadata() map[string]string {
 	return nil
 }
 
+func (x *Envelope) GetWatch() bool {
+	if x != nil {
+		return x.Watch
+	}
+	return false
+}
+
+func (x *Envelope) GetWatchedId() uint64 {
+	if x != nil {
+		return x.WatchedId
+	}
+	return 0
+}
+
 // Hello is the first envelope on a stream, sent by the server. It names the
 // node the client actually reached.
 type Hello struct {
@@ -502,7 +524,7 @@ const file_grpcproc_v1_grpcproc_proto_rawDesc = "" +
 	"\x03PID\x12\x12\n" +
 	"\x04node\x18\x01 \x01(\tR\x04node\x12 \n" +
 	"\vincarnation\x18\x02 \x01(\x04R\vincarnation\x12\x0e\n" +
-	"\x02id\x18\x03 \x01(\x04R\x02id\"\x9f\x04\n" +
+	"\x02id\x18\x03 \x01(\x04R\x02id\"\xd4\x04\n" +
 	"\bEnvelope\x12%\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x11.grpcproc.v1.KindR\x04kind\x12)\n" +
 	"\x10from_incarnation\x18\x02 \x01(\x04R\x0ffromIncarnation\x12\x17\n" +
@@ -518,7 +540,10 @@ const file_grpcproc_v1_grpcproc_proto_rawDesc = "" +
 	"\x04body\x18\v \x01(\fR\x04body\x12(\n" +
 	"\x05hello\x18\f \x01(\v2\x12.grpcproc.v1.HelloR\x05hello\x12#\n" +
 	"\rtimeout_nanos\x18\r \x01(\x03R\ftimeoutNanos\x12?\n" +
-	"\bmetadata\x18\x0f \x03(\v2#.grpcproc.v1.Envelope.MetadataEntryR\bmetadata\x1a;\n" +
+	"\bmetadata\x18\x0f \x03(\v2#.grpcproc.v1.Envelope.MetadataEntryR\bmetadata\x12\x14\n" +
+	"\x05watch\x18\x10 \x01(\bR\x05watch\x12\x1d\n" +
+	"\n" +
+	"watched_id\x18\x11 \x01(\x04R\twatchedId\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"W\n" +

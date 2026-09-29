@@ -3,6 +3,7 @@ syntax = "proto3";
 
 package grpcproc.actor.v1;
 
+import "google/protobuf/any.proto";
 import "google/protobuf/empty.proto";
 import "grpcproc/v1/grpcproc.proto";
 
@@ -20,7 +21,17 @@ message Control {
     grpcproc.v1.PID stop = 2;
     // Answered with Children.
     google.protobuf.Empty which_children = 3;
+    // A child one of the supervisor's factories builds, from any node.
+    // Answered with Started.
+    StartFrom start_from = 4;
   }
+}
+
+// StartFrom names a factory of the supervisor's Spec, and the argument it
+// builds a child spec from.
+message StartFrom {
+  string factory = 1;
+  google.protobuf.Any arg = 2;
 }
 
 // Started answers a start with the child's PID.

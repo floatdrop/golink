@@ -82,7 +82,15 @@ export const guidesSupervisors: Doc = {
 							[
 								<C>Children</C>,
 								<>
-									Started in order, stopped in reverse. <C>StartChild</C> adds more, after them.
+									Started in order, stopped in reverse. <C>StartChild</C> and <C>StartChildFrom</C>{' '}
+									add more, after them.
+								</>
+							],
+							[
+								<C>Factories</C>,
+								<>
+									What <C>StartChildFrom</C> can ask the supervisor for, from any node, by name: see{' '}
+									<A to="guides/supervisors/#remote">Starting a child from another node</A>.
 								</>
 							]
 						]}
@@ -258,6 +266,63 @@ if err != nil && !errors.Is(err, actor.ErrAlreadyStarted) {
 			)
 		},
 		{
+			id: 'remote',
+			title: 'Starting a child from another node',
+			body: (
+				<>
+					<p>
+						A spec is Go functions, and no message carries those. A supervisor that other nodes ask
+						for children declares what they may ask for instead: <C>Spec.Factories</C>, a factory per
+						name, each built with <C>actor.ChildFactory</C> from a function that takes an argument, a
+						protobuf message, and returns the spec to start. The functions, and the dependencies they
+						close over, stay on the supervisor's node; only the name and the argument travel.
+					</p>
+					<Code>{`rooms, err := actor.Supervise(node, actor.Spec{Factories: map[string]actor.Factory{
+	"peer": actor.ChildFactory(func(j *roomspb.Join) (actor.ChildSpec, error) {
+		if media.Full() {
+			return actor.ChildSpec{}, ErrFull
+		}
+		return actor.Child("peer:"+j.GetPeer(), func() *Peer { return &Peer{join: j, media: media} }).
+			WithRestart(actor.Temporary), nil
+	}),
+}}, grpcproc.WithName("rooms"))`}</Code>
+					<p>
+						<C>actor.StartChildFrom(ctx, from, sup, factory, arg, opts...)</C> asks for one, from any
+						node, and returns the child's PID once it runs. The child is the supervisor's as one{' '}
+						<C>StartChild</C> added is. The factory is where admission goes: what it refuses with is{' '}
+						<C>StartChildFrom</C>'s error, as it returned it, so <C>errors.Is</C> tells a full node,
+						worth trying elsewhere, from a request that is wrong everywhere.{' '}
+						<C>actor.ErrNoFactory</C> is a name the supervisor has no factory for.
+					</p>
+					<Code>{`sup := grpcproc.Name{Node: pick(), Name: "rooms"}
+pid, ref, err := actor.StartChildFrom(p.Context(), p, sup, "peer", &roomspb.Join{Peer: id}, actor.WithMonitor())
+switch {
+case errors.Is(err, ErrFull):
+	// try another node
+case err != nil && !errors.Is(err, actor.ErrAlreadyStarted):
+	return err
+}
+// A Down with ref comes when pid exits, however soon.`}</Code>
+					<p>
+						<C>actor.WithMonitor()</C> has the caller monitor the child from before it runs, as{' '}
+						<C>SpawnMonitor</C> does on one node: a child that exits at once is a <C>Down</C> with its
+						reason, after <C>StartChildFrom</C> returns, never <C>noproc</C>. A start that fails
+						leaves no monitor, and no <C>Down</C> comes of it, so an error means nothing started, or
+						nothing the caller will hear of. <C>actor.WithLink()</C> links the caller to the child
+						instead. Either needs the caller to be a process.
+					</p>
+					<p>
+						A call is answered at most once, and an answer can be lost: a link that breaks, a context
+						that ends. The child may have started then, unwatched. A named child is found again:{' '}
+						<C>StartChildFrom</C> of its name answers <C>ErrAlreadyStarted</C> with its PID and the
+						monitor, as <C>StartChild</C> does. An anonymous one runs until it ends, and{' '}
+						<C>actor.Children</C> lists it. The monitor is of the child's process: a restart the
+						supervisor makes is a new one, which <C>StartChildFrom</C> of the name monitors again.
+					</p>
+				</>
+			)
+		},
+		{
 			id: 'busy',
 			title: 'A busy supervisor',
 			body: (
@@ -287,7 +352,7 @@ if err != nil && !errors.Is(err, actor.ErrAlreadyStarted) {
 				<>
 					<p>
 						Every supervisor publishes its state through <C>WithInspect</C>: its strategy, its
-						restarts against the intensity, and each child with its PID or <C>stopped</C>, its
+						restarts against the intensity, the names of its factories, and each child with its PID or <C>stopped</C>, its
 						restart policy and how many times it has been restarted. A child the supervisor is
 						waiting on shows as <C>waiting</C> with the PID it waits for. <C>node.Inspect</C> reads
 						it, and so does <C>grpcprocctl</C> through the <A to="guides/inspector/">Inspector</A>:

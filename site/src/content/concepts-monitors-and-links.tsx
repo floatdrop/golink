@@ -116,6 +116,32 @@ if err != nil {
 }
 // A Down with ref arrives when child exits, with its reason, even
 // if it exits before this line runs.`}</Code>
+					<p>
+						A child of another node has the same gap, wider: the process that starts it is there,
+						answering a call. The caller asks for the monitor with the call, with{' '}
+						<C>addr.CallMonitor</C>, and the callee spawns with <C>grpcproc.WatchedBy(m)</C>, which
+						places it on the child inside the same critical section, before the child runs. The
+						answer names the child, and a <C>Down</C> that came before it waits for it, so it comes
+						after the answer with its real reason. Only an answer that is not an error brings the
+						monitor: a call that fails leaves none, and no <C>Down</C> comes of it, so a spawn that
+						failed is an error and a child that started and died is a <C>Down</C>.{' '}
+						<C>addr.CallLink</C> links the caller instead, as <C>LinkChild</C> does, and{' '}
+						<C>m.Watch(pid)</C> places either on a process that runs already.
+					</p>
+					<Code>{`// On the caller's node.
+placed, ref, err := placer.CallMonitor[*roomspb.Placed](ctx, p, &roomspb.Place{Peer: id})
+
+// On the callee's: the placer, answering the call m.
+peer, err := p.Spawn(runPeer, grpcproc.WatchedBy(m))
+if err != nil {
+	return m.Reply(nil, err)
+}
+return m.Reply(&roomspb.Placed{Peer: peer.PID().Proto()}, nil)`}</Code>
+					<p>
+						A supervisor does this for a child it builds from a factory, with{' '}
+						<C>actor.StartChildFrom</C>: see{' '}
+						<A to="guides/supervisors/#remote">Starting a child from another node</A>.
+					</p>
 				</>
 			)
 		},

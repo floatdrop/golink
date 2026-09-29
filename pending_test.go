@@ -93,7 +93,7 @@ func TestSecondLocalAnswerIsDropped(t *testing.T) {
 		ch := make(chan callResult, 1)
 		me := n.PID()
 		for range 2 {
-			if err := n.reply(me, me, 1, ch, nil, grpcprocv1.Status_STATUS_NOPROC, "", false); err != nil {
+			if err := n.reply(me, me, 1, answerTo{ch: ch}, nil, grpcprocv1.Status_STATUS_NOPROC, "", false); err != nil {
 				t.Fatal(err)
 			}
 		}
