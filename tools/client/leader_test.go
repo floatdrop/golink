@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
+	"github.com/floatdrop/grpcproc"
 	"github.com/floatdrop/grpcproc/tools/client"
 	"github.com/floatdrop/grpcproc/tools/internal/testcluster"
 )
@@ -62,5 +65,20 @@ func TestElection(t *testing.T) {
 	}
 	if _, err := c.Cordon(ctx, "sched", "\xff", false); err == nil {
 		t.Error("a node name that is not UTF-8 went out")
+	}
+
+	// Every election is found by its electors' names, whatever the others
+	// are called.
+	f.Elect(t, "jobs", "a", "b")
+	if _, err := f.C.Node("a").Spawn(func(p *grpcproc.Process[proto.Message]) error {
+		_, err := p.Receive()
+		return err
+	}, grpcproc.WithName("myleader/decoy")); err != nil {
+		t.Fatal(err)
+	}
+	all, err := c.Elections(ctx)
+	if err != nil || len(all) != 2 || all[0].Cluster != "jobs" || all[1].Cluster != "sched" ||
+		len(all[0].Electors) != 2 || len(all[1].Electors) != 3 || all[0].Leading == "" {
+		t.Fatalf("%+v %v", all, err)
 	}
 }

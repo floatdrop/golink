@@ -80,6 +80,7 @@ monitors:              2
 | `cron enable\|disable\|remove <pid\|name> <job>` | change a job of a cron process: `--node` |
 | `dot` | Graphviz of processes and who started whom: `--node`, `--cluster` |
 | `mcp` | serve these as MCP tools over stdio: `--allow-writes` |
+| `web` | serve a web UI that shows the cluster live: `--listen`, `--allow-writes` |
 
 `grpcprocctl --version` prints the version it was installed at, which is also
 what its MCP server reports.
@@ -140,6 +141,54 @@ why the last one that failed did. `enable`, `disable` and `remove` go to the
 cron process through the Inspector's `Call`, then list it again. Its runs are
 processes of their own: `grpcprocctl ps --label cron:yearly` shows those
 going.
+
+## In a browser
+
+```sh
+grpcprocctl --plaintext web          # http://localhost:9911
+```
+
+serves a page, in the spirit of Erlang's observer, that reads the cluster
+through the same Inspector and refreshes every second:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../site/public/screenshots/grpcprocctl-web-processes-dark.webp">
+  <img alt="grpcprocctl web: the Processes view sorted by mailbox, with ledger, whose mailbox climbs, open beside it" src="../site/public/screenshots/grpcprocctl-web-processes-light.webp">
+</picture>
+
+- **Cluster**: every node, a map of the links between them with messages
+  per second on each, dead letters and queues.
+- **Node**: its counters and links, with the last minute charted.
+- **Processes**: the table `ps` prints, with messages in and out per
+  second; the scope (name, label, state, mailbox) goes to the node, the
+  search and the order stay in the page.
+- **Supervision**: each process under the one that started it, coloured by
+  state, mailbox or activity.
+- **Events**: spawns, exits with reasons, links and dead letters, streamed
+  as they happen.
+- **Cron** and **Elections**: every grpcproc/cron job and grpcproc/leader
+  election reachable from here, found by what they run and how their
+  electors are named.
+
+A process opens beside any of these: its mailbox and messages per second
+charted, what it says about itself (asked for, or asked again on an
+interval, since asking takes it a turn), and what it started. The address
+says what is open, so a view can be shared.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../site/public/screenshots/grpcprocctl-web-cluster-dark.webp">
+  <img alt="grpcprocctl web: the Cluster view, three nodes and the messages per second on each link" src="../site/public/screenshots/grpcprocctl-web-cluster-light.webp">
+</picture>
+
+The page is read-only unless started with `--allow-writes`, which adds
+exiting a process, setting its log level, enabling, disabling and removing
+cron jobs, and moving or cordoning a leader, each confirmed first. It
+listens on localhost by default and then answers only to a localhost Host,
+so a page elsewhere cannot reach it through the browser; a change must come
+from the page itself. On any other address, put it behind something that
+authenticates. The API behind the page returns the objects `--json`
+prints: `/api/nodes`, `/api/node`, `/api/processes`, `/api/process`,
+`/api/crons`, `/api/elections`, and `/api/events` as server-sent events.
 
 ## For an AI agent
 

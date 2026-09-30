@@ -57,6 +57,13 @@ func (f *fake) Watch(context.Context, *inspectv1.WatchRequest, ...grpc.CallOptio
 	return &stream{events: f.events, end: cmp.Or(f.end, errFake)}, nil
 }
 
+// noProcesses lists no processes on any node fake reaches.
+type noProcesses struct{ *fake }
+
+func (noProcesses) ListProcesses(context.Context, *inspectv1.ListProcessesRequest, ...grpc.CallOption) (*inspectv1.ListProcessesResponse, error) {
+	return &inspectv1.ListProcessesResponse{}, nil
+}
+
 type stream struct {
 	grpc.ClientStream
 	events []*inspectv1.Event
@@ -93,6 +100,15 @@ func TestFailuresAndOddities(t *testing.T) {
 	if _, err := c.Processes(ctx, "", Filter{}); !errors.Is(err, errFake) {
 		t.Fatal(err)
 	}
+	if _, err := c.Elections(ctx); !errors.Is(err, errFake) {
+		t.Fatal(err)
+	}
+	// Nodes that cannot be reached are not searched for electors.
+	c.rpc = noProcesses{&fake{}}
+	if all, err := c.Elections(ctx); err != nil || len(all) != 0 {
+		t.Fatal(all, err)
+	}
+	c.rpc = &fake{}
 	if err := c.Watch(ctx, "", func(EventView) bool { return true }); !errors.Is(err, errFake) {
 		t.Fatal(err)
 	}
@@ -120,6 +136,9 @@ func TestFailuresAndOddities(t *testing.T) {
 	// A cluster whose first node fails is an error.
 	c.rpc = unreachable{}
 	if _, err := c.Cluster(ctx); !errors.Is(err, errFake) {
+		t.Fatal(err)
+	}
+	if _, err := c.Elections(ctx); !errors.Is(err, errFake) {
 		t.Fatal(err)
 	}
 }

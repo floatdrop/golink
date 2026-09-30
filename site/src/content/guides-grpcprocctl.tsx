@@ -1,4 +1,5 @@
 import { Code, Output } from '../code.tsx';
+import { Screenshot } from '../components/Figure.tsx';
 import { A, C, Ext, Table } from '../components/prose.tsx';
 import { file } from '../config.ts';
 import type { Doc } from './types.ts';
@@ -7,12 +8,13 @@ export const guidesGrpcprocctl: Doc = {
 	path: 'guides/grpcprocctl/',
 	title: 'grpcprocctl',
 	description:
-		'The command line of the Inspector: processes and their mailboxes, nodes and links, events as they happen, leader elections and cron jobs, for the whole cluster from one endpoint.',
+		'The command line of the Inspector: processes and their mailboxes, nodes and links, events as they happen, leader elections and cron jobs, for the whole cluster from one endpoint, in a terminal or a browser.',
 	lead: (
 		<p>
 			<C>grpcprocctl</C> asks a node's <A to="guides/inspector/">Inspector</A>, which forwards to
 			every other node's, so one address reaches the whole cluster. It reads what the node's Go API
-			says, changes what the Inspector lets it change, and serves the same as MCP tools for an{' '}
+			says, changes what the Inspector lets it change, and serves the same as a page in the{' '}
+			<A to="guides/grpcprocctl/#web">browser</A> and as MCP tools for an{' '}
 			<A to="guides/mcp/">AI agent</A>. It is{' '}
 			<Ext href={file('tools/README.md')}>grpcproc/tools</Ext>, a separate module.
 		</p>
@@ -195,6 +197,50 @@ b     billing  yearly  @yearly     UTC   disabled                    0`}</Output
 			)
 		},
 		{
+			id: 'web',
+			title: 'In a browser',
+			body: (
+				<>
+					<Code lang="sh">{'grpcprocctl --plaintext web   # http://localhost:9911'}</Code>
+					<p>
+						serves a page, in the spirit of Erlang's observer, that reads the cluster through the
+						same Inspector and refreshes every second. The Cluster view maps the nodes and the
+						messages per second on each link; Node charts one node's counters and links over the
+						last minute; Processes is the table <C>ps</C> prints, with messages in and out per
+						second, its scope (name, label, state, mailbox) sent to the node and its search and order
+						kept in the page; Supervision draws each process under the one that started it; Events
+						streams what <C>watch</C> prints; Cron and Elections find every cron job and leader
+						election reachable from here.
+					</p>
+					<Screenshot
+						caption="grpcprocctl web: the cluster"
+						name="grpcprocctl-web-cluster"
+						alt="The Cluster view: three nodes a, b and c, each with its process count, joined by arrows labelled with messages per second, above a table of the nodes with their uptime, processes, spawns and exits per second, dead letters and peers."
+					/>
+					<p>
+						Clicking a process opens it beside the page: its mailbox and messages per second
+						charted, what it says about itself, and what it started. Asking what it says takes the
+						process a turn, so the page asks when told to, or again on an interval of your choosing.
+						Here <C>ledger</C> handles about 20 messages a second while more arrive, and its mailbox
+						climbs:
+					</p>
+					<Screenshot
+						caption="grpcprocctl web: a backlog"
+						name="grpcprocctl-web-processes"
+						alt="The Processes view sorted by mailbox, ledger first with hundreds of messages waiting, and ledger open beside it: running, its oldest message waiting over twenty seconds, receiving about 19 a second, a chart of its mailbox climbing, and what it publishes about itself."
+					/>
+					<p>
+						The address says what is open, so a view can be shared. The page is read-only unless
+						started with <C>--allow-writes</C>, which adds what the commands above change (exiting
+						a process, its log level, cron jobs, leader moves and cordons), each confirmed first. It
+						listens on localhost unless <C>--listen</C> says otherwise, and then answers only to a
+						localhost <C>Host</C>, so a page on another site cannot read it through the browser; on
+						any other address, put it behind something that authenticates.
+					</p>
+				</>
+			)
+		},
+		{
 			id: 'json',
 			title: 'JSON',
 			body: (
@@ -256,7 +302,13 @@ b     billing  yearly  @yearly     UTC   disabled                    0`}</Output
 								Graphviz of processes and who started whom: <C>--node</C>, <C>--cluster</C>.
 							</>
 						],
-						[<C>mcp</C>, <>Serve these as MCP tools over stdio: <C>--allow-writes</C>.</>]
+						[<C>mcp</C>, <>Serve these as MCP tools over stdio: <C>--allow-writes</C>.</>],
+						[
+							<C>web</C>,
+							<>
+								Serve a page that shows the cluster live: <C>--listen</C>, <C>--allow-writes</C>.
+							</>
+						]
 					]}
 				/>
 			)

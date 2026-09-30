@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>grpcproc observer</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<header class="top">
+	<a class="brand" href="#/cluster"><img src="favicon.svg" alt="">grpcproc <small>observer</small></a>
+	<label>node <select id="node" aria-label="node"></select></label>
+	<span class="spacer"></span>
+	<label>refresh
+		<select id="interval" aria-label="refresh interval">
+			<option value="1000">1s</option>
+			<option value="2000">2s</option>
+			<option value="5000">5s</option>
+			<option value="0">paused</option>
+		</select>
+	</label>
+	<span id="live" class="live">connecting</span>
+	<span id="mode" class="badge"></span>
+	<button id="theme" type="button" title="Switch theme" aria-label="Switch theme">◐</button>
+</header>
+<nav class="side">
+	<a href="#/cluster" data-page="cluster"><span class="ico">⬡</span>Cluster</a>
+	<a href="#/node" data-page="node"><span class="ico">▣</span>Node</a>
+	<a href="#/processes" data-page="processes"><span class="ico">≡</span>Processes</a>
+	<a href="#/tree" data-page="tree"><span class="ico">⌥</span>Supervision</a>
+	<a href="#/events" data-page="events"><span class="ico">↯</span>Events</a>
+	<a href="#/cron" data-page="cron"><span class="ico">◷</span>Cron</a>
+	<a href="#/elections" data-page="elections"><span class="ico">♛</span>Elections</a>
+	<div class="foot muted" id="about"></div>
+</nav>
+<main id="main"></main>
+<aside id="drawer" hidden></aside>
+<div id="toast" role="status"></div>
+</body>
+</html>
