@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -43,7 +44,59 @@ func (c *Client) Election(ctx context.Context, cluster string) ([]ElectorView, e
 	if err != nil {
 		return nil, err
 	}
-	var out []ElectorView
+	out := c.election(ctx, nodes, cluster)
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no node runs an election called %q", cluster)
+	}
+	return out, nil
+}
+
+// ElectionView is one grpcproc/leader election, as each node that takes
+// part sees it.
+type ElectionView struct {
+	Cluster  string        `json:"cluster"`
+	Leading  string        `json:"leading,omitempty" jsonschema:"the leader of the highest term any node knows; empty while none leads"`
+	Electors []ElectorView `json:"electors"`
+}
+
+// Elections finds every grpcproc/leader election that a node reachable from
+// this one takes part in, by the names its electors are registered under,
+// and describes each as Election does, in order of name. An election whose
+// electors all exit while it is asked is listed with none.
+func (c *Client) Elections(ctx context.Context) ([]ElectionView, error) {
+	nodes, err := c.Cluster(ctx)
+	if err != nil {
+		return nil, err
+	}
+	prefix := leader.ElectorName("")
+	var names []string
+	for _, n := range nodes {
+		if n.Error != "" {
+			continue
+		}
+		ps, err := c.Processes(ctx, n.Name, Filter{Name: prefix})
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range ps {
+			// The filter matches a substring: "myleader/x" is not an elector.
+			if cluster, ok := strings.CutPrefix(p.Name, prefix); ok && !slices.Contains(names, cluster) {
+				names = append(names, cluster)
+			}
+		}
+	}
+	slices.Sort(names)
+	out := make([]ElectionView, 0, len(names))
+	for _, name := range names {
+		views := c.election(ctx, nodes, name)
+		out = append(out, ElectionView{Cluster: name, Leading: Leading(views), Electors: views})
+	}
+	return out, nil
+}
+
+// election asks each of nodes for its elector of cluster.
+func (c *Client) election(ctx context.Context, nodes []NodeView, cluster string) []ElectorView {
+	out := []ElectorView{}
 	for _, n := range nodes {
 		if n.Error != "" {
 			out = append(out, ElectorView{Node: n.Name, Error: n.Error})
@@ -60,10 +113,7 @@ func (c *Client) Election(ctx context.Context, cluster string) ([]ElectorView, e
 			out = append(out, electorView(n.Name, resp.GetInspect()))
 		}
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("no node runs an election called %q", cluster)
-	}
-	return out, nil
+	return out
 }
 
 // Leading is the node views say leads: the leader of the highest term, or

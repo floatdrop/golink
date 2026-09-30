@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net"
+	"net/http"
 	"os"
 	"runtime/debug"
 	"slices"
@@ -31,6 +33,7 @@ import (
 	"github.com/floatdrop/grpcproc/tools/client"
 	"github.com/floatdrop/grpcproc/tools/dot"
 	"github.com/floatdrop/grpcproc/tools/mcpserver"
+	"github.com/floatdrop/grpcproc/tools/web"
 )
 
 // Conn says how to reach an Inspector.
@@ -48,7 +51,9 @@ type Env struct {
 	Stdout, Stderr io.Writer
 	Dial           func(ctx context.Context, c Conn) (grpc.ClientConnInterface, func() error, error)
 	MCPTransport   mcp.Transport
-	Getenv         func(string) string
+	// Listen is where grpcprocctl web serves; a TCP listener when nil.
+	Listen func(ctx context.Context, addr string) (net.Listener, error)
+	Getenv func(string) string
 	// BuildInfo is where the version comes from; debug.ReadBuildInfo when nil.
 	BuildInfo func() (*debug.BuildInfo, bool)
 }
@@ -89,6 +94,7 @@ Commands:
   cron enable|disable|remove <pid|name> <job>   change a job of a cron process (--node)
   dot                         Graphviz of processes and who started whom (--node, --cluster)
   mcp                         serve these as MCP tools over stdio (--allow-writes)
+  web                         serve a web UI that shows the cluster live (--listen, --allow-writes)
 
 A pid is written as grpcproc prints it, <node.incarnation.id>; a name is
 looked up on --node, by default the node serving the Inspector.
@@ -115,6 +121,11 @@ func Main(ctx context.Context, args []string, env Env) int {
 	}
 	if env.MCPTransport == nil {
 		env.MCPTransport = &mcp.StdioTransport{}
+	}
+	if env.Listen == nil {
+		env.Listen = func(ctx context.Context, addr string) (net.Listener, error) {
+			return (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
+		}
 	}
 	if env.Getenv == nil {
 		env.Getenv = os.Getenv
@@ -236,6 +247,7 @@ func init() {
 	commands = map[string]command{
 		"node": cmdNode, "nodes": cmdNodes, "ps": cmdPS, "inspect": cmdInspect, "watch": cmdWatch,
 		"exit": cmdExit, "loglevel": cmdLogLevel, "dot": cmdDot, "mcp": cmdMCP, "leader": cmdLeader, "cron": cmdCron,
+		"web": cmdWeb,
 	}
 }
 
@@ -731,4 +743,45 @@ func cmdMCP(ctx context.Context, a *app, args []string) error {
 		return err
 	}
 	return nil // interrupted, or the client went away
+}
+
+func cmdWeb(ctx context.Context, a *app, args []string) error {
+	var addr string
+	var writes bool
+	if _, err := a.flags("web", args, func(fs *flag.FlagSet) {
+		fs.StringVar(&addr, "listen", "localhost:9911", "address to serve the UI on")
+		fs.BoolVar(&writes, "allow-writes", false, "also let the UI change things: exit a process, set a log level, move or cordon a leader, change a cron job")
+	}); err != nil {
+		return err
+	}
+	ln, err := a.env.Listen(ctx, addr)
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{
+		Handler: web.New(a.client, web.Options{
+			AllowWrites: writes, Version: a.version, Target: a.conn.Addr, Timeout: a.timeout, LoopbackOnly: loopback(addr),
+		}),
+		ReadHeaderTimeout: 10 * time.Second,
+		// Streams of events end with ctx, so Shutdown need not wait for them.
+		BaseContext: func(net.Listener) context.Context { return ctx },
+	}
+	stop := context.AfterFunc(ctx, func() {
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(sctx)
+	})
+	defer stop()
+	fmt.Fprintf(a.env.Stderr, "grpcprocctl web: %s on http://%s\n", a.conn.Addr, ln.Addr())
+	if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// loopback reports whether addr is only reachable from this host.
+func loopback(addr string) bool {
+	host, _, _ := net.SplitHostPort(addr)
+	ip := net.ParseIP(host)
+	return host == "localhost" || ip != nil && ip.IsLoopback()
 }

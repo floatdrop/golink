@@ -763,6 +763,25 @@ body {
 	color: var(--shiki-dark);
 }
 
+/* ---- screenshots --------------------------------------------------------- */
+
+/* Each is taken in both themes, and the theme class shows one: display: none
+   also takes the other out of what a screen reader reads. */
+.gp-shot {
+	display: block;
+	width: 100%;
+	height: auto;
+}
+
+.gp-shot_dark,
+.g-root_theme_dark .gp-shot_light {
+	display: none;
+}
+
+.g-root_theme_dark .gp-shot_dark {
+	display: block;
+}
+
 /* ---- footer -------------------------------------------------------------- */
 
 .gp-footer {

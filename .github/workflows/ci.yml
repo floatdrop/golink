@@ -27,7 +27,7 @@ jobs:
           - module: etcd
             cover: .
           - module: tools
-            cover: ./client ./dot ./cli ./mcpserver
+            cover: ./client ./dot ./cli ./mcpserver ./web
           - module: cron
             cover: .
           - module: leader
