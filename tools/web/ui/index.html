@@ -3,37 +3,50 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>grpcproc observer</title>
+<title>grpcprocctl web</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
+<script src="theme.js"></script>
+<link rel="stylesheet" href="gravity.css">
 <link rel="stylesheet" href="style.css">
 <script src="app.js" defer></script>
 </head>
 <body>
 <header class="top">
-	<a class="brand" href="#/cluster"><img src="favicon.svg" alt="">grpcproc <small>observer</small></a>
-	<label>node <select id="node" aria-label="node"></select></label>
+	<a class="brand" href="#/cluster"><img src="favicon.svg" alt="" width="24" height="24">grpcprocctl web</a>
+	<span class="select"><select id="node" aria-label="Node"></select></span>
 	<span class="spacer"></span>
-	<label>refresh
-		<select id="interval" aria-label="refresh interval">
-			<option value="1000">1s</option>
-			<option value="2000">2s</option>
-			<option value="5000">5s</option>
-			<option value="0">paused</option>
-		</select>
-	</label>
-	<span id="live" class="live">connecting</span>
-	<span id="mode" class="badge"></span>
-	<button id="theme" type="button" title="Switch theme" aria-label="Switch theme">◐</button>
+	<span class="select"><select id="interval" aria-label="Refresh">
+		<option value="1000">every 1s</option>
+		<option value="2000">every 2s</option>
+		<option value="5000">every 5s</option>
+		<option value="0">paused</option>
+	</select></span>
+	<button id="live" type="button" class="live">connecting</button>
+	<span id="mode" class="label label_unknown"></span>
+	<button id="theme" type="button" class="icon-button" aria-label="Switch theme" title="Switch theme">
+		<svg class="theme-icon theme-icon_on-light" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M8 13.5a5.5 5.5 0 0 0 2.263-10.514 5.5 5.5 0 0 1-7.278 7.278A5.5 5.5 0 0 0 8 13.5M1.045 8.795a7.001 7.001 0 1 0 7.75-7.75l-.028-.003A7 7 0 0 0 8 1c-.527 0-.59.842-.185 1.18a4 4 0 0 1 .342.322A4 4 0 1 1 2.18 7.814C1.842 7.41 1 7.474 1 8a7 7 0 0 0 .045.794"/></svg>
+		<svg class="theme-icon theme-icon_on-dark" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 3a.75.75 0 0 1-.75-.75V.75a.75.75 0 0 1 1.5 0v1.5A.75.75 0 0 1 8 3m0 7.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8m-.75 3.25a.75.75 0 0 0 1.5 0v-1.5a.75.75 0 0 0-1.5 0zM13 8a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 13 8M.75 7.25a.75.75 0 0 0 0 1.5h1.5a.75.75 0 0 0 0-1.5zm10.786-2.786a.75.75 0 0 1 0-1.06l1.06-1.06a.75.75 0 0 1 1.06 1.06l-1.06 1.06a.75.75 0 0 1-1.06 0m-9.193 8.132a.75.75 0 0 0 1.06 1.06l1.062-1.06a.75.75 0 0 0-1.061-1.06zm9.193-1.06a.75.75 0 0 1 1.06 0l1.06 1.06a.75.75 0 0 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.06M3.404 2.343a.75.75 0 0 0-1.06 1.06l1.06 1.061a.75.75 0 1 0 1.06-1.06z"/></svg>
+	</button>
 </header>
-<nav class="side">
-	<a href="#/cluster" data-page="cluster"><span class="ico">⬡</span>Cluster</a>
-	<a href="#/node" data-page="node"><span class="ico">▣</span>Node</a>
-	<a href="#/processes" data-page="processes"><span class="ico">≡</span>Processes</a>
-	<a href="#/tree" data-page="tree"><span class="ico">⌥</span>Supervision</a>
-	<a href="#/events" data-page="events"><span class="ico">↯</span>Events</a>
-	<a href="#/cron" data-page="cron"><span class="ico">◷</span>Cron</a>
-	<a href="#/elections" data-page="elections"><span class="ico">♛</span>Elections</a>
-	<div class="foot muted" id="about"></div>
+<nav class="side" aria-label="Pages">
+	<div class="side__group">
+		<div class="side__title">Cluster</div>
+		<ul class="side__list">
+			<li><a href="#/cluster" data-page="cluster">Overview</a></li>
+			<li><a href="#/node" data-page="node">Node</a></li>
+			<li><a href="#/processes" data-page="processes">Processes</a></li>
+			<li><a href="#/tree" data-page="tree">Supervision</a></li>
+			<li><a href="#/events" data-page="events">Events</a></li>
+		</ul>
+	</div>
+	<div class="side__group">
+		<div class="side__title">Modules</div>
+		<ul class="side__list">
+			<li><a href="#/cron" data-page="cron">Cron</a></li>
+			<li><a href="#/elections" data-page="elections">Elections</a></li>
+		</ul>
+	</div>
+	<div class="side__foot" id="about"></div>
 </nav>
 <main id="main"></main>
 <aside id="drawer" hidden></aside>

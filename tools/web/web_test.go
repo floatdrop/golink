@@ -70,7 +70,10 @@ func post(t *testing.T, s *httptest.Server, path, body string, header ...string)
 func TestPage(t *testing.T) {
 	f := testcluster.Start(t)
 	s := serve(t, f, web.Options{})
-	for path, want := range map[string]string{"/": "grpcproc observer", "/app.js": "function pidParts", "/style.css": "--accent", "/favicon.svg": "<svg"} {
+	for path, want := range map[string]string{
+		"/": "<title>grpcprocctl web</title>", "/app.js": "function pidParts", "/theme.js": "g-root_theme_",
+		"/gravity.css": "--g-color-base-background", "/style.css": "var(--g-color-line-generic)", "/favicon.svg": "<svg",
+	} {
 		res, err := http.Get(s.URL + path)
 		if err != nil {
 			t.Fatal(err)

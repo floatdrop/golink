@@ -183,7 +183,28 @@ function toast(msg, bad) {
 
 // ---- small components ---------------------------------------------------
 
-const pill = (text, kind) => h('span', { class: cls('pill', kind ?? text) }, text);
+// Gravity's xmark icon (@gravity-ui/icons, MIT).
+const XMARK =
+	'M3.47 3.47a.75.75 0 0 1 1.06 0L8 6.94l3.47-3.47a.75.75 0 1 1 1.06 1.06L9.06 8l3.47 3.47a.75.75 0 1 1-1.06 1.06L8 9.06l-3.47 3.47a.75.75 0 0 1-1.06-1.06L6.94 8 3.47 4.53a.75.75 0 0 1 0-1.06';
+const icon = (d) =>
+	svg('svg', { width: 16, height: 16, viewBox: '0 0 16 16', 'aria-hidden': 'true' }, svg('path', { fill: 'currentColor', 'fill-rule': 'evenodd', 'clip-rule': 'evenodd', d }));
+
+// pill is Gravity's Label, in the theme that says what kind names: a state,
+// a link's state, an elector's role, an event's kind, or one of bad, warn.
+const LABEL_THEME = {
+	idle: 'unknown', running: 'success', 'waiting-reply': 'warning', exiting: 'danger',
+	up: 'success', connecting: 'warning', down: 'danger',
+	leader: 'success', follower: 'info', candidate: 'warning', unclustered: 'unknown',
+	spawn: 'success', exit: 'unknown', 'link-up': 'info', 'link-down': 'warning', 'dead-letter': 'danger',
+	info: 'info', bad: 'danger', warn: 'warning',
+};
+const pill = (text, kind) => h('span', { class: `label label_${LABEL_THEME[kind ?? text] || 'unknown'}` }, text);
+
+// head is a page's title and, under it, what the page shows.
+const head = (title, lead) => h('header', { class: 'head' }, h('h1', null, title), h('p', { class: 'lead' }, lead));
+
+// select wraps a select for Gravity's chevron.
+const select = (el) => h('span', { class: 'select' }, el);
 const delta = (v, fmt = fmtRate) => (v > 0 ? h('span', { class: 'delta' }, `+${fmt(v)}/s`) : null);
 const card = (k, v, sub, kind) =>
 	h('div', { class: cls('card', kind) }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v), h('div', { class: 's' }, sub));
@@ -311,7 +332,7 @@ class Chart {
 		for (const s of this.series) for (const v of s.data) if (v != null && v > max) max = v;
 		max = niceCeil(max);
 		const top = 12, bottom = ht - 2, span = bottom - top;
-		g.strokeStyle = css.getPropertyValue('--line');
+		g.strokeStyle = css.getPropertyValue('--g-color-line-generic');
 		g.lineWidth = 1;
 		for (const f of [0, 0.5, 1]) {
 			const y = Math.round(bottom - f * span) + 0.5;
@@ -320,8 +341,8 @@ class Chart {
 			g.lineTo(w, y);
 			g.stroke();
 		}
-		g.fillStyle = css.getPropertyValue('--muted');
-		g.font = '10px ' + css.getPropertyValue('--mono');
+		g.fillStyle = css.getPropertyValue('--g-color-text-secondary');
+		g.font = '10px ' + css.getPropertyValue('--g-font-family-monospace');
 		g.fillText(this.fmt(max), 2, top - 2);
 		const step = w / (this.n - 1);
 		for (const s of this.series) {
@@ -368,7 +389,7 @@ function clusterPage() {
 	const map = h('div', { class: 'map' });
 	const list = h('div');
 	const nodeRates = rates(), linkRates = rates();
-	const el = h('div', null, h('h1', null, 'Cluster'), b.el, cards, map, h('h2', null, 'Nodes'), list);
+	const el = h('div', null, head('Cluster', 'Every node this Inspector reaches, and what goes between them.'), b.el, cards, map, h('h2', null, 'Nodes'), list);
 	const linkKey = (l) => `${l.from}>${l.peer}>${l.direction}`;
 
 	return {
@@ -394,13 +415,14 @@ function clusterPage() {
 				card('Messages / s', fmtRate(sum(outs, (l) => lr.get(linkKey(l))?.messages)), `${fmtBytes(sum(outs, (l) => lr.get(linkKey(l))?.bytes))}/s between nodes`),
 			);
 			map.replaceChildren(
+				h('div', { class: 'caption' }, 'nodes and links'),
 				drawMap(nodes, (l) => lr.get(linkKey(l))),
-				h('div', { class: 'legend' }, 'An arrow is a node sending to a peer; its width grows with messages per second.', h('span', null, 'Dashed: connecting or down. Click a node to open it.')),
+				h('div', { class: 'legend' }, h('span', null, 'An arrow is a node sending to a peer; its width grows with messages per second.'), h('span', null, 'Dashed: connecting or down. Click a node to open it.')),
 			);
 			list.replaceChildren(
 				table(
 					[
-						{ t: 'Node', get: (n) => [h('b', null, n.name), n === nodes[0] ? ' ' : null, n === nodes[0] ? pill('inspector', 'follower') : null] },
+						{ t: 'Node', get: (n) => [h('b', null, n.name), n === nodes[0] ? ' ' : null, n === nodes[0] ? pill('inspector', 'info') : null] },
 						{ t: 'Advertise', get: (n) => h('span', { class: 'mono' }, n.advertise) },
 						{ t: 'Uptime', get: (n) => n.uptime },
 						{ t: 'Processes', num: true, get: (n) => fmtInt(n.error ? null : n.processes) },
@@ -408,7 +430,7 @@ function clusterPage() {
 						{ t: 'Exits / s', num: true, get: (n) => fmtRate(nr.get(n.name)?.exited) },
 						{ t: 'Dead letters', num: true, get: (n) => [fmtInt(n.error ? null : n.dead_letters), delta(nr.get(n.name)?.dead_letters)] },
 						{ t: 'Peers', get: (n) => peers(n) },
-						{ t: 'Error', wrap: true, get: (n) => (n.error ? h('span', { class: 'pill bad' }, n.error) : '') },
+						{ t: 'Error', wrap: true, get: (n) => (n.error ? pill(n.error, 'bad') : '') },
 					],
 					nodes,
 					{ onRow: (n) => go('node', { node: n.name }) },
@@ -425,7 +447,7 @@ function peers(n) {
 		const s = seen.get(l.peer);
 		seen.set(l.peer, s === 'up' || l.state === 'up' ? 'up' : s || l.state);
 	}
-	return [...seen].map(([p, s]) => h('span', { class: cls('pill', s) }, p));
+	return h('span', { class: 'row' }, [...seen].map(([p, s]) => pill(p, s)));
 }
 
 // drawMap lays the nodes out on an ellipse, the inspector's node first,
@@ -491,7 +513,7 @@ function nodePage(node) {
 	const el = h(
 		'div',
 		null,
-		h('h1', null, 'Node ', h('span', { class: 'mono' }, node || '(inspector)')),
+		head(['Node ', h('span', { class: 'mono' }, node || '(inspector)')], "Its counters and its links to peers, charted over the last minute."),
 		b.el,
 		cards,
 		h('div', { class: 'charts' }, cProc.el, cLife.el, cDead.el, cMsgs.el, cBytes.el),
@@ -604,7 +626,7 @@ function processesPage(node, params) {
 		el: h(
 			'div',
 			null,
-			h('h1', null, 'Processes on ', h('span', { class: 'mono' }, node || '(inspector)')),
+			head(['Processes ', h('span', { class: 'mono' }, node || '(inspector)')], 'Every process on the node. The node applies the scope; the search and the order apply here, to what it sent.'),
 			b.el,
 			h('div', { class: 'charts' }, cMsgs.el, cBox.el, cState.el),
 			h(
@@ -613,7 +635,7 @@ function processesPage(node, params) {
 				h('b', null, 'Scope'),
 				h('label', null, name),
 				h('label', null, label, labels),
-				h('label', null, state),
+				select(state),
 				h('label', null, 'mailbox ≥', min),
 				h('span', { class: 'sep' }),
 				h('label', null, search),
@@ -720,7 +742,7 @@ function treePage(node, params) {
 					h('span', { class: 'tname' }, x.name || x.label),
 					h('span', { class: 'mono muted', title: x.pid }, pidText(x.pid)),
 					x.name ? h('span', { class: 'muted' }, x.label) : null,
-					x.mailbox ? h('span', { class: 'badge' }, `${fmtInt(x.mailbox)} waiting`) : null,
+					x.mailbox ? pill(`${fmtInt(x.mailbox)} waiting`, 'warn') : null,
 					!open && ch.length ? h('span', { class: 'muted' }, `${ch.length} below`) : null,
 					x.parent && !byPid.has(x.parent) ? h('span', { class: 'muted' }, 'started by ', pidLink(x.parent)) : null,
 				),
@@ -738,19 +760,18 @@ function treePage(node, params) {
 		el: h(
 			'div',
 			null,
-			h('h1', null, 'Supervision on ', h('span', { class: 'mono' }, node || '(inspector)')),
+			head(['Supervision ', h('span', { class: 'mono' }, node || '(inspector)')], ['Each process under the one that started it: a supervisor over its children. ', legend]),
 			b.el,
 			h(
 				'div',
 				{ class: 'scope' },
-				h('label', null, color),
+				select(color),
 				h('label', null, search),
 				h('button', { type: 'button', onclick: () => (collapsed.clear(), render()) }, 'Expand all'),
 				h('button', { type: 'button', onclick: () => (rows.forEach((x) => x.parent && collapsed.add(x.parent)), render()) }, 'Collapse all'),
 				h('span', { class: 'spacer' }),
 				count,
 			),
-			h('p', { class: 'muted' }, 'Each process under the one that started it: a supervisor over its children. ', legend),
 			view,
 		),
 		banner: b.set,
@@ -779,7 +800,7 @@ function eventsPage(node) {
 	const tbody = h('tbody');
 	const chips = KINDS.map((k) => {
 		const n = h('span', { class: 'n' }, '0');
-		const btn = h('button', { type: 'button', class: 'chip on', onclick: () => (on.has(k) ? on.delete(k) : on.add(k), btn.classList.toggle('on'), redraw()) }, k, n);
+		const btn = h('button', { type: 'button', class: 'kind on', 'aria-pressed': 'true', onclick: () => (on.has(k) ? on.delete(k) : on.add(k), btn.setAttribute('aria-pressed', String(btn.classList.toggle('on'))), redraw()) }, k, n);
 		return { k, btn, n };
 	});
 	const pause = h('button', { type: 'button', onclick: () => ((paused = !paused), (held = 0), (pause.textContent = paused ? 'Resume' : 'Pause'), paused || redraw()) }, 'Pause');
@@ -801,7 +822,7 @@ function eventsPage(node) {
 			h('td', { class: 'mono' }, clock(e.time)),
 			h('td', null, pill(e.kind)),
 			h('td', null, who),
-			h('td', { class: 'wrap' }, detail.join(' · '), e.missed ? h('span', { class: 'badge' }, `${fmtInt(e.missed)} missed before this`) : null),
+			h('td', { class: 'wrap' }, detail.join(' · '), e.missed ? [' ', pill(`${fmtInt(e.missed)} missed before this`, 'warn')] : null),
 		);
 	}
 	function redraw() {
@@ -838,7 +859,7 @@ function eventsPage(node) {
 		el: h(
 			'div',
 			null,
-			h('h1', null, 'Events on ', h('span', { class: 'mono' }, node || '(inspector)')),
+			head(['Events ', h('span', { class: 'mono' }, node || '(inspector)')], 'Spawns, exits with their reasons, links and dead letters, as they happen. The node keeps no history: the stream starts when the page opens.'),
 			b.el,
 			h('div', { class: 'charts' }, chart.el),
 			h(
@@ -853,7 +874,6 @@ function eventsPage(node) {
 				status,
 			),
 			h('div', { class: 'tablewrap' }, h('table', null, h('thead', null, h('tr', null, ['Time', 'Kind', 'Process', 'Detail'].map((t) => h('th', null, t)))), tbody)),
-			h('p', { class: 'muted' }, 'Events stream from the moment this page opened; the node keeps no history.'),
 		),
 		banner: (msg) => b.set(msg || note()),
 		tick() {
@@ -897,7 +917,7 @@ function cronPage(_node, params) {
 					{ t: 'Next', get: (x) => (x.j?.disabled ? pill('disabled', 'idle') : x.j?.next) },
 					{ t: 'Last', get: (x) => x.j?.last },
 					{ t: 'Running', num: true, get: (x) => (x.j?.running ? pill(String(x.j.running), 'running') : '') },
-					{ t: 'Last failure', wrap: true, get: (x) => (x.j?.failure ? h('span', { class: 'pill bad' }, x.j.failure) : '') },
+					{ t: 'Last failure', wrap: true, get: (x) => (x.j?.failure ? pill(x.j.failure, 'bad') : '') },
 					{ t: 'Error', wrap: true, get: (x) => x.c.error },
 					...(app.info.allow_writes
 						? [{ t: '', get: (x) => (x.j ? h('span', { class: 'actions' }, x.j.disabled ? job(x, 'enable', 'Enable') : job(x, 'disable', 'Disable'), job(x, 'remove', 'Remove', true)) : '') }]
@@ -913,9 +933,9 @@ function cronPage(_node, params) {
 		el: h(
 			'div',
 			null,
-			h('h1', null, 'Cron'),
+			head('Cron', 'Every grpcproc/cron job on the nodes reachable from here. Each run is a process of its own, labelled cron:<job>.'),
 			b.el,
-			h('div', { class: 'scope' }, h('label', null, 'on', where), h('span', { class: 'spacer' }), h('span', { class: 'muted' }, 'Each run is a process of its own, labelled cron:<job>.')),
+			h('div', { class: 'scope' }, h('label', null, 'on', select(where))),
 			list,
 			readOnlyNote(),
 		),
@@ -937,7 +957,7 @@ function electionsPage() {
 	const moveTo = new Map(); // what each election's "to" select was left at
 	return {
 		every: 5000,
-		el: h('div', null, h('h1', null, 'Elections'), b.el, list, readOnlyNote()),
+		el: h('div', null, head('Elections', 'Every grpcproc/leader election reachable from here, as each node that takes part sees it. Nodes that follow different leaders, or lag a term behind, point at a partition.'), b.el, list, readOnlyNote()),
 		banner: b.set,
 		async tick() {
 			const all = await api('/api/elections');
@@ -973,7 +993,7 @@ function election(e, moveTo) {
 			h(
 				'span',
 				{ class: 'actions' },
-				to,
+				select(to),
 				h('button', { type: 'button', onclick: () => act(`moved ${e.cluster}`, '/api/leader', { cluster: e.cluster, op: 'move', to: to.value }, `Hand leadership of ${e.cluster} over from ${e.leading} ${to.value ? 'to ' + to.value : 'to the most up-to-date follower'}? Its singleton stops, and starts on the new leader.`) }, 'Move leader'),
 			),
 		);
@@ -1047,7 +1067,7 @@ function procDrawer(pid) {
 				h(
 					'div',
 					{ class: 'actions' },
-					h('label', { class: 'row' }, 'log level', level),
+					h('label', null, 'log level', select(level)),
 					h('button', { type: 'button', onclick: () => act(`log level ${level.value}`, '/api/loglevel', { node, target: pid, level: level.value }) }, 'Set'),
 					h('span', { class: 'spacer' }),
 					reason,
@@ -1071,12 +1091,12 @@ function procDrawer(pid) {
 	const el = h(
 		'div',
 		null,
-		h('div', { class: 'dhead' }, h('div', null, h('div', { class: 'row' }, title, state), sub), h('span', { class: 'spacer' }), h('button', { type: 'button', title: 'Close (Esc)', onclick: closeProc }, '✕')),
+		h('div', { class: 'dhead' }, h('div', null, h('div', { class: 'row' }, title, state), sub), h('span', { class: 'spacer' }), h('button', { type: 'button', class: 'icon-button', title: 'Close (Esc)', 'aria-label': 'Close', onclick: closeProc }, icon(XMARK))),
 		b.el,
 		cards,
 		h('div', { class: 'charts' }, cMsgs.el, cBox.el),
 		h('h3', null, 'What it says about itself'),
-		h('div', { class: 'row' }, h('button', { type: 'button', onclick: ask }, 'Ask'), h('label', { class: 'row muted' }, autoBox, 'keep asking'), everySel, saidNote),
+		h('div', { class: 'row' }, h('button', { type: 'button', onclick: ask }, 'Ask'), h('label', null, autoBox, 'keep asking'), select(everySel), saidNote),
 		h('p', { class: 'muted' }, 'Asking takes the process a turn: it answers between messages, so a busy one keeps you waiting.'),
 		said,
 		h('h3', null, 'Process'),
@@ -1193,7 +1213,7 @@ function onRoute() {
 		app.key = key;
 		app.page = pages[page].make(node, params);
 		$('#main').replaceChildren(app.page.el);
-		document.title = `${pages[page].title} · grpcproc observer`;
+		document.title = `${pages[page].title} · grpcprocctl web`;
 		for (const a of document.querySelectorAll('.side a')) a.classList.toggle('on', a.dataset.page === page);
 		run(app.page);
 	} else app.page.update?.(params);
@@ -1272,25 +1292,35 @@ function selectNode(node) {
 	sel.value = node;
 }
 
-function toggleTheme() {
+// The theme follows the site's: a g-root_theme_* class on the root, the one
+// chosen last with the button, or the system's, as theme.js settled it
+// before the page painted.
+function setTheme(theme) {
 	const root = document.documentElement;
-	const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
-	root.dataset.theme = dark ? 'light' : 'dark';
-	try {
-		localStorage.setItem('grpcproc-theme', root.dataset.theme);
-	} catch {
-		// storage is off: the choice lasts as long as the page
-	}
+	root.classList.toggle('g-root_theme_dark', theme === 'dark');
+	root.classList.toggle('g-root_theme_light', theme !== 'dark');
 	redrawCharts();
 }
 
-async function boot() {
+function chosenTheme() {
 	try {
-		const t = localStorage.getItem('grpcproc-theme');
-		if (t) document.documentElement.dataset.theme = t;
+		return localStorage.getItem('gp-theme');
 	} catch {
-		// storage is off: follow the system
+		return null; // storage is off: follow the system
 	}
+}
+
+function toggleTheme() {
+	const theme = document.documentElement.classList.contains('g-root_theme_dark') ? 'light' : 'dark';
+	try {
+		localStorage.setItem('gp-theme', theme);
+	} catch {
+		// storage is off: the choice lasts as long as the page
+	}
+	setTheme(theme);
+}
+
+async function boot() {
 	try {
 		app.info = await api('/api/info');
 	} catch (e) {
@@ -1298,7 +1328,7 @@ async function boot() {
 	}
 	const mode = $('#mode');
 	mode.textContent = app.info.allow_writes ? 'writes allowed' : 'read-only';
-	mode.classList.toggle('writes', !!app.info.allow_writes);
+	mode.className = `label label_${app.info.allow_writes ? 'warning' : 'unknown'}`;
 	$('#about').textContent = `grpcprocctl ${app.info.version || ''}\n${app.info.target || ''}`;
 	$('#about').title = 'The Inspector this page reads through';
 	try {
@@ -1316,7 +1346,7 @@ async function boot() {
 	addEventListener('hashchange', onRoute);
 	addEventListener('resize', debounce(redrawCharts, 100));
 	addEventListener('keydown', (e) => e.key === 'Escape' && app.drawer && closeProc());
-	matchMedia('(prefers-color-scheme: dark)').addEventListener('change', redrawCharts);
+	matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => chosenTheme() || setTheme(e.matches ? 'dark' : 'light'));
 	// The node list follows the cluster while pages other than Cluster show.
 	setInterval(async () => {
 		if (app.interval && !document.hidden && !app.key.startsWith('cluster')) {

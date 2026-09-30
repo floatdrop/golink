@@ -227,7 +227,7 @@ b     billing  yearly  @yearly     UTC   disabled                    0`}</Output
 					<Screenshot
 						caption="grpcprocctl web: a backlog"
 						name="grpcprocctl-web-processes"
-						alt="The Processes view sorted by mailbox, ledger first with hundreds of messages waiting, and ledger open beside it: running, its oldest message waiting over twenty seconds, receiving about 19 a second, a chart of its mailbox climbing, and what it publishes about itself."
+						alt="The Processes view sorted by mailbox, ledger first with a deep mailbox, and ledger open beside it: running, receiving about 20 a second, its oldest message waiting tens of seconds, a chart of its mailbox climbing, and what it publishes about itself."
 					/>
 					<p>
 						The address says what is open, so a view can be shared. The page is read-only unless
