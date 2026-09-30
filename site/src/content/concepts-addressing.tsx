@@ -71,13 +71,13 @@ export const conceptsAddressing: Doc = {
 
 pid, ok := warehouse.Whereis("stock") // on this node, now`}</Code>
 					<p>
-						Names are per node. Two nodes can each have a <C>stock</C>, and nothing but a node name
-						tells them apart; that is a feature, since it is what lets the same service run on every
-						node of the <A to="shop/">tutorial</A>. A name is freed when its process exits and taken by
-						whatever is spawned under it next, so an address by name outlives any one process: a
-						supervisor restarts a child under the same name and its callers notice nothing but the
-						gap. A message sent by name while nobody holds it is a dead letter, and a monitor placed
-						by name fires at once with <C>noproc</C>.
+						Names are per node. Two nodes can each have a <C>stock</C>, and nothing but the node
+						name tells them apart; that is what lets the same service run on every node of the{' '}
+						<A to="shop/">tutorial</A>. A name is freed when its process exits and taken by whatever
+						is spawned under it next, so an address by name outlives any one process: a supervisor
+						restarts a child under the same name and its callers notice nothing but the gap. A
+						message sent by name while nobody holds it is a dead letter, and a monitor placed by
+						name fires at once with <C>noproc</C>.
 					</p>
 					<p>
 						There is no cluster-wide registry. A process is found by knowing which node it is on,
@@ -143,11 +143,11 @@ pid, ok := warehouse.Whereis("stock") // on this node, now`}</Code>
 				<>
 					<p>
 						A typed send or call goes through the address, which takes the sender as an argument, a{' '}
-						<C>Caller</C>: the <C>*Node</C>, or a <C>*Process</C> from inside a handler. A call names
-						its reply, <C>stock.Call[*shoppb.Reserved](ctx, node, req)</C>, and every call site does,
-						wrapping the request in the mailbox's oneof when it has one. The package that owns a
-						process can do both once. A contract wraps the address's <C>Call</C> and <C>Send</C> in a
-						method per operation, on an address type of its own:
+						<C>Caller</C>: the <C>*Node</C>, or a <C>*Process</C> from inside a handler. Every call
+						site names its reply, <C>stock.Call[*shoppb.Reserved](ctx, node, req)</C>, and wraps the
+						request in the mailbox's oneof. The package that owns the process can do both once,
+						wrapping <C>Call</C> and <C>Send</C> in a method per operation on an address type of its
+						own:
 					</p>
 					<Code caption="examples/guide/proto/inventory/v1/address.go">
 						{`${region(inventoryAddress, /^\/\/ StockAddr addresses/, /^type StockAddr/)}
@@ -160,9 +160,9 @@ ${region(inventoryAddress, /^\/\/ Reserve takes items/, /^}/)}`}
 						the oneof. The sender is an argument rather than part of the address because who sends
 						matters: a process's call carries the metadata of the message it is handling, and an
 						actor keeps its addresses in fields but has its process only inside a handler. The type
-						embeds <C>Addr</C>, so it is still a <C>Target</C>, and its raw <C>Call</C> and{' '}
-						<C>Send</C> are still there: the methods make the protocol the easy way, not the only
-						one. <A to="shop/#contracts">The shop</A>'s contracts are written this way.
+						embeds <C>Addr</C>, so it is still a <C>Target</C> with its raw <C>Call</C> and{' '}
+						<C>Send</C>: the methods make the protocol the easy way, not the only one.{' '}
+						<A to="shop/#contracts">The shop</A>'s contracts are written this way.
 					</p>
 				</>
 			)
@@ -238,8 +238,8 @@ md := grpcproc.MetadataFrom(ctx) // reads it back`}</Code>
 						id on every message its handling causes, across processes and nodes, without a single
 						handler threading a context through. A call's context can add to what is inherited, and{' '}
 						<C>m.Context(parent)</C> puts a message's metadata into a context for code that wants
-						one, a database client for instance. For a call, that context also ends at the caller's
-						deadline; <A to="concepts/processes/#send-call">Send and Call</A> has how it travels.
+						one, a database client say; for a call it also ends at the caller's deadline, as{' '}
+						<A to="concepts/processes/#send-call">Send and Call</A> describes.
 					</p>
 					<p>
 						This is what <A to="guides/observability/">grpcproc/otel</A> builds its traces on: a span
@@ -255,11 +255,11 @@ md := grpcproc.MetadataFrom(ctx) // reads it back`}</Code>
 			body: (
 				<>
 					<p>
-						A message sent from outside any process, with the node as the sender, still has a sender. It is the node's pseudo-process, <C>node.PID()</C>: the node's name and
-						incarnation with ID zero. It has no mailbox, so a process cannot reply to it with a send;
-						a call from it is answered through the call, as any other. It shows up in <C>Msg.From</C>,
-						in dead letters and in traces, so that a message from the edge is as attributable as one
-						from a process.
+						A message sent from outside any process still has a sender: the node's pseudo-process,{' '}
+						<C>node.PID()</C>, the node's name and incarnation with ID zero. It has no mailbox, so a
+						process cannot reply to it with a send; a call from it is answered through the call, as
+						any other. It shows up in <C>Msg.From</C>, in dead letters and in traces, so a message
+						from the edge is as attributable as one from a process.
 					</p>
 				</>
 			)

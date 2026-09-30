@@ -114,10 +114,10 @@ type MemberEvent struct {
 				<>
 					<p>
 						A node notices a lost link by itself, as fast as gRPC keepalive allows, and that is the
-						faster signal. It is also a local one, and it has a blind spot. A peer that dies without
-						closing its connections, behind a half-open TCP connection or a partition, is noticed
-						only when keepalive gives up, or never if keepalive is not configured. And a link
-						breaking says nothing about whether the peer is gone or only unreachable from here.
+						faster signal. It is also a local one with a blind spot: a peer that dies without
+						closing its connections is noticed only when keepalive gives up, or never if keepalive
+						is not configured. And a link breaking says nothing about whether the peer is gone or
+						only unreachable from here.
 					</p>
 					<p>
 						<C>Membership</C> is the cluster-wide verdict on top of that. With etcd, it is the
@@ -166,10 +166,10 @@ type MemberEvent struct {
 						<A to="guides/etcd/">grpcproc/etcd</A> implements the three on one <C>Cluster</C> value:
 						a key per node under a lease the node keeps alive, resolved by reading the key, and
 						membership by listing the keys and then watching the prefix. It is a separate module,
-						so the core does not depend on the etcd client, and a deployment that wants another
-						registry implements the same three interfaces. The services on the node do not change
-						either way: the tutorial's <A to="shop/platform/">platform</A> takes its resolver,
-						registrar and membership from the configuration, and the services see only the node.
+						and a deployment that wants another registry implements the same three interfaces. The
+						services on the node do not change either way: the tutorial's{' '}
+						<A to="shop/platform/">platform</A> takes its resolver, registrar and membership from
+						the configuration, and the services see only the node.
 					</p>
 				</>
 			)

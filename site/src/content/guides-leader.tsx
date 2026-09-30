@@ -18,8 +18,8 @@ export const guidesLeader: Doc = {
 			<C>grpcproc/leader</C> elects one node of a cluster, and runs a singleton there: a child spec
 			of yours, started when its node wins and told to exit when it loses. Leadership is the
 			singleton's lifetime, so no handler asks whether it still leads. The singleton can checkpoint
-			its state, and whichever node leads next starts from it. It is a separate module, versioned
-			on its own, and depends on grpcproc alone.
+			its state, and whichever node leads next starts from it. It is a separate module, versioned on
+			its own.
 		</p>
 	),
 	sections: [
@@ -301,19 +301,16 @@ leader.Uncordon(ctx, node, "scheduler", "c")`}</Code>
 						node of the view to lead is refused.
 					</p>
 					<p>
-						From a terminal, <A to="guides/grpcprocctl/#leader">grpcprocctl</A> does the same
-						through the Inspector, and shows what every node's elector believes once they agree:
+						From a terminal, <A to="guides/grpcprocctl/#leader">grpcprocctl</A> does the same three
+						through the Inspector — <C>leader move</C>, with <C>--to</C> a node,{' '}
+						<C>leader cordon</C> and <C>leader uncordon</C> — and an agent gets them as MCP tools.
+						It shows what every node's elector believes once they agree:
 					</p>
 					<Code lang="sh">{'grpcprocctl --plaintext leader cordon scheduler b   # b led: it hands over'}</Code>
 					<Output>{`NODE  ROLE      TERM  LEADER  VIEW   STATE  CORDONED  UNREACHABLE  SINGLETON  BACKOFF  ERROR
 a     leader    2     a       a,b,c  2.3    b                      <a.1.11>
 b     follower  2     a       a,b,c  2.3    b                      none       200ms
 c     follower  2     a       a,b,c  2.3    b                      none`}</Output>
-					<p>
-						<C>grpcprocctl leader scheduler</C> shows the same table; <C>leader move scheduler</C>{' '}
-						(with <C>--to</C> a node) and <C>leader uncordon scheduler b</C> are the other two
-						operations, and an agent gets them as MCP tools.
-					</p>
 					<p>
 						A node that restarts holds no state, and voters refuse a candidate whose state is
 						older than theirs; so a voter that refuses one sends its own with the refusal, and

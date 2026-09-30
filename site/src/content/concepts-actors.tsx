@@ -13,10 +13,9 @@ export const conceptsActors: Doc = {
 		'What a process is, why it talks in messages, why its address is not a pointer, and where supervision comes from: the model behind grpcproc, for a Go developer who has not met it.',
 	lead: (
 		<p>
-			grpcproc takes its shape from Erlang, where the unit of a program is a process: something with
-			state of its own, a queue of messages in front of it, and an address anyone can send to. This
-			page says what that buys, and what it costs, for a reader who has goroutines and channels and
-			wonders why they are not enough.
+			grpcproc takes its shape from Erlang, where the unit of a program is a process: state of its
+			own, a queue of messages in front of it, and an address anyone can send to. This page says
+			what that buys, and what it costs, for a reader who has goroutines and channels.
 		</p>
 	),
 	sections: [
@@ -26,25 +25,23 @@ export const conceptsActors: Doc = {
 			body: (
 				<>
 					<p>
-						A process here is a Go function, run on a goroutine of its own, that takes messages from
-						a mailbox one at a time. The mailbox is a queue. Anything can append to it, from any
-						goroutine or any node, and only the process reads from it. The function keeps whatever
-						state it needs in local variables, and since nothing else touches those variables, it
-						needs no lock.
+						A process is a Go function, run on a goroutine of its own, that takes messages from a
+						mailbox one at a time. Anything can append to the mailbox, from any goroutine or any
+						node; only the process reads from it. Its state lives in local variables nothing else
+						touches, so it needs no lock.
 					</p>
 					<Code caption="examples/quickstart/main.go">{region(quickstart, /^func inventory/, /^}/)}</Code>
 					<p>
 						That is the whole discipline: state lives inside one goroutine, and the only way to
-						change it is to send a message. A caller that wants an answer sends a call and waits
-						for the reply; a caller that does not sends and moves on. The process decides, per
-						message, what to do with it. It cannot be interrupted between two messages, so every
-						handler sees a consistent state and leaves one.
+						change it is to send a message. A caller that wants an answer sends a call and waits;
+						one that does not sends and moves on. Nothing interrupts a process between two messages,
+						so every handler sees a consistent state and leaves one.
 					</p>
 					<p>
-						A mailbox is typed. This one holds <C>*shoppb.Reserve</C> and nothing else, and the
-						compiler checks that only such messages are sent to it. The type is a protobuf message,
-						so it already has a wire encoding: the same value a process gets from its neighbour in
-						the binary, it gets from a process on another machine.
+						A mailbox is typed: this one holds <C>*shoppb.Reserve</C> and nothing else, and the
+						compiler checks every send to it. The type is a protobuf message, so it has a wire
+						encoding already: a process gets the same value from its neighbour in the binary and
+						from a process on another machine.
 					</p>
 				</>
 			)
@@ -60,24 +57,23 @@ export const conceptsActors: Doc = {
 						a channel with an owner, an address, and a lifetime you can observe.
 					</p>
 					<p>
-						A channel has no name. To send on it you need the channel value, which means the sender
-						and the receiver were wired together by whoever created both, usually in one function.
-						A channel does not cross a program boundary: a service on another machine cannot hold
-						one. And a channel cannot tell you that the goroutine reading it has died; a send to it
+						A channel has no name: to send on it you need the channel value, so sender and receiver
+						were wired together by whoever created both. A channel does not cross a program
+						boundary, and it cannot tell you that the goroutine reading it has died; a send to it
 						blocks for ever, or never happens, and nothing reports which.
 					</p>
 					<p>
-						A process fixes each of those. It has an address, a PID or a registered name, that can
-						be passed around, stored, and sent inside a message. The address works from any node in
-						the cluster. And a process can be monitored: when it exits, or when the node it runs on
-						is lost, whoever asked is told, with a reason.
+						A process fixes each of those. Its address, a PID or a registered name, can be passed
+						around, stored and sent inside a message, and works from any node in the cluster. And a
+						process can be monitored: when it exits, or when its node is lost, whoever asked is
+						told, with a reason.
 					</p>
 					<p>
 						What a process does not fix is shared state, on purpose. Two processes never share a
 						variable; they share nothing but the messages between them. A value that many parts of a
 						program read and write becomes a process that owns it and answers questions about it.
-						That is more typing than a mutex, and it is also the reason the process can move to
-						another machine without anything else changing.
+						That is more typing than a mutex, and it is why the process can move to another machine
+						without anything else changing.
 					</p>
 				</>
 			)
@@ -93,22 +89,20 @@ export const conceptsActors: Doc = {
 						are small comparable values that mean the same thing on every node.
 					</p>
 					<p>
-						This is what makes the location of a process nobody's business. <C>Send</C>, <C>Call</C>,{' '}
+						So the location of a process is nobody's business. <C>Send</C>, <C>Call</C>,{' '}
 						<C>Monitor</C> and <C>Exit</C> take an address, look at the node in it, and either
-						deliver within the program or write the message to the link with that node. The code
-						that sends is the same in both cases, and so is the code that receives. A local send
-						does not even encode the message; a remote one does, and the reply comes back the same
-						way.
+						deliver within the program or write to the link with that node. The code on both ends is
+						the same either way.
 					</p>
 					<Drawing caption="the same call, within a node and across nodes">
 						<ActorsPicture />
 					</Drawing>
 					<p>
-						The difference between the two is not hidden, it is placed where it belongs: in what can
-						go wrong. A remote call can fail because the link broke, and the caller finds out. A
-						monitor on a remote process fires when the node cannot be reached, with a reason that
-						says so. The <A to="shop/">tutorial</A> is one application run as one program and as
-						three, from the same code, and the only thing that changes is the configuration.
+						The difference is not hidden; it is where it belongs, in what can go wrong. A remote
+						call fails when the link breaks, and the caller finds out; a monitor on a remote process
+						fires when the node cannot be reached, with a reason that says so. The{' '}
+						<A to="shop/">tutorial</A> runs one application as one program and as three, from the
+						same code: only the configuration changes.
 					</p>
 				</>
 			)
@@ -131,10 +125,10 @@ export const conceptsActors: Doc = {
 						process, and a mutex around a struct is the usual way of writing one without saying so.
 					</p>
 					<p>
-						The two meet at the edge. In the tutorial, an HTTP handler is not a process; it calls one
-						through the node, waits for the answer with the request's context, and turns it into a
-						status code. The handler is stateless, the process behind it is not, and the call
-						between them is typed like everything else.
+						The two meet at the edge. In the tutorial an HTTP handler is not a process: it calls one
+						through the node, waits with the request's context, and turns the answer into a status
+						code. The handler is stateless, the process behind it is not, and the call between them
+						is typed like everything else.
 					</p>
 				</>
 			)
@@ -146,9 +140,9 @@ export const conceptsActors: Doc = {
 				<>
 					<p>
 						A process ends when its function returns, and it has a reason: <C>normal</C> for a nil
-						return, the error's text otherwise, <C>panic: …</C> for a panic, or whatever an <C>Exit</C>{' '}
-						request asked for. The reason is not lost. Any process that monitored it receives a{' '}
-						<C>Down</C> carrying it, in its mailbox, after the last message the exiting process sent.
+						return, the error's text otherwise, <C>panic: …</C> for a panic, or whatever an{' '}
+						<C>Exit</C> request asked for. The reason is not lost: any process that monitored it
+						receives a <C>Down</C> carrying it, after the last message the exiting process sent.
 					</p>
 					<p>
 						A node that cannot be reached is reported the same way: every monitor on a process there
@@ -157,9 +151,9 @@ export const conceptsActors: Doc = {
 						the code that handles one handles the other.
 					</p>
 					<p>
-						This is the piece that goroutines lack entirely. A goroutine that panics takes the program
-						down; one that returns leaves no trace; one whose machine is gone is not a concept. With
-						exits as messages, failure becomes something a program can be written about, and{' '}
+						This is what goroutines lack. A goroutine that panics takes the program down, one that
+						returns leaves no trace, and one whose machine is gone is not a concept. With exits as
+						messages, failure is something a program can be written about, and{' '}
 						<A to="concepts/monitors-and-links/">Monitors and links</A> is the vocabulary for it.
 					</p>
 				</>
@@ -171,11 +165,11 @@ export const conceptsActors: Doc = {
 			body: (
 				<>
 					<p>
-						Erlang's answer to a process that fails is not to handle every error inside it. It is to
-						let the process die and have another one, a supervisor, start it again from a known
-						state. The reasoning: most failures come from a state the code did not anticipate, and
-						the surest way out of such a state is to leave it. Code that tries to recover in place
-						keeps the bad state and adds guesses to it.
+						Erlang's answer to a process that fails is not to handle every error inside it, but to
+						let it die and have another one, a supervisor, start it again from a known state. Most
+						failures come from a state the code did not anticipate, and the surest way out of such a
+						state is to leave it. Code that recovers in place keeps the bad state and adds guesses
+						to it.
 					</p>
 					<p>
 						A supervisor is itself a process. It starts its children, monitors them, and when one

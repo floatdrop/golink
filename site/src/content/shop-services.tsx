@@ -38,9 +38,9 @@ export const shopServices: Doc = {
 						The levels live in a <C>Store</C>, not in the actor. When the store fails on a release
 						the process crashes, and its supervisor starts a new one; <C>actor.Child</C> builds a
 						fresh actor at every start, so it begins from what the store says, not from whatever
-						crashed. The store is an interface the container serves. The tutorial's store keeps the
-						levels in memory; a database would be built, started and stopped by the container the
-						same way, and nothing else would change.
+						crashed. The store is an interface the container serves: the tutorial's keeps the levels
+						in memory, and a database would be built, started and stopped the same way, with nothing
+						else changing.
 					</p>
 					<p>
 						<C>Module</C> registers the store and the service's tree. The tree is not started here:

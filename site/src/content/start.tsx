@@ -14,9 +14,9 @@ export const start: Doc = {
 		'Install grpcproc, put a node on your gRPC server, spawn a process, and reach it from another node by name.',
 	lead: (
 		<p>
-			This page builds the program on the front page, one piece at a time. It is{' '}
-			<Ext href={file('examples/quickstart/main.go')}>examples/quickstart</Ext> in the repository,
-			whole and runnable; the code here is cut from it.
+			The program on the front page, built one piece at a time. It is{' '}
+			<Ext href={file('examples/quickstart/main.go')}>examples/quickstart</Ext> in the repository;
+			the code here is cut from it.
 		</p>
 	),
 	sections: [
@@ -27,9 +27,8 @@ export const start: Doc = {
 				<>
 					<Code lang="sh">{'go get github.com/floatdrop/grpcproc'}</Code>
 					<p>
-						grpcproc needs Go 1.27 or later. Messages are protobuf messages, the ones your services
-						already define; a mailbox holds one message type. The example uses two, from a small
-						file compiled with <C>protoc-gen-go</C>:
+						grpcproc needs Go 1.27 or later. Messages are protobuf messages, and a mailbox holds one
+						type. The example uses two, compiled with <C>protoc-gen-go</C>:
 					</p>
 					<Code lang="proto" caption="examples/shoppb/shop.proto">
 						{region(shopProto, /^\/\/ Reserve asks/, /^}/) + '\n\n' + region(shopProto, /^\/\/ Reserved is/, /^}/)}
@@ -44,9 +43,8 @@ export const start: Doc = {
 				<>
 					<p>
 						A <em>node</em> is grpcproc in one program: it hosts processes and links to the nodes of
-						other programs. It is a plain value. You construct it, register it on the gRPC server
-						your service already runs, start it once the server serves, and stop it before the
-						server stops:
+						other programs. Construct it, register it on your gRPC server, start it once the server
+						serves, and stop it before the server stops:
 					</p>
 					<Code caption="examples/quickstart/main.go">{region(quickstart, /^\/\/ peers is where/, /^}/)}</Code>
 					<p>
@@ -74,13 +72,13 @@ export const start: Doc = {
 						A process is a function over a typed mailbox, run on its own goroutine until it returns.
 						This one holds a stock of apples. Its mailbox holds <C>*shoppb.Reserve</C> and nothing
 						else, and every message it takes is a <em>call</em>: the sender waits for an answer,
-						which <C>Reply</C> gives, as a message or as an error.
+						which <C>Reply</C> gives, as a message or an error.
 					</p>
 					<Code caption="examples/quickstart/main.go">{region(quickstart, /^\/\/ inventory is a process/, /^}/)}</Code>
 					<p>
-						<C>Receive</C> blocks until there is a message, and returns an error when the process
-						should stop: it was asked to exit, or its node is stopping. Returning that error is
-						the whole of the exit handling. A process that returns <C>nil</C> ends with reason{' '}
+						<C>Receive</C> blocks until a message arrives, and returns an error when the process
+						should stop: it was asked to exit, or its node is stopping. Returning that error is the
+						whole of the exit handling. A process that returns <C>nil</C> ends with reason{' '}
 						<C>normal</C>; one that returns an error, or panics, ends with that as its reason, and
 						whoever monitors it learns which.
 					</p>
@@ -116,8 +114,8 @@ export const start: Doc = {
 						bounds the whole call.
 					</p>
 					<p>
-						Nothing in the shop's code says the process is remote. The same call works with a local
-						address, and a local send does not even encode the message.
+						Nothing in the shop's code says the process is remote: the same call works with a local
+						address.
 					</p>
 				</>
 			)

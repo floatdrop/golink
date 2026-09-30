@@ -11,10 +11,9 @@ export const guidesInspector: Doc = {
 	lead: (
 		<p>
 			Everything <A to="guides/observability/">Observability</A> describes is a Go API on the node.
-			The Inspector serves it over gRPC, on the server the node already runs, and forwards to
-			every other node's, so one endpoint reaches the whole cluster.{' '}
-			<A to="guides/grpcprocctl/">grpcprocctl</A> is its command line, and{' '}
-			<A to="guides/mcp/">an AI agent</A> asks it the same questions over MCP.
+			The Inspector serves it over gRPC, on the node's own server, and forwards to every other
+			node's, so one endpoint reaches the whole cluster. <A to="guides/grpcprocctl/">grpcprocctl</A>{' '}
+			is its command line, and <A to="guides/mcp/">an AI agent</A> asks the same questions over MCP.
 		</p>
 	),
 	sections: [
@@ -38,9 +37,8 @@ defer insp.Close()`}</Code>
 						<C>Close</C>. <C>WithResolver</C> takes another resolver or other dial options, for
 						Inspectors served elsewhere than on the port the nodes link through, and{' '}
 						<C>WithPeers</C> any other way of reaching a peer's Inspector; <C>WithPeers(nil)</C>{' '}
-						keeps a server to its own node. A process targeted by PID routes to the PID's
-						node when the request names none. So a tool pointed at one node can ask about any, which
-						is what a cluster of three programs on three hosts needs.
+						keeps a server to its own node. A process targeted by PID routes to the PID's node when
+						the request names none. So a tool pointed at one node can ask about any.
 					</p>
 					<p>
 						<C>inspect.ReadOnly()</C> refuses the four writes: <C>Send</C>, <C>Call</C>,{' '}

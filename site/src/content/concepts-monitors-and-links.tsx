@@ -14,11 +14,10 @@ export const conceptsMonitorsAndLinks: Doc = {
 	lead: (
 		<>
 			<p>
-				A process runs until it returns, and then it is gone. What is left is the question of who
-				needs to know. A caller waiting for a reply needs to know, so its call can fail instead of
-				hang. A supervisor needs to know, so it can start a replacement. A worker whose only reason to
-				exist is another process needs to know, so it can stop too. grpcproc has two ways to tell
-				them, and one way to ask a process to go.
+				A process runs until it returns, and then it is gone. The question is who needs to know: a
+				caller waiting for a reply, so its call can fail instead of hang; a supervisor, so it can
+				start a replacement; a worker whose only reason to exist is another process, so it can stop
+				too. grpcproc has two ways to tell them, and one way to ask a process to go.
 			</p>
 		</>
 	),
@@ -53,11 +52,10 @@ if m.Down != nil && m.Down.Ref == ref {
 					</p>
 					<p>
 						Two cases need no exit at all. A monitor on a process that does not exist, because it
-						never did or already went, answers at once with reason <C>noproc</C>: the watcher asked
-						about something gone, and the answer is that it is gone. A monitor on a process whose
-						node cannot be reached, now or later, answers with <C>noconnection</C>, the moment the
-						node is declared down. In both, the watcher gets exactly one <C>Down</C>, so it never
-						waits for one that cannot come.
+						never did or already went, answers at once with reason <C>noproc</C>. A monitor on a
+						process whose node cannot be reached, now or later, answers with <C>noconnection</C>,
+						the moment the node is declared down. In both the watcher gets exactly one <C>Down</C>,
+						so it never waits for one that cannot come.
 					</p>
 				</>
 			)
@@ -69,10 +67,9 @@ if m.Down != nil && m.Down.Ref == ref {
 				<>
 					<p>
 						A process's <C>Down</C> arrives after every message that process sent to the watcher.
-						That is a guarantee, not a likelihood, and it is what makes the notice useful: when a
-						worker sends its result and then exits, the watcher sees the result, then the{' '}
-						<C>Down</C>, never the other way around. A watcher that gets a <C>Down</C> knows there is
-						nothing more to come from that process.
+						That is a guarantee, not a likelihood: when a worker sends its result and then exits,
+						the watcher sees the result, then the <C>Down</C>, never the other way around. A watcher
+						that has the <C>Down</C> knows there is nothing more to come.
 					</p>
 					<p>
 						Within a node it holds because the <C>Down</C> is queued in the watcher's mailbox like a
@@ -122,11 +119,11 @@ if err != nil {
 						<C>addr.CallMonitor</C>, and the callee spawns with <C>grpcproc.WatchedBy(m)</C>, which
 						places it on the child inside the same critical section, before the child runs. The
 						answer names the child, and a <C>Down</C> that came before it waits for it, so it comes
-						after the answer with its real reason. Only an answer that is not an error brings the
-						monitor: a call that fails leaves none, and no <C>Down</C> comes of it, so a spawn that
-						failed is an error and a child that started and died is a <C>Down</C>.{' '}
-						<C>addr.CallLink</C> links the caller instead, as <C>LinkChild</C> does, and{' '}
-						<C>m.Watch(pid)</C> places either on a process that runs already.
+						after the answer with its real reason. Only a successful answer brings the monitor: a
+						call that fails leaves none, so a spawn that failed is an error and a child that started
+						and died is a <C>Down</C>. <C>addr.CallLink</C> links the caller instead, as{' '}
+						<C>LinkChild</C> does, and <C>m.Watch(pid)</C> places either on a process that runs
+						already.
 					</p>
 					<Code>{`// On the caller's node.
 placed, ref, err := placer.CallMonitor[*roomspb.Placed](ctx, p, &roomspb.Place{Peer: id})

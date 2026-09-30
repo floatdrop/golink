@@ -206,8 +206,7 @@ export const guidesSupervisors: Doc = {
 						order, and a child supervisor has as long as it takes, <C>Infinity</C>, to stop its own.
 						grpcproc cannot kill a goroutine, so a worker that outlives its <C>Shutdown</C> is
 						logged and left behind; a named one keeps its name until it exits, and the supervisor
-						starts it again, or ends, only once it has. Nothing is ever started under a name an old
-						process still holds.
+						starts it again, or ends, only once it has.
 					</p>
 				</>
 			)
@@ -221,12 +220,11 @@ export const guidesSupervisors: Doc = {
 						<C>actor.StartChild(ctx, from, sup, spec)</C> adds a child to a running supervisor and
 						starts it, after the children it already has; it returns the child's PID once it runs.{' '}
 						<C>from</C> is who asks, the node or a process from inside its handler, as for an
-						address's <C>Call</C>, and <C>sup</C> is a PID or a name.
-						The child is the supervisor's like the others, with one difference: once it ends for
-						good, because it is temporary, or transient and ended normally, or <C>StopChild</C>{' '}
-						stopped it, the supervisor forgets it. A pool of workers is a <C>OneForOne</C>{' '}
-						supervisor and anonymous children added as they are needed, and it does not grow with
-						every worker that ever ran.
+						address's <C>Call</C>, and <C>sup</C> is a PID or a name. The child is the supervisor's
+						like the others, with one difference: once it ends for good, because it is temporary, or
+						transient and ended normally, or <C>StopChild</C> stopped it, the supervisor forgets it.
+						So a pool of workers — a <C>OneForOne</C> supervisor with anonymous children added as
+						they are needed — does not grow with every worker that ever ran.
 					</p>
 					<Code>{`worker, err := actor.StartChild(ctx, node, pool, actor.ChildFunc("", handle(job)).WithRestart(actor.Temporary))`}</Code>
 					<p>

@@ -15,8 +15,8 @@ export const guidesBlockingIO: Doc = {
 	lead: (
 		<p>
 			A process is a goroutine you write, and <C>Receive</C> is a call it makes, so nothing stops it
-			from blocking on a socket. What it gives up while blocked is its mailbox. This page is about
-			when that is fine and what to do when it is not. The code is from{' '}
+			from blocking on a socket. What it gives up while blocked is its mailbox: when that is fine,
+			and what to do when it is not. The code is from{' '}
 			<Ext href={file('examples/blockingio/main.go')}>examples/blockingio</Ext>, a line server whose
 			listener and connections are processes.
 		</p>
@@ -57,9 +57,9 @@ export const guidesBlockingIO: Doc = {
 						A connection's process has two things to do at once: read what the peer sends, and write
 						what other processes ask it to. Blocked in <C>Read</C>, it could not do the second. So
 						the process keeps its mailbox and its state, and the blocking reads go to a goroutine of
-						its own. That goroutine touches none of the process's state. It only sends each line it
-						reads to the process's mailbox, where the line waits in order with the writes, and the
-						process's loop is the one place that handles either.
+						its own, which touches none of that state: it only sends each line it reads to the
+						process's mailbox, where the line waits in order with the writes. The process's loop is
+						the one place that handles either.
 					</p>
 					<Code caption="examples/blockingio/main.go">{region(blockingio, /^\/\/ serve runs one connection/, /^}/)}</Code>
 					<p>
@@ -114,8 +114,7 @@ export const guidesBlockingIO: Doc = {
 						connection: the reader's <C>Read</C> fails, and the reader stops. When the peer hangs up
 						first, the reader's <C>Read</C> fails on its own; the reader sends why, and the loop
 						returns nil, a normal exit. The reader checks the context before it sends that, so an
-						exit the process started leaves no message behind for a process that is gone, which
-						would be a dead letter.
+						exit the process started leaves no dead letter behind.
 					</p>
 					<p>
 						The program talks to its server as a client would, then asks the listener to exit. The
@@ -134,12 +133,11 @@ export const guidesBlockingIO: Doc = {
 				<>
 					<p>
 						Code outside any process reaches processes with the node as the sender: an address's{' '}
-						<C>Send</C> and <C>Call</C>, or the node's <C>SendTo</C> and <C>CallTo</C>, work from any
-						goroutine. An HTTP or gRPC handler is such code. It calls the process that does the work
-						and writes the answer, with the request's context bounding the wait, and needs no process
-						of its own; <A to="shop/services/#edge">the shop's web front</A> does exactly that. A
-						process per connection is for what a server library does not already handle: a raw
-						socket, a pipe, a device.
+						<C>Send</C> and <C>Call</C>, or the node's <C>SendTo</C> and <C>CallTo</C>, work from
+						any goroutine. An HTTP or gRPC handler is such code: it calls the process that does the
+						work and writes the answer, with the request's context bounding the wait, as{' '}
+						<A to="shop/services/#edge">the shop's web front</A> does. A process per connection is
+						for what a server library does not already handle: a raw socket, a pipe, a device.
 					</p>
 					<Aside title="Coming from Ergo">
 						<p>

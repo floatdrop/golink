@@ -15,9 +15,9 @@ export const guidesActors: Doc = {
 	lead: (
 		<p>
 			<C>grpcproc/actor</C> is optional structure on top of processes, built on the public API only.
-			This page is about its handler loop; <A to="guides/supervisors/">Supervisors</A> covers the
+			This page covers its handler loop; <A to="guides/supervisors/">Supervisors</A> covers the
 			other half. The code is from{' '}
-			<Ext href={file('examples/actors/main.go')}>examples/actors</Ext>, whole and runnable.
+			<Ext href={file('examples/actors/main.go')}>examples/actors</Ext>.
 		</p>
 	),
 	sections: [
@@ -28,10 +28,10 @@ export const guidesActors: Doc = {
 				<>
 					<p>
 						A process is a function over a mailbox, and the function is a loop: receive, switch on
-						what came, reply or not. That is the right shape for a process that does one thing.
-						For a service it grows old. The switch gets a case per operation, a case for{' '}
-						<C>Down</C>, another for a call that must be answered later, and the state the loop
-						closes over is reachable from nothing but the loop.
+						what came, reply or not. That is the right shape for a process that does one thing; for
+						a service it grows old. The switch gets a case per operation, one for <C>Down</C>,
+						another for a call that must be answered later, and the state the loop closes over is
+						reachable from nothing but the loop.
 					</p>
 					<p>
 						An actor is that loop turned inside out. It is a struct holding its dependencies and its
@@ -126,9 +126,8 @@ addr, err := node.Spawn(actor.Run(NewOrders(repo)), grpcproc.WithName("orders"))
 					</p>
 					<p>
 						All of them run on the actor's goroutine, one at a time, in the order the messages
-						arrived. An actor handles one message at a time, so its fields need no lock, and a call
-						it makes from a handler holds the actor until the reply comes. The next message waits in
-						the mailbox meanwhile.
+						arrived, so its fields need no lock. A call it makes from a handler holds the actor
+						until the reply comes; the next message waits in the mailbox meanwhile.
 					</p>
 					<Aside title="Coming from Erlang">
 						<p>

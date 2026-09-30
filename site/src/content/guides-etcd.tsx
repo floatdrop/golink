@@ -10,12 +10,12 @@ export const guidesEtcd: Doc = {
 		'Cluster membership on etcd leases: nodes register under a lease, peers resolve them from it, and an expired lease drops the links to a node that stopped answering.',
 	lead: (
 		<p>
-			<C>grpcproc/etcd</C> implements <C>Resolver</C>, <C>Registrar</C> and <C>Membership</C> on
-			one etcd client. A node registers under a lease it keeps alive; peers resolve its address
-			from the key; and when the lease ends, because the node stopped or stopped answering, every
-			node watching the cluster drops its links to it. It is a separate module, so grpcproc itself
-			does not depend on the etcd client. <A to="concepts/discovery/">Discovery and membership</A>{' '}
-			says what the three interfaces are for.
+			<C>grpcproc/etcd</C> implements <C>Resolver</C>, <C>Registrar</C> and <C>Membership</C> on one
+			etcd client. A node registers under a lease it keeps alive; peers resolve its address from the
+			key; and when the lease ends, because the node stopped or stopped answering, every node
+			watching the cluster drops its links to it. It is a separate module.{' '}
+			<A to="concepts/discovery/">Discovery and membership</A> says what the three interfaces are
+			for.
 		</p>
 	),
 	sections: [
@@ -139,13 +139,12 @@ err = node.Start(ctx) // registers; Stop withdraws`}</Code>
 			body: (
 				<>
 					<p>
-						grpcproc notices a lost link by itself, as fast as gRPC keepalive allows. A node that
-						dies without closing its connections, behind a half-open TCP connection or a network
-						partition, is noticed only when keepalive gives up, or never if keepalive is not
-						configured. Its lease ends after the TTL regardless: every watching node then drops its
-						links, monitors across them fire <C>Down{'{'}noconnection{'}'}</C>, and pending calls
-						fail with "left the cluster". The lease is the verdict the whole cluster shares; a
-						broken link is one node's view.
+						grpcproc notices a lost link by itself, as fast as gRPC keepalive allows — or never, for
+						a node that died without closing its connections where keepalive is not configured. Its
+						lease ends after the TTL regardless: every watching node then drops its links, monitors
+						across them fire <C>Down{'{'}noconnection{'}'}</C>, and pending calls fail with "left
+						the cluster". The lease is the verdict the whole cluster shares; a broken link is one
+						node's view.
 					</p>
 					<p>
 						Both signals are worth having. Keepalive is faster and needs no round trip to etcd; set

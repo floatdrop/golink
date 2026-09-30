@@ -14,8 +14,7 @@ export const guidesGrpcprocctl: Doc = {
 			every other node's, so one address reaches the whole cluster. It reads what the node's Go API
 			says, changes what the Inspector lets it change, and serves the same as MCP tools for an{' '}
 			<A to="guides/mcp/">AI agent</A>. It is{' '}
-			<Ext href={file('tools/README.md')}>grpcproc/tools</Ext>, a separate module, so grpcproc
-			itself carries no CLI or MCP dependencies.
+			<Ext href={file('tools/README.md')}>grpcproc/tools</Ext>, a separate module.
 		</p>
 	),
 	sections: [

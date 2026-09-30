@@ -28,12 +28,12 @@ export const conceptsSupervision: Doc = {
 			body: (
 				<>
 					<p>
-						Most code handles errors where they happen. A handler that reads a corrupt record, gets an
-						impossible reply or finds its own state inconsistent has to decide what to do about it,
-						right there, with the information it has, which is usually not enough. The common answers
-						are to log and carry on with state that is now wrong, or to return an error the caller
-						cannot do anything with either. Every handler grows a layer of code for cases its author
-						could only guess at, and the guesses are where the bugs live.
+						Most code handles errors where they happen. A handler that reads a corrupt record, gets
+						an impossible reply or finds its own state inconsistent has to decide what to do right
+						there, with information that is usually not enough. The common answers are to log and
+						carry on with state that is now wrong, or to return an error the caller can do nothing
+						with either. Every handler grows a layer of code for cases its author could only guess
+						at, and the guesses are where the bugs live.
 					</p>
 					<p>
 						The other answer is to stop. A process that meets a state it cannot handle returns an
@@ -67,11 +67,11 @@ export const conceptsSupervision: Doc = {
 						for <C>Down</C> messages.
 					</p>
 					<p>
-						When one arrives, the supervisor reads the reason and the child's restart type, and either
-						starts the child again, and perhaps its siblings, or counts one failure too many and exits
-						itself. It does nothing else. A supervisor holds no application state and answers no
-						application calls, which is what makes it something to trust when everything under it is
-						failing.
+						When one arrives, the supervisor reads the reason and the child's restart type, and
+						either starts the child again, and perhaps its siblings, or counts one failure too many
+						and exits itself. It does nothing else: a supervisor holds no application state and
+						answers no application calls, which is what makes it something to trust when everything
+						under it is failing.
 					</p>
 					<Code>{`sup, err := actor.Supervise(node, actor.Spec{
 	Strategy: actor.OneForOne,
@@ -223,12 +223,12 @@ actor.ChildFunc("", oneOff).WithRestart(actor.Temporary) // anonymous: no name`}
 					<p>
 						A goroutine cannot be killed, so a child that ignores its exit request and outlives its{' '}
 						<C>Shutdown</C> is logged and left behind. That would be the end of it, except that a
-						named child keeps its name until it exits, and the supervisor is about to start something
-						under that name. Nothing is ever started under a name an old process still holds: the
-						supervisor monitors the stubborn child and starts its replacement, and the children after
-						it, only once it is gone, handling its mailbox meanwhile. Its own end waits the same way.
-						A child that never exits therefore holds its restart for good, which is the honest
-						outcome: the alternative, ending the tree, would free nothing.
+						named child keeps its name until it exits, and the supervisor is about to start
+						something under that name. Nothing is ever started under a name an old process still
+						holds: the supervisor monitors the stubborn child and starts its replacement, and the
+						children after it, only once it is gone, handling its mailbox meanwhile. Its own end
+						waits the same way. A child that never exits therefore holds its restart for good, which
+						is the honest outcome: ending the tree instead would free nothing.
 					</p>
 					<p>
 						So a process function must return when <C>Receive</C> returns an error, and a handler

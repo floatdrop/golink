@@ -17,7 +17,7 @@ export const guidesCron: Doc = {
 			on a node or under a supervisor. Every run is a process too, spawned by the cron process and
 			linked to it, so a run's exit reason is its result, a run still going when the next is due can
 			be left alone, skipped or replaced, and one that takes too long is told to exit. It is a
-			separate module, versioned on its own, and depends on grpcproc alone.
+			separate module, versioned on its own.
 		</p>
 	),
 	sections: [

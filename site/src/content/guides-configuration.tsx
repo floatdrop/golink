@@ -171,8 +171,8 @@ export const guidesConfiguration: Doc = {
 },`}</Code>
 					<p>
 						A refused peer gets <C>PermissionDenied</C>, its dial fails, and it backs off like any
-						other failed dial. The Inspector, if the node serves one, is a second gRPC service on the
-						same server and takes the same interceptors; <C>inspect.ReadOnly()</C> refuses its three
+						other failed dial. The Inspector, if the node serves one, is a second gRPC service on
+						the same server and takes the same interceptors; <C>inspect.ReadOnly()</C> refuses its
 						writes outright, for a deployment that shares the node's port without authenticating.{' '}
 						<A to="guides/inspector/">The Inspector</A> has the rest.
 					</p>

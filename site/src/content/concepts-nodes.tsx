@@ -12,10 +12,9 @@ export const conceptsNodes: Doc = {
 		'What a node is, how two nodes are linked, what travels between them and in what order, and what happens when a peer cannot be reached.',
 	lead: (
 		<p>
-			A process lives on a node, and a node lives in a program. Everything on the other pages
-			about processes holds within one node and across nodes alike; this page is about the
-			nodes themselves: how they find each other, what the link between two of them carries,
-			and what a node concludes when the link breaks.
+			A process lives on a node, and a node lives in a program. Everything the other pages say about
+			processes holds within one node and across nodes alike; this page is about the nodes
+			themselves.
 		</p>
 	),
 	sections: [
@@ -25,10 +24,10 @@ export const conceptsNodes: Doc = {
 			body: (
 				<>
 					<p>
-						A node hosts processes and links to the nodes of other programs. It is a value the
-						application constructs, registers on the gRPC server it already runs, starts and
-						stops; grpcproc opens no listener of its own and starts no goroutine outside{' '}
-						<C>Start</C> and <C>Stop</C>. One program normally runs one node.
+						A node hosts processes and links to the nodes of other programs. The application
+						constructs it, registers it on its gRPC server, starts it and stops it; grpcproc opens
+						no listener of its own and starts no goroutine outside <C>Start</C> and <C>Stop</C>. One
+						program normally runs one node.
 					</p>
 					<Code>{`node, err := grpcproc.NewNode(grpcproc.Config{
 	Name:        "warehouse",

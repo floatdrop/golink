@@ -61,14 +61,12 @@ export const shop: Doc = {
 			body: (
 				<>
 					<p>
-						A <em>node</em> is grpcproc in one program: it hosts processes and links to the nodes of
-						other programs. The shop's code comes in four kinds of package. A <em>service</em>{' '}
-						exports one function, <C>Module</C>, which registers with the container what the service
-						needs and, if it runs processes, their supervision tree, the supervisors that start and
-						restart them. A <em>contract</em> is the messages a service's process accepts and the
-						name it is registered under; it is all another service may import. The{' '}
-						<em>platform</em> is what every program runs. An <em>entry point</em> is a <C>main</C>{' '}
-						that picks the services.
+						The shop's code comes in four kinds of package. A <em>service</em> exports one function,{' '}
+						<C>Module</C>, which registers with the container what the service needs and, if it runs
+						processes, their supervision tree. A <em>contract</em> is the messages a service's
+						process accepts and the name it is registered under; it is all another service may
+						import. The <em>platform</em> is what every program runs. An <em>entry point</em> is a{' '}
+						<C>main</C> that picks the services.
 					</p>
 					<Code lang="txt" caption="examples/guide">
 						{treeText}
@@ -103,12 +101,12 @@ export const shop: Doc = {
 					<p>
 						A refusal is part of the answer: <C>Reserved</C> says what is left, or why nothing was
 						reserved, so an error means the stock failed, not that it said no. The registered name
-						is part of the contract too. The package exports the address, made from a node name, as
-						a type of its own: it embeds <C>Addr[*Command]</C>, which carries the message type, so
-						the compiler checks every send to it, wherever the process runs. Its methods are the
-						protocol. <C>Reserve</C> is a call answered with <C>Reserved</C>, <C>Release</C> is a
-						send, and the <C>Command</C> around each is wrapped here, once. Each takes its sender, a
-						node or a process, as a <C>grpcproc.Caller</C>.
+						is part of the contract too. The package exports the address as a type of its own, made
+						from a node name: it embeds <C>Addr[*Command]</C>, so the compiler checks every send to
+						it, wherever the process runs. Its methods are the protocol: <C>Reserve</C> is a call
+						answered with <C>Reserved</C>, <C>Release</C> is a send, and the <C>Command</C> around
+						each is wrapped here, once. Each takes its sender, a node or a process, as a{' '}
+						<C>grpcproc.Caller</C>.
 					</p>
 					<Code caption="proto/inventory/v1/address.go">{inventoryAddress}</Code>
 				</>

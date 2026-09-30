@@ -23,7 +23,7 @@ export const landing: Doc = {
 	path: '',
 	title: 'Overview',
 	description:
-		'Erlang-style processes for Go, on the gRPC server you already run: typed mailboxes, calls, monitors and supervision trees that work the same within a node and across nodes.',
+		'Erlang-style processes for Go: typed mailboxes, calls, monitors and supervision trees that work the same within a node and across nodes.',
 	sections: [
 		{
 			id: 'look',
@@ -103,8 +103,8 @@ export const landing: Doc = {
 						</li>
 						<li>
 							<strong>Mailboxes are typed.</strong> An address carries the message type its process
-							accepts, so a send to it is checked by the compiler, on the same node or another. The
-							messages are the protobuf messages you already define.
+							accepts, so a send to it is checked by the compiler, on the same node or another.
+							Messages are your own protobuf messages.
 						</li>
 						<li>
 							<strong>Failure is a message.</strong> A monitor turns the exit of a process, or the

@@ -13,10 +13,10 @@ export const guidesPubsub: Doc = {
 		'The grpcproc/pubsub package: topics a process publishes to without knowing who listens, subscribed to from any node, with the last few events kept for whoever comes late.',
 	lead: (
 		<p>
-			<C>grpcproc/pubsub</C> is publish/subscribe on top of processes, built on the public API only,
-			as <C>grpcproc/actor</C> is. A process publishes what changes to a topic; any process, on any
-			node, subscribes to it, and the publisher never learns who they are. The code is from{' '}
-			<Ext href={file('examples/pubsub/main.go')}>examples/pubsub</Ext>, whole and runnable.
+			<C>grpcproc/pubsub</C> is publish/subscribe on top of processes, built on the public API only.
+			A process publishes what changes to a topic; any process, on any node, subscribes, and the
+			publisher never learns who they are. The code is from{' '}
+			<Ext href={file('examples/pubsub/main.go')}>examples/pubsub</Ext>.
 		</p>
 	),
 	sections: [

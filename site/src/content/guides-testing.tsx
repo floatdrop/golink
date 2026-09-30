@@ -212,14 +212,13 @@ shop, warehouse := c.Node("shop"), c.Node("warehouse")`}</Code>
 					<p>
 						Two rules keep a test in its bubble. Everything it uses is made inside{' '}
 						<C>synctest.Test</C>: nodes, clusters, channels, contexts; a channel or a timer made
-						outside cannot be used inside. And every process has ended by the time the test does,
-						or synctest reports a deadlock with the goroutines still waiting: stopping the node in{' '}
-						<C>t.Cleanup</C>, as <C>grpcproctest</C> does for its cluster, ends them all, and a
-						process that ignores its exit is then the leak the report shows. Real sockets stay
-						outside: a goroutine blocked on the network is not waiting where the bubble can see it,
-						so a test that listens on a port, as the{' '}
-						<A to="guides/blocking-io/">blocking I/O</A> example does, or talks to etcd, runs on
-						real time.
+						outside cannot be used inside. And every process has ended by the time the test does, or
+						synctest reports a deadlock with the goroutines still waiting: stopping the node in{' '}
+						<C>t.Cleanup</C>, as <C>grpcproctest</C> does, ends them all, and a process that ignores
+						its exit is the leak the report shows. Real sockets stay outside: a goroutine blocked on
+						the network is not waiting where the bubble can see it, so a test that listens on a
+						port, as the <A to="guides/blocking-io/">blocking I/O</A> example does, or talks to
+						etcd, runs on real time.
 					</p>
 				</>
 			)

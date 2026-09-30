@@ -147,10 +147,10 @@ child, ref, err := p.SpawnMonitor(worker)`}</Code>
 
 r, err := stock.Call[*shoppb.Reserved](ctx, p, &shoppb.Stock{Op: &shoppb.Stock_Reserve{Reserve: reserve}})`}</Code>
 					<p>
-						The oneof and the reply type are the protocol, and spelling them at every call is the
-						job of the package that owns the process, not of its callers. It writes each operation
-						once, as a method on an address type of its own, which takes the sender, <C>p</C> or
-						the node, as an argument. The examples' <C>shoppb.StockAddr</C> does, and{' '}
+						The oneof and the reply type are the protocol; spelling them at every call is the job of
+						the package that owns the process, not of its callers. It writes each operation once, as
+						a method on an address type of its own, which takes the sender, <C>p</C> or the node, as
+						an argument. The examples' <C>shoppb.StockAddr</C> does, and{' '}
 						<A to="concepts/addressing/#protocol">an address with its protocol</A> shows how:
 					</p>
 					<Code>{`inventory := shoppb.StockAddr{Addr: stock}
@@ -168,13 +168,12 @@ r, err := inventory.Reserve(ctx, p, reserve)`}</Code>
 					<Code caption="examples/actors/main.go">{region(actors, /^\/\/ HandleCall gets what was sent/, /^}/)}</Code>
 					<p>
 						The caller's deadline travels with the call. <C>m.Deadline()</C> says when the caller
-						stops waiting, and <C>m.Context(parent)</C> gives a context that ends then, so work for a
-						caller that gave up can stop, a deferred reply's above all. Between nodes it travels as
-						the time left, as gRPC's does, so clocks need not agree, and counts from when the call
-						arrives: the callee's deadline is the caller's, or a little after it. It is not applied
-						to the callee's own sends and calls unless it passes that context on, since a callee may
-						have to finish what it started for a caller that stopped waiting. Only the deadline
-						travels, not a caller's cancellation.
+						stops waiting, and <C>m.Context(parent)</C> gives a context that ends then, so work for
+						a caller that gave up can stop, a deferred reply's above all. Between nodes it travels
+						as the time left, as gRPC's does, so clocks need not agree, and counts from when the
+						call arrives. It is not applied to the callee's own sends and calls unless it passes
+						that context on, since a callee may have to finish what it started. Only the deadline
+						travels, not the caller's cancellation.
 					</p>
 					<Code>{`ctx, cancel := m.Context(p.Context())
 defer cancel()
