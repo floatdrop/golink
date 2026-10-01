@@ -12,10 +12,13 @@
 //	})
 //
 // Each node is one key, <prefix>/nodes/<name>, holding its name,
-// incarnation and address as JSON. A node that registers a name already
+// incarnation, address and metadata as JSON. A node that registers a name already
 // present replaces it: a restarted node supersedes its previous
 // incarnation, whose lease has not yet expired. An older incarnation never
 // replaces a newer one.
+//
+// Cluster.Names is the store of the installation's global names, under
+// <prefix>/names/, for Config.Names: see Names.
 package grpcprocetcd
 
 import (
@@ -28,6 +31,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -63,13 +67,19 @@ func WithLogger(l *slog.Logger) Option { return func(c *Cluster) { c.log = l } }
 // Cluster implements grpcproc.Resolver, grpcproc.Registrar and grpcproc.Membership
 // on etcd. One value serves every node of a process.
 type Cluster struct {
-	kv      clientv3.KV
-	lease   clientv3.Lease
-	watcher clientv3.Watcher
-	prefix  string
-	ttl     int64
-	retry   time.Duration
-	log     *slog.Logger
+	kv        clientv3.KV
+	lease     clientv3.Lease
+	watcher   clientv3.Watcher
+	root      string // the prefix New was given, without a trailing slash
+	prefix    string // root + "/nodes/"
+	ttl       int64
+	retry     time.Duration
+	log       *slog.Logger
+	names     atomic.Pointer[Names] // once Names is called: keep tells it of lost and new leases
+	namesOnce sync.Once
+
+	leasesMu sync.Mutex
+	leases   map[string]*atomic.Int64 // by node this Cluster registered: its lease, 0 while lost
 }
 
 var (
@@ -84,11 +94,14 @@ func New(cli *clientv3.Client, prefix string, opts ...Option) *Cluster {
 }
 
 func newCluster(kv clientv3.KV, lease clientv3.Lease, watcher clientv3.Watcher, prefix string, opts ...Option) *Cluster {
+	root := strings.TrimSuffix(prefix, "/")
 	c := &Cluster{
 		kv: kv, lease: lease, watcher: watcher,
-		prefix: strings.TrimSuffix(prefix, "/") + "/nodes/",
+		root:   root,
+		prefix: root + "/nodes/",
 		ttl:    10,
 		retry:  time.Second,
+		leases: map[string]*atomic.Int64{},
 	}
 	for _, o := range opts {
 		o(c)
@@ -98,9 +111,10 @@ func newCluster(kv clientv3.KV, lease clientv3.Lease, watcher clientv3.Watcher, 
 }
 
 type record struct {
-	Name        string `json:"name"`
-	Incarnation uint64 `json:"incarnation"`
-	Addr        string `json:"addr,omitempty"`
+	Name        string            `json:"name"`
+	Incarnation uint64            `json:"incarnation"`
+	Addr        string            `json:"addr,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 func (c *Cluster) key(name string) string { return c.prefix + name }
@@ -110,7 +124,7 @@ func decode(value []byte) (grpcproc.Member, error) {
 	if err := json.Unmarshal(value, &r); err != nil {
 		return grpcproc.Member{}, fmt.Errorf("grpcprocetcd: bad record: %w", err)
 	}
-	return grpcproc.Member{Name: r.Name, Incarnation: r.Incarnation, Addr: r.Addr}, nil
+	return grpcproc.Member{Name: r.Name, Incarnation: r.Incarnation, Addr: r.Addr, Metadata: r.Metadata}, nil
 }
 
 // Resolve returns the address a node registered.
@@ -173,18 +187,26 @@ func (c *Cluster) list(ctx context.Context) (map[string]grpcproc.Member, int64, 
 // key at once.
 func (c *Cluster) Register(ctx context.Context, self grpcproc.Member) (func(context.Context) error, error) {
 	// Cannot fail: a struct of strings and an integer.
-	value, _ := json.Marshal(record{Name: self.Name, Incarnation: self.Incarnation, Addr: self.Addr})
+	value, _ := json.Marshal(record{Name: self.Name, Incarnation: self.Incarnation, Addr: self.Addr, Metadata: self.Metadata})
 	id, err := c.publish(ctx, self, value)
 	if err != nil {
 		return nil, err
 	}
-	var lease atomic.Int64
+	lease := &atomic.Int64{}
 	lease.Store(int64(id))
+	c.leasesMu.Lock()
+	c.leases[self.Name] = lease
+	c.leasesMu.Unlock()
 	kctx, stop := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go c.keep(kctx, self, value, &lease, done)
+	go c.keep(kctx, self, value, lease, done)
 	return func(ctx context.Context) error {
 		stop()
+		c.leasesMu.Lock()
+		if c.leases[self.Name] == lease {
+			delete(c.leases, self.Name)
+		}
+		c.leasesMu.Unlock()
 		select {
 		case <-done:
 		case <-ctx.Done():
@@ -250,16 +272,24 @@ func (c *Cluster) claim(ctx context.Context, self grpcproc.Member, value []byte,
 	}
 }
 
+// leaseOf is the lease node was registered with by this Cluster, or 0.
+func (c *Cluster) leaseOf(node string) clientv3.LeaseID {
+	c.leasesMu.Lock()
+	defer c.leasesMu.Unlock()
+	if lease := c.leases[node]; lease != nil {
+		return clientv3.LeaseID(lease.Load())
+	}
+	return 0
+}
+
 // keep keeps the lease alive until ctx is done, registering again when it
-// is lost, until a newer incarnation of self is registered.
+// is lost, until a newer incarnation of self is registered. The node's
+// global names are lost with the lease, and those claimed with KeepOnLoss
+// are claimed again under the next one.
 func (c *Cluster) keep(ctx context.Context, self grpcproc.Member, value []byte, lease *atomic.Int64, done chan<- struct{}) {
 	defer close(done)
 	for {
-		alive, err := c.lease.KeepAlive(ctx, clientv3.LeaseID(lease.Load()))
-		if err == nil {
-			for range alive {
-			}
-		}
+		err := c.alive(ctx, clientv3.LeaseID(lease.Load()))
 		for {
 			if ctx.Err() != nil {
 				return
@@ -267,6 +297,9 @@ func (c *Cluster) keep(ctx context.Context, self grpcproc.Member, value []byte, 
 			// The lease is gone, and nothing is published under it: a
 			// withdraw while this registers again has nothing to revoke.
 			lease.Store(0)
+			if n := c.names.Load(); n != nil {
+				n.lost(self.Name)
+			}
 			c.log.Warn("lease lost, registering again", "node", self.Name, "err", err)
 			select {
 			case <-ctx.Done():
@@ -276,6 +309,9 @@ func (c *Cluster) keep(ctx context.Context, self grpcproc.Member, value []byte, 
 			var id clientv3.LeaseID
 			if id, err = c.publish(ctx, self, value); err == nil {
 				lease.Store(int64(id))
+				if n := c.names.Load(); n != nil {
+					go n.regained(self.Name, id)
+				}
 				break
 			}
 			if errors.Is(err, ErrSuperseded) {
@@ -283,6 +319,35 @@ func (c *Cluster) keep(ctx context.Context, self grpcproc.Member, value []byte, 
 				lease.Store(0)
 				return
 			}
+		}
+	}
+}
+
+// alive keeps lease alive until ctx is done, or until it is lost: etcd let
+// it end, or it has not been kept alive for three quarters of the TTL. The
+// node's global names are lost then, before etcd can let the lease end and
+// another node claim them, as long as the two clocks run at the same rate:
+// etcd counts the TTL from when a keepalive arrived, which is after this
+// node saw the one before it answered.
+func (c *Cluster) alive(ctx context.Context, lease clientv3.LeaseID) error {
+	kctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	answers, err := c.lease.KeepAlive(kctx, lease)
+	if err != nil {
+		return err
+	}
+	within := time.Duration(c.ttl) * time.Second * 3 / 4
+	t := time.NewTimer(within)
+	defer t.Stop()
+	for {
+		select {
+		case _, ok := <-answers:
+			if !ok {
+				return errors.New("the lease ended")
+			}
+			t.Reset(within)
+		case <-t.C:
+			return fmt.Errorf("the lease was not kept alive within %v", within)
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/url"
+	"reflect"
 	"testing"
 	"time"
 
@@ -115,7 +116,7 @@ func TestRegisterResolveAndMembers(t *testing.T) {
 func TestWatch(t *testing.T) {
 	cli := startEtcd(t)
 	c := grpcprocetcd.New(cli, "/w")
-	_, _ = c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 1, Addr: "a:1"})
+	_, _ = c.Register(t.Context(), grpcproc.Member{Name: "a", Incarnation: 1, Addr: "a:1", Metadata: map[string]string{"version": "1.2"}})
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	events, err := c.Watch(ctx)
@@ -123,7 +124,8 @@ func TestWatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The snapshot first.
-	if ev := next(t, events); !ev.Up || ev.Member != (grpcproc.Member{Name: "a", Incarnation: 1, Addr: "a:1"}) {
+	// The snapshot carries the metadata a node registered with.
+	if ev := next(t, events); !ev.Up || !reflect.DeepEqual(ev.Member, grpcproc.Member{Name: "a", Incarnation: 1, Addr: "a:1", Metadata: map[string]string{"version": "1.2"}}) {
 		t.Fatalf("%+v", ev)
 	}
 	wb, _ := c.Register(t.Context(), grpcproc.Member{Name: "b", Incarnation: 1, Addr: "b:1"})
@@ -132,7 +134,7 @@ func TestWatch(t *testing.T) {
 	}
 	// b stops: a down with its incarnation.
 	_ = wb(t.Context())
-	if ev := next(t, events); ev.Up || ev.Member != (grpcproc.Member{Name: "b", Incarnation: 1, Addr: "b:1"}) {
+	if ev := next(t, events); ev.Up || !reflect.DeepEqual(ev.Member, grpcproc.Member{Name: "b", Incarnation: 1, Addr: "b:1"}) {
 		t.Fatalf("%+v", ev)
 	}
 	// a restarts before its old lease expired: the new incarnation replaces it.
@@ -143,7 +145,7 @@ func TestWatch(t *testing.T) {
 	// Garbage is skipped; deleting it is a down for whichever incarnation.
 	_, _ = cli.Put(t.Context(), "/w/nodes/junk", "{")
 	_, _ = cli.Delete(t.Context(), "/w/nodes/junk")
-	if ev := next(t, events); ev.Up || ev.Member != (grpcproc.Member{Name: "junk"}) {
+	if ev := next(t, events); ev.Up || !reflect.DeepEqual(ev.Member, grpcproc.Member{Name: "junk"}) {
 		t.Fatalf("%+v", ev)
 	}
 	_ = wa2(t.Context())

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/url"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -26,8 +27,22 @@ var errInjected = errors.New("injected")
 type faultKV struct {
 	clientv3.KV
 	failGets atomic.Int32 // fail this many Gets
-	txnErr   error
-	between  func() // runs before the next Txn commits
+	failTxn  atomic.Int32 // fail this many Txn commits, before between runs
+	mu       sync.Mutex
+	txnErr   error  // fails every Txn while set; guarded by mu
+	between  func() // runs before the next Txn commits; guarded by mu
+}
+
+func (f *faultKV) failTxns(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.txnErr = err
+}
+
+func (f *faultKV) beforeNextTxn(fn func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.between = fn
 }
 
 func (f *faultKV) Get(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
@@ -46,13 +61,22 @@ type faultTxn struct {
 
 func (t *faultTxn) If(cs ...clientv3.Cmp) clientv3.Txn   { t.Txn = t.Txn.If(cs...); return t }
 func (t *faultTxn) Then(ops ...clientv3.Op) clientv3.Txn { t.Txn = t.Txn.Then(ops...); return t }
+func (t *faultTxn) Else(ops ...clientv3.Op) clientv3.Txn { t.Txn = t.Txn.Else(ops...); return t }
 
 func (t *faultTxn) Commit() (*clientv3.TxnResponse, error) {
-	if t.kv.txnErr != nil {
-		return nil, t.kv.txnErr
+	if t.kv.failTxn.Add(-1) >= 0 {
+		return nil, errInjected
 	}
-	if f := t.kv.between; f != nil {
+	t.kv.mu.Lock()
+	err, f := t.kv.txnErr, t.kv.between
+	if err == nil {
 		t.kv.between = nil
+	}
+	t.kv.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if f != nil {
 		f()
 	}
 	return t.Txn.Commit()
@@ -63,6 +87,7 @@ type faultLease struct {
 	grants     atomic.Int32
 	failGrants atomic.Int32 // fail this many Grants
 	failKeeps  atomic.Int32 // fail this many KeepAlives
+	silent     atomic.Bool  // KeepAlives that are never answered
 	revoked    atomic.Int32
 	// hang has Revoke wait for ctx, as clientv3's does when etcd is out of
 	// reach, closing hanging first.
@@ -81,6 +106,11 @@ func (f *faultLease) Grant(ctx context.Context, ttl int64) (*clientv3.LeaseGrant
 func (f *faultLease) KeepAlive(ctx context.Context, id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	if f.failKeeps.Add(-1) >= 0 {
 		return nil, errInjected
+	}
+	if f.silent.Load() { // sent, and never answered
+		ch := make(chan *clientv3.LeaseKeepAliveResponse)
+		context.AfterFunc(ctx, func() { close(ch) })
+		return ch, nil
 	}
 	return f.Lease.KeepAlive(ctx, id)
 }
@@ -194,14 +224,14 @@ func TestEtcdErrorsSurface(t *testing.T) {
 	if _, err := e.c.Register(t.Context(), grpcproc.Member{Name: "a"}); !errors.Is(err, errInjected) {
 		t.Fatalf("Register (grant): %v", err)
 	}
-	e.kv.txnErr = errInjected
+	e.kv.failTxns(errInjected)
 	if _, err := e.c.Register(t.Context(), grpcproc.Member{Name: "a"}); !errors.Is(err, errInjected) {
 		t.Fatalf("Register (txn): %v", err)
 	}
 	if e.lease.revoked.Load() != 1 {
 		t.Fatal("the lease of a failed put was not revoked")
 	}
-	e.kv.txnErr = nil
+	e.kv.failTxns(nil)
 	e.kv.failGets.Store(1)
 	if _, err := e.c.Register(t.Context(), grpcproc.Member{Name: "a"}); !errors.Is(err, errInjected) {
 		t.Fatalf("Register (get): %v", err)
@@ -234,15 +264,15 @@ func TestClaimJudgesARegistrationThatCameMeanwhile(t *testing.T) {
 	put := func(inc uint64) func() {
 		return func() { _, _ = e.cli.Put(t.Context(), "/x/nodes/b", fmt.Sprintf(`{"name":"b","incarnation":%d}`, inc)) }
 	}
-	e.kv.between = put(2)
+	e.kv.beforeNextTxn(put(2))
 	if err := register(1); !errors.Is(err, ErrSuperseded) || err.Error() != ErrSuperseded.Error()+": b#2, and this node is b#1" {
 		t.Fatalf("got %v", err)
 	}
-	e.kv.between = put(1)
+	e.kv.beforeNextTxn(put(1))
 	if err := register(3); err != nil || registered() != 3 {
 		t.Fatal(err, registered())
 	}
-	e.kv.between = put(5)
+	e.kv.beforeNextTxn(put(5))
 	if err := register(4); !errors.Is(err, ErrSuperseded) || registered() != 5 {
 		t.Fatal(err, registered())
 	}
@@ -414,7 +444,7 @@ func TestWatchRecoversFromABrokenWatch(t *testing.T) {
 		{Member: grpcproc.Member{Name: "c", Incarnation: 1, Addr: "c:1"}, Up: true},
 	}
 	for _, w := range want {
-		if ev := next(t, events); ev != w {
+		if ev := next(t, events); !reflect.DeepEqual(ev, w) {
 			t.Fatalf("got %+v, want %+v", ev, w)
 		}
 	}

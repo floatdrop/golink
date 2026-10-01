@@ -31,9 +31,11 @@ cluster := grpcprocetcd.New(etcdClient, "/grpcproc/prod")
 node, err := grpcproc.NewNode(grpcproc.Config{
 	Name:       "orders-1",
 	Advertise:  "10.0.0.5:9000", // this node's gRPC server, as peers reach it
+	Metadata:   map[string]string{"version": buildVersion},
 	Resolver:   cluster,
 	Registrar:  cluster,
 	Membership: cluster,
+	Names:      cluster.Names(), // global names, optional
 })
 err = node.Start(ctx) // registers; Stop withdraws`}</Code>
 					<p>
@@ -152,6 +154,32 @@ err = node.Start(ctx) // registers; Stop withdraws`}</Code>
 						<A to="guides/configuration/#connections">Configuring a node</A> shows. The lease catches
 						what keepalive misses, and it is what removes a dead node from the addresses peers
 						resolve.
+					</p>
+				</>
+			)
+		},
+		{
+			id: 'names',
+			title: 'Global names',
+			body: (
+				<>
+					<p>
+						<C>cluster.Names()</C> keeps the installation's{' '}
+						<A to="concepts/addressing/#global">global names</A>: one key per name,{' '}
+						<C>&lt;prefix&gt;/names/&lt;name&gt;</C>, holding its holder's PID, under the lease of the
+						holder's node, so a node that dies takes its names with it as its peers drop their links
+						to it. A claim is a transaction that creates the key; a release deletes it if its create
+						revision is still the claim's, which is also the fencing token. Every node of a program
+						shares one copy of the names, listed a page at a time when the first starts and kept by
+						a watch, so a send to a global name never waits on etcd.
+					</p>
+					<p>
+						A node's claims are lost once its lease has not been kept alive for three quarters of
+						the TTL: their holders end with <C>name lost</C> before etcd can let the lease end and
+						another node claim the names. Claims made with <C>KeepOnLoss</C> keep their holders
+						running, and are made again together once the node has registered again: a key that
+						outlived the old lease moves to the new one with its revision, and a name another process
+						took meanwhile ends the holder with <C>name conflict</C>.
 					</p>
 				</>
 			)
