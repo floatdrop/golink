@@ -128,9 +128,19 @@ type Config struct {
 	// keepalive, interceptors. Keepalive is what turns a silent partition
 	// into a link error; set it.
 	DialOptions []grpc.DialOption
-	// Authorize, if set, runs for every inbound link with the peer's
-	// transport credentials in ctx (grpc/peer) and the identity it claims.
-	Authorize func(ctx context.Context, peer NodeID) error
+	// DialOptionsFor, if set, gives more options for the connections to one
+	// peer, its link's and Dial's. They come after DialOptions, so they
+	// override them: the credentials of another installation, whose nodes
+	// present certificates of another CA, say.
+	DialOptionsFor func(peer string) []grpc.DialOption
+	// Admit, if set, runs for every inbound link before it is accepted, with
+	// the peer's transport credentials in ctx (grpc/peer) and the identity it
+	// claims. An error refuses the link: the peer's dial fails with
+	// PermissionDenied. Otherwise the Policy it returns judges everything the
+	// peer asks over the link, for as long as the link lasts: messages,
+	// calls, monitors and links, exits. A nil Policy lets everything through,
+	// as a nil Admit does.
+	Admit func(ctx context.Context, peer NodeID) (Policy, error)
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
 	// Hooks is the observability tap; nil means none.
@@ -675,7 +685,8 @@ func (n *Node) Peers() []string {
 }
 
 // Dial opens a connection to peer's gRPC server as the node reaches it,
-// through Config.Resolver and with Config.DialOptions, credentials and all:
+// through Config.Resolver and with Config.DialOptions and DialOptionsFor,
+// credentials and all:
 // for a service registered there beside grpcproc's own, the peer's Inspector
 // say. ctx bounds resolving peer's address. The connection is the caller's
 // to close; the node's links do not use it.
@@ -684,7 +695,16 @@ func (n *Node) Dial(ctx context.Context, peer string) (*grpc.ClientConn, error) 
 	if err != nil {
 		return nil, err
 	}
-	return grpc.NewClient(addr, n.cfg.DialOptions...)
+	return grpc.NewClient(addr, n.dialOptions(peer)...)
+}
+
+// dialOptions are the options for connections to peer: Config.DialOptions,
+// then whatever DialOptionsFor adds, which therefore wins.
+func (n *Node) dialOptions(peer string) []grpc.DialOption {
+	if n.cfg.DialOptionsFor == nil {
+		return n.cfg.DialOptions
+	}
+	return append(slices.Clip(n.cfg.DialOptions), n.cfg.DialOptionsFor(peer)...)
 }
 
 // Membership returns Config.Membership, or nil: for a component that follows
@@ -1135,11 +1155,23 @@ func (n *Node) deadLetter(from, to PID, body proto.Message, reason string) {
 }
 
 // dispatch handles an envelope that arrived on the inbound link from peer:
-// its sender is a process of peer, its target one of this node.
-func (n *Node) dispatch(peer string, env *grpcprocv1.Envelope) {
+// its sender is a process of peer, its target one of this node. pol, the
+// link's Policy, judges what the peer asks; what it refuses is answered as
+// for a process that does not exist.
+func (n *Node) dispatch(peer string, pol Policy, env *grpcprocv1.Envelope) {
 	from := PID{Node: peer, Incarnation: env.GetFromIncarnation(), ID: env.GetFromId()}
 	to := PID{Node: n.id.Name, Incarnation: env.GetToIncarnation(), ID: env.GetToId()}
 	name, ref := env.GetToName(), env.GetRef()
+	if op := opOf(env.GetKind()); pol != nil && op != 0 && !n.admits(pol, op, to, name) {
+		n.deadLetter(from, to, nil, ReasonDenied)
+		switch op {
+		case OpCall:
+			_ = n.reply(to, from, ref, answerTo{}, nil, grpcprocv1.Status_STATUS_NOPROC, "", true)
+		case OpMonitor:
+			_ = n.down(to, from, ref, ReasonNoProc, true)
+		}
+		return
+	}
 	switch env.GetKind() {
 	case grpcprocv1.Kind_KIND_SEND:
 		body, err := decodeBody(env)

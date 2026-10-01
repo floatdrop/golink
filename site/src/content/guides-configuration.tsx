@@ -33,11 +33,12 @@ export const guidesConfiguration: Doc = {
 						[<C>Registrar</C>, 'None. Publishes the node on Start, withdraws it on Stop.'],
 						[<C>Membership</C>, 'None. The cluster\'s view of who is alive, watched from Start.'],
 						[<C>DialOptions</C>, 'None. Credentials, keepalive and interceptors for every outbound connection.'],
+						[<C>DialOptionsFor</C>, 'None. More options for the connections to one peer, after DialOptions, so they win.'],
 						[<C>DialTimeout</C>, '5s. Bounds a dial: resolve, connect, handshake.'],
 						[<C>DialBackoff</C>, '5s. The longest wait before dialing a peer again after failed dials; negative dials again at once.'],
 						[<C>MaxQueued</C>, 'None. How many envelopes the link to a peer may hold before sends and calls to it fail at once.'],
 						[<C>MaxQueuedBytes</C>, 'None. The same bound, in bytes of message bodies.'],
-						[<C>Authorize</C>, 'None. Runs for every inbound link with the peer\'s credentials and claimed identity.'],
+						[<C>Admit</C>, 'None. Runs for every inbound link: refuses it, or admits it with a Policy of what the peer may ask.'],
 						[<C>Logger</C>, 'slog.Default().'],
 						[<C>Hooks</C>, 'None. The observability tap.'],
 						[<C>CopyLocal</C>, 'Off. Clone every locally delivered message.']
@@ -152,26 +153,59 @@ export const guidesConfiguration: Doc = {
 						<C>grpc.WithTransportCredentials</C> in <C>DialOptions</C>. The node's identity travels
 						in the stream's metadata: its name, incarnation and protocol version. Nothing checks by
 						itself that the certificate a peer presents belongs to the name it claims; that is what{' '}
-						<C>Authorize</C> is for. It runs for every inbound link, with the peer's transport
+						<C>Admit</C> is for. It runs for every inbound link, with the peer's transport
 						credentials in the ctx, before the link is accepted:
 					</p>
-					<Code>{`Authorize: func(ctx context.Context, peer grpcproc.NodeID) error {
+					<Code>{`Admit: func(ctx context.Context, peer grpcproc.NodeID) (grpcproc.Policy, error) {
 	p, ok := grpcpeer.FromContext(ctx) // google.golang.org/grpc/peer
 	if !ok {
-		return errors.New("no peer")
+		return nil, errors.New("no peer")
 	}
 	tls, ok := p.AuthInfo.(credentials.TLSInfo)
 	if !ok || len(tls.State.PeerCertificates) == 0 {
-		return errors.New("no client certificate")
+		return nil, errors.New("no client certificate")
 	}
 	if cn := tls.State.PeerCertificates[0].Subject.CommonName; cn != peer.Name {
-		return fmt.Errorf("certificate %q does not match node %q", cn, peer.Name)
+		return nil, fmt.Errorf("certificate %q does not match node %q", cn, peer.Name)
+	}
+	return nil, nil // a nil Policy: the peer may ask anything
+},`}</Code>
+					<p>
+						A refused peer gets <C>PermissionDenied</C>, its dial fails, and it backs off like any
+						other failed dial.
+					</p>
+					<p>
+						An admitted peer may ask anything of any process, <C>Exit</C> included, which a process
+						cannot trap. That suits the nodes of one installation. A node of another one, a
+						partner's or a tenant's, gets a <C>Policy</C> instead: it judges every message, call,
+						monitor and exit the peer sends over the link, by the name of the process it is for.{' '}
+						<C>grpcproc.Export</C> is the usual one: the names listed, by name or PID, for sends,
+						calls and monitors, and no exits. What a policy refuses does not exist for the peer: a
+						call fails with <C>ErrNoProc</C>, a monitor gets <C>Down{'{'}noproc{'}'}</C>, and this
+						node counts a dead letter with reason <C>denied</C>, which <C>grpcprocctl watch</C>{' '}
+						shows.
+					</p>
+					<Code>{`Admit: func(ctx context.Context, peer grpcproc.NodeID) (grpcproc.Policy, error) {
+	if err := checkCertificate(ctx, peer); err != nil {
+		return nil, err
+	}
+	if strings.HasPrefix(peer.Name, "partner-") {
+		return grpcproc.Export("quotes", "orders"), nil
+	}
+	return nil, nil
+},
+DialOptionsFor: func(peer string) []grpc.DialOption {
+	if strings.HasPrefix(peer, "partner-") { // another CA, another client certificate
+		return []grpc.DialOption{grpc.WithTransportCredentials(partnerCreds)}
 	}
 	return nil
 },`}</Code>
 					<p>
-						A refused peer gets <C>PermissionDenied</C>, its dial fails, and it backs off like any
-						other failed dial. The Inspector, if the node serves one, is a second gRPC service on
+						<C>DialOptionsFor</C> gives the connections to one peer options of their own, after{' '}
+						<C>DialOptions</C>, so they win: the credentials for another installation's CA, here.
+						Replies and <C>Down</C>s always pass a policy, since they answer what this node asked, so
+						a process here can call and monitor the partner's processes whatever the partner may
+						reach here. The Inspector, if the node serves one, is a second gRPC service on
 						the same server and takes the same interceptors; <C>inspect.ReadOnly()</C> refuses its
 						writes outright, for a deployment that shares the node's port without authenticating.{' '}
 						<A to="guides/inspector/">The Inspector</A> has the rest.

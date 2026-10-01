@@ -321,18 +321,18 @@ func TestInboundRejections(t *testing.T) {
 	})
 }
 
-func TestAuthorize(t *testing.T) {
+func TestAdmitRefuses(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ln := bufconn.Listen(1 << 20)
 		srv := grpc.NewServer()
 		n, err := grpcproc.NewNode(grpcproc.Config{
 			Name:     "b",
 			Resolver: grpcproc.StaticResolver{},
-			Authorize: func(_ context.Context, peer grpcproc.NodeID) error {
+			Admit: func(_ context.Context, peer grpcproc.NodeID) (grpcproc.Policy, error) {
 				if peer.Name != "trusted" {
-					return errors.New("unknown peer " + peer.Name)
+					return nil, errors.New("unknown peer " + peer.Name)
 				}
-				return nil
+				return nil, nil
 			},
 		})
 		if err != nil {

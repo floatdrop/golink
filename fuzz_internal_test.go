@@ -155,7 +155,7 @@ func FuzzDispatch(f *testing.F) {
 		synctest.Test(t, func(t *testing.T) {
 			n, pending := fuzzNode(t)
 			for _, env := range fr.GetEnvelopes() {
-				n.dispatch("b", env)
+				n.dispatch("b", nil, env)
 			}
 			synctest.Wait()
 			// A pending call is answered once at most, and with a result a

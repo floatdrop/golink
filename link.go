@@ -427,7 +427,7 @@ func (n *Node) dial(peer string) (*outLink, error) {
 		}
 		return nil, err
 	}
-	cc, err := grpc.NewClient(addr, n.cfg.DialOptions...)
+	cc, err := grpc.NewClient(addr, n.dialOptions(peer)...)
 	if err != nil {
 		return nil, err
 	}
@@ -509,7 +509,8 @@ func handshake(peer string, stream grpc.BidiStreamingClient[grpcprocv1.Frame, gr
 // ---------- inbound ----------
 
 type inLink struct {
-	peer NodeID
+	peer   NodeID
+	policy Policy // from Config.Admit; nil lets everything through
 	// done is closed when the link ends from this side: closed (why is nil),
 	// or cut, when this node cannot route a reply or a Down back to the peer
 	// (routeOrCut; why says why).
@@ -557,7 +558,7 @@ func (l *inLink) deliver(n *Node, f *grpcprocv1.Frame) bool {
 		return false
 	}
 	for _, env := range f.GetEnvelopes() {
-		n.dispatch(l.peer.Name, env)
+		n.dispatch(l.peer.Name, l.policy, env)
 	}
 	_, body := frameOf(f.GetEnvelopes())
 	l.messages.Add(uint64(len(f.GetEnvelopes())))
@@ -600,8 +601,10 @@ func (n *Node) serveLink(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcp
 	case peer.Name == "" || peer.Name == n.id.Name:
 		return status.Errorf(codes.InvalidArgument, "grpcproc: bad node name %q", peer.Name)
 	}
-	if n.cfg.Authorize != nil {
-		if err := n.cfg.Authorize(ctx, peer); err != nil {
+	var pol Policy
+	if n.cfg.Admit != nil {
+		var err error
+		if pol, err = n.cfg.Admit(ctx, peer); err != nil {
 			n.log.Warn("rejected peer", "peer", peer, "err", err)
 			return status.Errorf(codes.PermissionDenied, "grpcproc: %v", err)
 		}
@@ -619,7 +622,7 @@ func (n *Node) serveLink(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcp
 		return err
 	}
 
-	l := &inLink{peer: peer, done: make(chan struct{}), established: time.Now()}
+	l := &inLink{peer: peer, policy: pol, done: make(chan struct{}), established: time.Now()}
 	// A new stream from a peer we already have one from means the peer lost
 	// its session with us (it restarted, or its side broke): the old one ends
 	// first, as do links with an older incarnation. The new link goes in only

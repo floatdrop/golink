@@ -208,14 +208,16 @@ if errors.Is(err, grpcproc.ErrNoConnection) {
 							[<C>max restarts</C>, <>A supervisor restarted its children more often than its <C>Spec</C> allows. Abnormal, so its own supervisor restarts it.</>],
 							[<C>noproc</C>, <>Only in a <C>Down</C> or through a link: the monitored process does not exist. No process ever exits with it.</>],
 							[<C>noconnection</C>, <>Only in a <C>Down</C> or through a link: the node the process runs on cannot be reached. Its monitors and links fire with it; the process itself may still run.</>],
-							[<C>type</C>, <>A dead letter's reason: the message was not of the type the process accepts. Not an exit reason.</>]
+							[<C>type</C>, <>A dead letter's reason: the message was not of the type the process accepts. Not an exit reason.</>],
+							[<C>denied</C>, <>A dead letter's reason: the <C>Policy</C> the peer was admitted with refused its request, which the peer sees as <C>noproc</C>. Not an exit reason.</>]
 						]}
 					/>
 					<p>
 						A supervisor reads the reason to decide on a restart: a <C>Transient</C> child comes back
 						after any reason but <C>normal</C> and <C>shutdown</C>, and a process linked to another
-						takes the target's reason as it is, <C>normal</C> included. Only the last two rows come
-						from the node rather than a process, and only monitors and links carry them.{' '}
+						takes the target's reason as it is, <C>normal</C> included. <C>noproc</C> and{' '}
+						<C>noconnection</C> come from the node rather than a process, and only monitors and links
+						carry them.{' '}
 						<A to="concepts/monitors-and-links/">Monitors and links</A> has the rules.
 					</p>
 				</>
@@ -246,8 +248,10 @@ if errors.Is(err, grpcproc.ErrNoConnection) {
 				<>
 					<p>
 						A dead letter is a message that was sent and could not be delivered: to a process that
-						does not exist (<C>noproc</C>), to one that does not accept its type (<C>type</C>), or
-						queued on a link that broke before or while writing it (<C>noconnection</C>). A message
+						does not exist (<C>noproc</C>), to one that does not accept its type (<C>type</C>), to
+						one the sender's node may not reach (<C>denied</C>, see{' '}
+						<A to="guides/configuration/#security">Security</A>), or queued on a link that broke before
+						or while writing it (<C>noconnection</C>). A message
 						that could not be sent at all is not one: its sender got the error. A <C>Send</C> to no
 						process succeeds and becomes a dead letter, because a send has no reply to carry the
 						failure on; a <C>Call</C> in the same situation fails with <C>ErrNoProc</C>.
