@@ -1,4 +1,4 @@
-# grpcproc — design and roadmap
+# grpcproc — design
 
 `grpcproc` gives goroutines Erlang-style network transparency on top of the gRPC
 server a service already runs. A process is addressed by a PID or a name; the
@@ -19,9 +19,10 @@ It is a library, not a framework, in the same sense that `fsm` and `di` are:
   in another dependency (etcd, OpenTelemetry) is a separate Go module that
   plugs into an interface the core defines.
 
-This document lists what to build, in what order, and what was looked at in
+This document describes how grpcproc works and why, what was looked at in
 other frameworks to decide it (ergo.services, Proto.Actor, GoAkt, Hollywood,
-go-actor, Erlang/OTP).
+go-actor, Erlang/OTP, Akka, Orleans), what was rejected, and what is still
+open.
 
 ## The shape at a glance
 
@@ -50,32 +51,38 @@ addr, _ := node.Spawn[*orderspb.OrderMsg](func(p *grpcproc.Process[*orderspb.Ord
     }
 }, grpcproc.WithName("reservations"), grpcproc.WithLabel("order"))
 
+// From any node: the node itself, or a process (inside its function), sends.
+addr.Send(ctx, node, &orderspb.OrderMsg{Kind: &orderspb.OrderMsg_Reserve{}}) // compile-time typed
+resp, err := addr.Call[*orderspb.Reserved](ctx, node, &orderspb.OrderMsg{})  // reply typed by R
+
+// Inside a process: watch something on another node.
 ref := p.Monitor(grpcproc.Name{Node: "billing-2", Name: "ledger"})
-addr.Send(ctx, p, &orderspb.OrderMsg{Kind: &orderspb.OrderMsg_Reserve{}})   // compile-time typed
-resp, err := addr.Call[*orderspb.Reserved](ctx, node, &orderspb.OrderMsg{}) // reply typed by R
 ```
 
 ## Package layout
 
 ```
 grpcproc/                    core: Node, Process, PID, Send/Call/Monitor/Link/Exit, node links, inspection API
-grpcproc/proto/grpcproc/v1       wire protocol (.proto + generated code)
+grpcproc/proto/grpcproc/v1       wire protocol (.proto + generated code); inspect/v1, actor/v1, pubsub/v1 beside it
 grpcproc/grpcproctest            in-memory clusters over bufconn: Cluster, Partition, Kill
-grpcproc/inspect             grpcproc.v1.Inspector gRPC service (optional to register); its Go client is tools/client
+grpcproc/inspect             grpcproc.inspect.v1.Inspector gRPC service (optional to register); its Go client is tools/client
 grpcproc/actor               optional helpers: handler loop, supervisor
 grpcproc/pubsub              optional: topics with a replay buffer, relayed once per node
 grpcproc/etcd     (nested module)   Resolver + Registrar + Membership on etcd leases
 grpcproc/otel     (nested module)   Hooks implementation: OTel metrics + trace propagation
-grpcproc/tools    (nested module)   grpcprocctl: CLI, Graphviz and MCP server over the Inspector
+grpcproc/tools    (nested module)   grpcprocctl over the Inspector: CLI, Graphviz, MCP server, web UI
 grpcproc/cron     (nested module)   jobs on crontab schedules, every run a process
 grpcproc/leader   (nested module)   leader election, and a singleton that runs on the leader with its state
+grpcproc/examples (nested module)   runnable examples and the shop the site's tutorial builds
+grpcproc/benchmarks (nested module) grpcproc against GoAkt, Hollywood, Proto.Actor and Ergo
+site/                            the documentation site
 ```
 
-`grpcproctest` ships with the first release: the best argument for network
+`grpcproctest` is part of the core module: the best argument for network
 transparency is that a three-node scenario, including a node dying, runs in a
 plain `go test` with no sockets and no etcd.
 
-## Core (v0.1)
+## Core
 
 ### Identity
 
@@ -109,9 +116,9 @@ as long as clocks agree to within the time between two starts, and a random
 one would be refused whenever it came out lower than the last. It fences grpcproc traffic only: an old instance
 can still write to a database, which needs fencing of its own.
 
-Names are per node. A cluster-wide registry is a later, etcd-backed feature;
-Erlang's `global` is the model and it is deliberately separate from local
-registration.
+Names are per node. A cluster-wide registry is open work, etcd-backed (see
+Open work); it is deliberately separate from local registration, as
+Erlang's `global` is.
 
 ### Wire protocol
 
@@ -170,15 +177,15 @@ message Envelope {                                   // one flat message, decode
   `keepalive.ClientParameters`, server `keepalive.ServerParameters`) is what
   turns a silent partition into a stream error in seconds; the library does
   not set it, the application's gRPC configuration does.
-- **A failed dial backs off.** `Config.DialTimeout` bounds a dial, and after
-  one fails, everything routed to that peer fails at once with
-  `ErrNoConnection` for a while, rather than each wait out a dial of its own:
-  a process sending to a dead or hung node would otherwise stall for
+- **A failed dial backs off.** `Config.DialTimeout` (5s by default) bounds a
+  dial, and after one fails, everything routed to that peer fails at once
+  with `ErrNoConnection` for a while, rather than each wait out a dial of its
+  own: a process sending to a dead or hung node would otherwise stall for
   `DialTimeout` per send. The wait starts at a 32nd of `Config.DialBackoff`
-  and doubles to it, with jitter. Then one send dials again while the others
-  keep failing, so a hung peer holds one sender at a time: a half-open
-  breaker. `Membership` reporting the peer up (not as an older incarnation)
-  ends the wait. A link the peer opens lets the next send dial at once but
+  (5s by default) and doubles to it, with jitter. Then one send dials again
+  while the others keep failing, so a hung peer holds one sender at a time:
+  a half-open breaker. `Membership` reporting the peer up (not as an older
+  incarnation) ends the wait, and so does `Node.Disconnect`. A link the peer opens lets the next send dial at once but
   keeps the doubling: it shows the peer is up, not that this node can reach
   it, and in a one-way partition every reply would otherwise wait out a dial
   again. `LinkInfo` shows the peer as a down outbound link with its
@@ -251,19 +258,25 @@ type Addr[M proto.Message] struct { /* PID or Name, plus the phantom type M */ }
 
 func (n *Node) Spawn[M proto.Message](fn func(*Process[M]) error, opts ...SpawnOption) (Addr[M], error)
 func Named[M proto.Message](node, name string) Addr[M]   // remote by name; checked on delivery
+func AddrOf[M proto.Message](t Target) Addr[M]           // a PID or a Name, typed
 func (a Addr[M]) PID() PID
+func (a Addr[M]) Node() string
+func (a Addr[M]) Name() string
 func (a Addr[M]) Call[R proto.Message](ctx, from Caller, req M) (R, error) // from: a *Node or a *Process
+func (a Addr[M]) CallMonitor[R proto.Message](ctx, from Caller, req M) (R, Ref, error) // from a process; see Remote spawn
+func (a Addr[M]) CallLink[R proto.Message](ctx, from Caller, req M) (R, error)
 func (a Addr[M]) Send(ctx, from Caller, m M) error
 
+func (p *Process[M]) PID() PID
+func (p *Process[M]) Addr() Addr[M]
+func (p *Process[M]) Node() *Node
 func (p *Process[M]) Receive() (Msg[M], error)
 func (p *Process[M]) ReceiveTimeout(d time.Duration) (Msg[M], error)
-func (p *Process[M]) Send[N proto.Message](to Addr[N], m N) error
-func (p *Process[M]) Call[R, N proto.Message](ctx, to Addr[N], req N) (R, error)
 func (p *Process[M]) CallTo[R proto.Message](ctx, to Target, req proto.Message) (R, error)
 func (p *Process[M]) SendTo(to Target, m proto.Message) error
-// Node has the same Send / SendTo / Call / CallTo / Exit, with the node as
-// sender; its Send, SendTo and Exit take a ctx too, for the dial (Send and
-// SendTo also carry its metadata).
+func (p *Process[M]) SendAfter[N proto.Message](d time.Duration, to Addr[N], m N) *Timer
+// Node has SendTo / CallTo / Exit too, with the node as sender; its SendTo
+// and Exit take a ctx, for the dial (SendTo also carries its metadata).
 func (p *Process[M]) Monitor(to Target) Ref
 func (p *Process[M]) Demonitor(ref Ref)
 func (p *Process[M]) Link(to Target)           // one way: to's exit ends p
@@ -286,6 +299,7 @@ func (m Msg[M]) IsCall() bool
 func (m Msg[M]) Reply(resp proto.Message, err error) error // may be deferred, from any goroutine
 func (m Msg[M]) Deadline() (time.Time, bool)   // when a call's caller stops waiting
 func (m Msg[M]) Context(parent context.Context) (context.Context, context.CancelFunc) // metadata, ending then
+func (m Msg[M]) Watch(pid PID) error            // a CallMonitor's watch, on a process that runs
 ```
 
 `M` is whichever of these fits:
@@ -428,7 +442,8 @@ Its nodes dial again at once after a failed dial (`DialBackoff` is negative),
 so the send right after `Heal` or `Restart` reaches the peer.
 
 Nodes and clusters run inside a `testing/synctest` bubble as they are, and
-tests in the core, `actor`, `grpcproctest` and `pubsub` hold them to it. A process
+tests in the core, `actor`, `grpcproctest`, `pubsub`, `cron` and `leader` hold
+them to it. A process
 waits on channels the bubble sees, so `synctest.Wait` returns once every
 process waits, and timers (`SendAfter`, `ReceiveTimeout`, deadlines, a
 supervisor's restart window and `Shutdown`) keep the bubble's fake clock;
@@ -439,7 +454,7 @@ goroutine waits, so the default incarnation, the start time, is now one
 more than the last this program picked when the clock has not moved, and
 a node made again under the same name still gets a newer one.
 
-## Observability (v0.1 core surface, v0.2 tools)
+## Observability
 
 This is the part taken from ergo. Its Observer, REST API and MCP server are
 thin clients of a `system` application every node runs, which answers: what
@@ -452,9 +467,11 @@ programs. The rules:
    read by snapshot. No sampling, no configuration.
 2. **Nothing in the core imports a metrics or tracing library.** A `Hooks`
    interface is the single tap; `grpcproc/otel` implements it.
-3. **The Go API is the source of truth.** The gRPC `Inspector` service and any
-   tool built on it expose exactly what `node.Info()` and `node.Processes()`
-   return, nothing more.
+3. **The Go API is the source of truth.** The gRPC `Inspector` service is the
+   node's public API over the wire (`Info`, `Processes`, `Subscribe`,
+   `SendTo`, `CallTo`, `Exit`, a process's log level), and tools use it and
+   nothing else: what `grpcprocctl` shows of a supervisor, a cron process or
+   an elector, it gets by calling that process, as any other caller would.
 
 ### Process snapshot
 
@@ -466,7 +483,8 @@ type ProcessInfo struct {
     PID        PID
     Name       string
     Label      string            // WithLabel; the low-cardinality key for metrics
-    Parent     PID
+    Type       string            // the Go type of M, for display
+    Parent     PID               // zero for Node.Spawn
     State      ProcessState      // Idle | Running | WaitingReply | Exiting
     StartedAt  time.Time
     Mailbox    MailboxInfo       // Depth, OldestAge (latency), Peak
@@ -550,7 +568,7 @@ frameworks reduces to:
 
 | Feature | ergo | GoAkt | grpcproc |
 |---|---|---|---|
-| Metrics | Observer charts | `WithMetrics()` OTel gauges | `grpcproc/otel` on `Hooks` + `Processes()` snapshots, one series per **label** by default (GoAkt's per-actor default is a cardinality trap it later added a switch for) |
+| Metrics | Observer charts | `WithMetrics()` OTel gauges | `grpcproc/otel` on `Hooks` + `Processes()` snapshots, one series per **label** and never per PID (GoAkt's per-actor default is a cardinality trap it later added a switch for); a PID's own numbers are in `Processes()` and the Inspector |
 | Dead letters | log | dead-letter actor + event | `OnDeadLetter` + counter in `NodeInfo` |
 | System events | `gen.CoreEvent` | event stream | `OnSpawn/OnExit/OnLinkUp/OnLinkDown`; `Node.Subscribe(ctx, buffer)` is a channel of the same events |
 | Tracing | Sent / Delivered / Processed observations, trace id in the message | eBPF sidecar | `Envelope.metadata` carries W3C trace context. `grpcproc/otel` opens a producer (send) or client (call) span in `OnSend` and a consumer/server span covering the handling in `OnReceive`; a process's sends inherit the handling span, so chains form without threading a context. Sampling stays the tracer's job |
@@ -566,7 +584,7 @@ atomic load at each point that would publish. The list of subscribers is
 copy-on-write, so publishing takes no lock but the per-subscriber one that
 guards against a concurrent close.
 
-### Inspector service (`grpcproc/inspect`, done)
+### Inspector service (`grpcproc/inspect`)
 
 A second gRPC service registered on the same server, optional:
 
@@ -592,18 +610,29 @@ Observer on one node and inspect the whole cluster". A process targeted by
 PID routes to the PID's node when the request names none. `GetProcess` with
 `inspect: true` returns the snapshot even when the process is too busy to
 answer, with `inspect_error` saying so. Access control is the application's
-(interceptors, mTLS), as for any of its other services.
+(interceptors, mTLS), as for any of its other services; `inspect.ReadOnly()`
+refuses `SetLogLevel`, `Send`, `Call` and `Exit` with `PermissionDenied`, for
+an Inspector that should only be looked at.
 
-What sits on top, outside the core, is `grpcproc/tools`: `grpcprocctl` (`ps`,
-`inspect`, `watch`, `exit`, `loglevel`, and `dot`, which draws processes and
-who started whom across nodes), and an MCP server exposing the same methods
-for an agent — ergo's MCP experience is convincing, and it is a
-half-day of work once the gRPC service exists.
+What sits on top, outside the core, is `grpcproc/tools`, one binary,
+`grpcprocctl`, with three faces over the same Go client (`tools/client`):
+
+- **A CLI**: nodes and their links, `ps`, `inspect`, `watch`, `exit`,
+  `loglevel`; `leader` and `cron`, which read and operate those modules'
+  processes by calling them; and `dot`, which draws processes and who started
+  whom across nodes. The command list is in `tools/README.md`.
+- **An MCP server** (`grpcprocctl mcp`) for an AI agent, ergo's most
+  convincing tool: the CLI's reads as tools, and writes (exit, log level,
+  moving and cordoning a leader, cron jobs) only with `--allow-writes`.
+- **A web UI** (`grpcprocctl web`), after ergo's Observer: a page embedded in
+  the binary, served on the operator's machine, that shows the cluster live
+  through one node's Inspector, read-only unless `--allow-writes`. It is a
+  client like the other two; no node serves a page.
 
 Goroutine dumps and heap profiles are `net/http/pprof`; `grpcproc` does not
 duplicate them.
 
-## Helpers (`grpcproc/actor`, done)
+## Helpers (`grpcproc/actor`)
 
 Optional, built only on the public core API, so users can ignore or replace
 them. Two primitives went into the core because they need process internals:
@@ -709,7 +738,7 @@ them. Two primitives went into the core because they need process internals:
   when its significant children end by themselves for good; one it stops
   does not count. A permanent child cannot be significant.
 
-## Remote spawn (done)
+## Remote spawn
 
 Locally, `SpawnMonitor` places the monitor in the critical section that
 admits the child. Across nodes an application could only place a child, by
@@ -785,7 +814,7 @@ so remote spawn with a monitor and with a link are one feature.
   follow: its `Down` says the old one ended, and `StartChildFrom` of the
   name monitors the new one.
 
-## Pub/sub (`grpcproc/pubsub`, done)
+## Pub/sub (`grpcproc/pubsub`)
 
 Built on the public core API only, as `actor` is. A topic is a process: it
 keeps its subscribers and its last `Buffer` events, and sends each event it
@@ -826,7 +855,7 @@ has:
   call failed with, not the error that wraps it, so that it is that sentinel
   on the subscriber's side too.
 
-## Cron and leader election (nested modules, done)
+## Cron and leader election (nested modules)
 
 Both are built on the public API alone, as `actor` is, and are modules of
 their own so they can be versioned apart from the core; neither imports the
@@ -938,41 +967,104 @@ leader's singleton, and its state the singleton's.
   `ElectionTimeout` goes up. `Lease.Term` is the fencing token for external
   resources; `Confirm` makes leadership wait for an external lock.
 
-## Later
-
-- A **global name registry** (`grpcproc.Global{"ledger"}` resolving through
-  etcd, with a lease as fencing token), on top of `grpcproc/etcd`.
-- Delivery beyond at-most-once, in order per sender. Explicitly out of scope;
-  build it above `grpcproc`, as OTP does.
-- Virtual actors, placement, persistence. Out of scope: where a child
-  goes is the application's to decide, and remote spawn (above) is how it
-  starts it there.
-
 ## What was rejected, and why
 
 | Idea | Seen in | Why not |
 |---|---|---|
-| Own TCP protocol | ergo, GoAkt, Hollywood (dRPC) | The whole point is to reuse the gRPC server, TLS, interceptors and tooling the service already has |
+| Own TCP protocol | ergo, GoAkt, Hollywood (dRPC) | The whole point is to reuse the gRPC server, TLS, interceptors and tooling the service already has. Akka went the same way, deprecating its ClusterClient for gRPC. Should one stream per direction show head-of-line blocking, Partisan's case for channels, gRPC answers it: more `Link` streams to a peer, split by sender, which keeps each sender's order |
 | One monitor = one stream | — | Loses message-before-Down ordering, costs a goroutine per monitor |
-| Priority mailbox queues | ergo (4 queues) | Inspection runs inside `Receive` instead; `Down` must stay in order with messages |
-| Two-way links | Erlang/OTP | A one-way link is a monitor on the wire and needs no agreement between nodes; see Links |
-| Bounded mailboxes | GoAkt | A full mailbox would stall the shared link for everyone; a link's queue is per peer, and can be bounded (`Config.MaxQueued`) |
-| Metrics per PID by default | GoAkt | Cardinality; label is the key, PID is available on request |
-| Embedded web UI | ergo Observer | A UI is a client; the core exposes the gRPC surface it would need |
+| Priority mailbox queues | ergo (4 queues), GoAkt | Inspection runs inside `Receive` instead; `Down` must stay in order with messages; and `Exit` cancels the process's context rather than wait in its mailbox, so no signal is stuck behind a backlog |
+| Two-way links | Erlang/OTP | A one-way link is a monitor on the wire and needs no agreement between nodes; see Links. Erlang needed unlink ids and acknowledgements (OTP 23) to settle the races two-way links have |
+| Mailboxes that block when full | GoAkt | A full mailbox would stall the shared link for everyone; a link's queue is per peer, and can be bounded (`Config.MaxQueued`). A bound that refuses instead is open work, below |
+| Metrics per PID | GoAkt | Cardinality; the label is the key, and a PID's own numbers are in `Processes()` and the Inspector |
+| A UI served by every node | ergo Observer | A UI is a client: `grpcprocctl web` is one, over the Inspector, and a node serves nothing but gRPC |
 | gob / custom codec | first prototype | protobuf is already the service's contract; a body travels as its full name and bytes, and generated types register themselves |
+| Delivery beyond at-most-once in the core | Akka Reliable Delivery, GoAkt | Every send would pay for a store and acknowledgements most do not need, and both Akka and GoAkt made it a layer one opts into. Here it is a module, open work below; the core's `LinkError.Unsent` tells it what is safe to send again |
+| Sagas that live in memory | ergo `gen.Saga` (v2, gone in v3), Elixir's Sage | A crashed coordinator leaves steps done and nothing to undo them. Every saga framework that calls itself production-ready (Akka's workflows, Dapr Workflow, Commanded) has a coordinator that outlives a crash, and steps that are idempotent for it. A recipe and a durable module are open work, below |
+| One membership across installations | Orleans multi-cluster (removed in 3.2), Akka ClusterClient (deprecated in 2.6) | Two installations are operated apart: a registry or a singleton spanning both needs agreement over a network neither side controls, and the systems that tried went back to an explicit boundary. The boundary is open work, below |
 
-## Order of work
+## Open work
 
-1. ~~`proto/grpcproc/v1`, core `Node`/`Process`, links, static resolver, `ProcessInfo`
-   counters, `Hooks`, `WithInspect`, `grpcproctest`~~ (done). Tests: ordering, monitors with
-   every reason, node down, restart with new incarnation, bad peer identity.
-2. ~~`grpcproc/inspect` service~~ (done, with `Node.Subscribe`; its Go client is `tools/client`);
-   ~~`grpcproc/actor` helpers~~ (done, with `SendAfter` and `SpawnMonitor`).
-3. ~~`grpcproc/otel` (metrics + trace propagation)~~ (done: see otel/README.md),
-   ~~`grpcproc/etcd`~~ (done: see etcd/README.md).
-4. ~~`grpcprocctl`, `DOT`, MCP server~~ (done: `grpcproc/tools`, see tools/README.md).
-5. ~~`grpcproc/cron`, `grpcproc/leader`~~ (done: see cron/README.md and
-   leader/README.md).
+What production use asks for next, roughly in order. The core gets hooks and
+interfaces only; whatever needs a dependency is a nested module, as etcd and
+OpenTelemetry are.
 
-Coverage target and style follow `fsm` and `di`: 100 % on the core,
-race-detected, examples compiled in CI, `DESIGN.md` kept current.
+- **A boundary between installations.** Two installations can talk today:
+  a resolver that answers the other's node names is enough, and `Send`,
+  `Call`, `Monitor` and `Link` work across. Three things make it unsafe.
+  `Config.DialOptions` is one set for every peer, so there is one trust root.
+  `Authorize` admits a link once, and then every kind of envelope on it is
+  dispatched, `exit` included; since `Exit` cannot be trapped, any admitted
+  peer can end any process it can name. And node names must be unique across
+  both. Two optional hooks, nil by default as `Authorize` is, would close it:
+  dial options per peer, and a policy per inbound link, decided once when it
+  is admitted, of which kinds of envelope and which names that peer may
+  reach. They serve a multi-tenant installation as well. A federation module
+  on top would add qualified names (`installation/node`) and tables of what
+  each installation exports, as NATS accounts export services and Temporal's
+  Nexus endpoints list their callers; a supervisor never links across. Only
+  if one side can dial out and not in (a customer's VPC, a factory floor)
+  does the link need turning around: a bridge with a gRPC service of its own,
+  so the core keeps one link per direction.
+- **Sagas.** The shop's order desk is one already, in memory: it reserves,
+  charges, releases the stock on a decline, and logs an error from the bank
+  as unsettled, since the card may have been charged. A guide first: an
+  idempotency key per step, the saga's id and the step's, in the request or
+  the metadata; a step sent again only when it cannot have left
+  (`ErrNoProc`, `LinkError.Unsent`), the rule `leader.Call` follows; each
+  compensation registered before its step, so a step that timed out but
+  happened is undone too; a pivot step, after which recovery retries forward
+  instead of compensating; and reconciliation for what stays unknown. Then a
+  coordinator that needs nothing new: a leader's singleton whose state is
+  the sagas in flight, saved with `Lease.Checkpoint` after each step, with
+  `Lease.Term` passed to participants as a fence. That holds tens or
+  hundreds in flight, since the whole state travels with the heartbeats.
+  Then, for volume, a `grpcproc/saga` module: each step's result saved behind
+  a `Store` (create, append with compare-and-swap, claim with a lease and an
+  epoch, list what is in flight), as DBOS checkpoints steps, rather than
+  Temporal's replay of a history, whose determinism rules forbid the
+  `select` and goroutines processes are written with. The leader takes over
+  the sagas of a node that left. Steps' timeouts need durable timers (below).
+- **A global name registry**, per installation: a name claimed by
+  compare-and-swap under an etcd lease, the lease as fencing token, on top of
+  `grpcproc/etcd`. A minority partition cannot register, as with Akka's
+  lease-majority downing; in exchange there is no conflict to settle when it
+  heals, which Erlang's `global` and Horde leave to the application.
+- **Process groups**, Erlang's `pg` and Akka's Receptionist: the live
+  members of a group, found and watched. Pub/sub topics already monitor their
+  subscribers through a relay per node, so it is a thin module.
+- **Durable one-shot timers**: "send this to that name at that time", kept
+  in the checkpointed state of a cron process that runs as the leader's
+  singleton, so it outlasts the node that set it, as Dapr's reminders outlast
+  an actor.
+- **More discovery**: a DNS SRV resolver, standard library only, so in the
+  core, and a Kubernetes one, a nested module for client-go.
+- **Metadata on `Member`**, the application's version above all, so that a
+  rolling deploy keeps new work and leadership on new nodes, as Akka's
+  `app-version` does, and `Cordon` keeps old ones from leading.
+- **An operations guide**: keepalive values, static `Voters` or etcd
+  `Membership` for an election, the two election timeouts in which two nodes
+  can each believe they lead and `Lease.Term` against it, and the order of a
+  shutdown (`Resign`, stop supervisors, `Stop`, withdraw). Akka does that
+  order itself on SIGTERM; grpcproc does not own signals.
+- **Delivery beyond at-most-once**, as a module beside sagas, on the same
+  `Store`: idempotency keys, sending again what `Unsent` says never left, and
+  an outbox fenced by an epoch, so a writer on a node that left cannot commit,
+  as GoAkt's durable queue is. The core stays at most once.
+- **A mailbox bound that refuses** rather than blocks: optional, per process.
+  A local send fails at once, a remote call is answered busy, a remote send
+  is a dead letter with reason `mailbox full`, and `Down`s and exits always
+  get in. Depth is visible already; this is for a process that cannot be
+  trusted to shed load itself.
+- **Keyed entities**: a consistent hash over `Membership` picks the node,
+  `StartChildFrom` starts the entity there or answers with the one that runs
+  (`ErrAlreadyStarted`), and an entity idle for a while stops. Orleans' grains
+  and Akka's sharding, without the strongly consistent directory that made
+  Orleans' multi-cluster mode admit duplicates; state only through the saga
+  module's `Store`.
+- **A protoc plugin** that writes contract address types like `StockAddr`
+  from a service definition, as Proto.Actor generates its grains' clients.
+
+Coverage and style follow `fsm` and `di`: CI requires 100 % coverage of every
+library package, the core's and the nested modules', race-detected; CI runs
+every example and checks what it prints; and `DESIGN.md` is kept current.

@@ -82,7 +82,7 @@ pid, ok := warehouse.Whereis("stock") // on this node, now`}</Code>
 					<p>
 						There is no cluster-wide registry. A process is found by knowing which node it is on,
 						from configuration or from a message that carried its PID. A global registry with a
-						fencing token is listed under later work in the{' '}
+						fencing token is listed under open work in the{' '}
 						<Ext href={file('docs/DESIGN.md')}>design notes</Ext>; Erlang keeps <C>global</C> apart
 						from local registration for the same reason.
 					</p>

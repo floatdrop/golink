@@ -225,7 +225,7 @@ func parentPID(p *proc) PID {
 // shows the process as waiting on a reply, so a goroutine that feeds a
 // process, one blocked on a read say, sends to it as the node instead:
 //
-//	_ = p.Node().Send(ctx, p.Addr(), m)
+//	_ = p.Addr().Send(ctx, p.Node(), m)
 type Process[M proto.Message] struct{ *proc }
 
 // Msg is what Receive returns: a message (Body), a Down or an Exited, one
