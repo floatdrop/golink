@@ -1058,6 +1058,9 @@ type Names interface {
     Lookup(name string) (PID, bool)                       // must not block: the implementation keeps what it watches
     Resolve(ctx context.Context, name string) (PID, bool, error) // asks the store itself, when Lookup's lag matters
 }
+type NameLister interface {         // optional, for a Names that keeps every name
+    List(prefix string) []GlobalName // ordered by name; GlobalName{Name string; PID PID}
+}
 Config.Names Names
 
 // grpcproc/etcd: *Cluster implements Names, and claims
@@ -1185,8 +1188,19 @@ func (c *Claim) Release(ctx context.Context) error
 - **Tests.** `grpcproctest` gets an in-memory `Names` with the same claims,
   shared by a cluster's nodes, so a test of a moving service needs no etcd.
 
-Open: whether the Inspector and `grpcprocctl` list global names beside
-local ones.
+- **In the tools, as far as the node can tell.** A node with `Names`
+  resolves any one name, so `grpcprocctl names room:42` answers wherever
+  the room is, through the Inspector's `Lookup` of that node. Listing them
+  needs a `Names` that keeps them all, as the etcd one and `grpcproctest`'s
+  do, and not one that would ask etcd on a miss past hundreds of thousands
+  of names: so listing is the optional `NameLister`, and the Inspector's
+  `ListNames` (a prefix, a limit, since there may be a hundred thousand
+  rooms) answers `Unimplemented` for a node whose `Names` cannot list, and
+  `grpcprocctl names` says so rather than show an empty list. Where it can
+  list, `grpcprocctl inspect` shows the global names a process holds,
+  found by its PID in the list, `names` lists them by prefix, and the MCP
+  server and the web UI show the same. A node without `Names` has none to
+  show.
 
 ## What was rejected, and why
 
