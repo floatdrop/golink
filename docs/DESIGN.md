@@ -1045,23 +1045,27 @@ installation, and whichever process holds it, wherever it runs, is what
 `Global{"ledger"}` reaches. It is for a service that moves, restarted by a
 supervisor on another node or placed by `StartChildFrom`, and for many of
 them: one coordinator per tenant or per order, where a `leader` election
-per name would cost a Raft group each. `grpcproc/etcd` knows nodes, not
-processes, and an application that writes the keys itself gets the parts
-below wrong, the claim's lifetime first.
+per name would cost a Raft group each, or one room of a teleconference
+per name, placed on the SFU node with the most room. `grpcproc/etcd` knows
+nodes, not processes, and an application that writes the keys itself gets
+the parts below wrong, the claim's lifetime first.
 
 ```go
 // core
 type Global struct{ Name string } // a Target: whoever holds Name in this installation
 type Names interface {
-    Watch(ctx context.Context) error   // from Start, before Registrar; returns once every name is known
-    Lookup(name string) (PID, bool)    // must not block: the implementation keeps what it watches
+    Watch(ctx context.Context) error                      // from Start, before Registrar; returns once every name is known
+    Lookup(name string) (PID, bool)                       // must not block: the implementation keeps what it watches
+    Resolve(ctx context.Context, name string) (PID, bool, error) // asks the store itself, when Lookup's lag matters
 }
 Config.Names Names
 
 // grpcproc/etcd: *Cluster implements Names, and claims
 type Holder interface{ PID() grpcproc.PID; Node() *grpcproc.Node } // a *grpcproc.Process of any M
-func (c *Cluster) Claim(ctx context.Context, p Holder, name string) (*Claim, error) // ErrTaken, with the holder
-func (c *Claim) Revision() int64 // the fencing token
+func (c *Cluster) Claim(ctx context.Context, p Holder, name string, opts ...ClaimOption) (*Claim, error) // *TakenError{Holder}
+func KeepOnLoss() ClaimOption    // keep the holder running when the claim is lost, and claim again
+func (c *Claim) Revision() int64 // the fencing token; a new one after a claim made again
+func (c *Claim) Held() bool      // false while a KeepOnLoss claim is lost
 func (c *Claim) Release(ctx context.Context) error
 ```
 
@@ -1082,38 +1086,78 @@ func (c *Claim) Release(ctx context.Context) error
   gone, both of which delivery at most once already allows. A monitor
   follows the process it found, not the name: its `Down` says that holder
   ended, and the caller looks again, as a monitor of a restarted child
-  does.
+  does. Where the lag matters, `Resolve` reads etcd itself: before starting
+  what may already exist, a room whose first join came to another node a
+  moment ago, and after losing a race to start it.
 - **A claim lives as long as its process.** `Claim` is a compare-and-swap
   that creates `<prefix>/names/<name>`, holding the PID, under the lease of
-  the holder's node's registration, and fails with `ErrTaken` and the
-  holder's PID if it exists: `StartChild`'s `ErrAlreadyStarted`, so a
-  caller that lost the race reaches the winner. A process per node, started
+  the holder's node's registration, and fails with a `*TakenError` holding
+  the holder's PID if it exists, as `StartChild` answers with
+  `ErrAlreadyStarted`, so a caller that lost the race reaches the winner.
+  Only on the claimer's node, though: an error crosses the wire as its text
+  (`errors.Is` matches `ErrTaken` by it), and the PID does not survive. A
+  room started on an SFU node through `StartChildFrom` from a signaling
+  node that loses its claim fails the call with `ErrTaken`, and the
+  signaling node then asks `Resolve` for the winner, which etcd knows by
+  then, rather than its own copy, which may not. A process per node, started
   with the first claim, monitors every holder of that node and deletes the
   key when it exits, comparing the key's create revision, so that a newer
   claim of the name is never deleted. A monitor and not `Node.Subscribe`,
   whose events can be dropped. A node that dies takes its claims with its
   lease, at the same time as its peers drop their links to it.
-- **Losing the claim ends the holder.** When the node's lease is lost,
-  etcd out of reach longer than the TTL, its keys go, and another node may
-  claim the name. The holder must have stopped by then, so the per-node
-  process exits every holder of the node, with reason `name lost`, once the
-  TTL has passed since the last keepalive that succeeded, counted from when
-  it was sent: etcd counts from when it arrived, which is later, so the
-  holder stops first, as long as the two clocks run at the same rate. That
-  is `leader`'s rule, leadership as a process's lifetime: a holder does not
-  ask whether it still holds the name, and its context ends with it. `name
-  lost` is abnormal, so a supervisor restarts it, and its claim at start
-  then waits for etcd, or reaches the new holder. For what clocks cannot
-  promise, `Revision` is the fencing token: create revisions grow, so a
-  write fenced by it refuses a holder that lost the name.
-- **Uniqueness over availability.** In a partition, the side that cannot
-  reach etcd cannot claim, and its holders end when their leases do; the
-  other side claims the names again. Erlang's `global` keeps both sides
-  registering and resolves the clash when they meet again
-  (`random_exit_name` and its kin), and Horde sends the loser a
-  `name_conflict` exit: duplicates the application must handle. With a
+- **Losing the claim ends the holder, by default.** When the node's lease
+  is lost, etcd out of reach longer than the TTL, its keys go, and another
+  node may claim the name. The holder must have stopped by then, so the
+  per-node process exits every holder of the node, with reason `name lost`,
+  once the TTL has passed since the last keepalive that succeeded, counted
+  from when it was sent: etcd counts from when it arrived, which is later,
+  so the holder stops first, as long as the two clocks run at the same
+  rate. That is `leader`'s rule, leadership as a process's lifetime: a
+  holder does not ask whether it still holds the name, and its context ends
+  with it. `name lost` is abnormal, so a supervisor restarts it, and its
+  claim at start then waits for etcd, or reaches the new holder. For what
+  clocks cannot promise, `Revision` is the fencing token: create revisions
+  grow, so a write fenced by it refuses a holder that lost the name.
+- **Uniqueness by default, availability by choice.** In a partition, the
+  side that cannot reach etcd cannot claim, and by default its holders end
+  when their leases do; the other side claims the names again. With a
   lease there is no clash to resolve, at the price of a quiet minority, as
-  with Akka's lease-majority downing.
+  with Akka's lease-majority downing: right for a ledger, whose writes two
+  holders would corrupt. It is wrong for a teleconference room. An SFU node
+  that loses etcd still carries the room's media to clients that still
+  reach it, and ending its rooms ends every call on it, every call
+  everywhere if etcd itself is down for longer than the TTL, to avoid a
+  duplicate that costs far less. So a claim made with `KeepOnLoss` keeps
+  its holder running when the lease is lost: `Held` turns false, and the
+  per-node process claims the name again once etcd is back, with a new
+  `Revision`. If another process claimed it meanwhile, a room that the
+  other side started for a join that could not reach this one, the holder
+  etcd has wins, since every other node already routes to it, and the one
+  claiming again exits with reason `name conflict`, as Horde sends the
+  loser `name_conflict` and Erlang's `global` resolves a clash with
+  `random_exit_name`. Between the two, two rooms carry one name: the
+  application chooses that by the option, for a process whose duplicate is
+  a nuisance and whose absence is an outage.
+- **A directory, not placement.** A global name says where a process is,
+  not where it should go. The node with the most room is decided by load,
+  which changes by the second and is not `Member.Metadata`, fixed for a
+  node's life: each node publishing its load on a pubsub topic, or asking
+  two nodes at random and taking the lighter (the power of two choices).
+  Placement by load is also why a room wants a directory and not a hash of
+  its id over `Membership`, keyed entities' way (see Open work), which
+  decides the node itself and cannot weigh load.
+- **Scale.** One key per name, under one lease per node, so leases do not
+  grow with names. Writes are a claim and a release per holder's life: a
+  hundred thousand rooms lasting half an hour on average is about 110 a
+  second, and an SFU node that dies with ten thousand rooms is ten
+  thousand claims again as their clients reconnect, which etcd clears in
+  seconds; Kubernetes keeps more objects than that in one etcd. Every node
+  keeps a copy, some ten to twenty megabytes for a hundred thousand names,
+  and receives every claim and release: fine for hundreds of thousands of
+  names over tens of nodes. Past that, `Lookup` would ask etcd on a miss,
+  or a node would watch only the names it routes to. The initial list is
+  paged, and etcd needs automatic compaction, since every claim and
+  release is a revision.
 - **One installation.** Names do not cross installations: a registry
   spanning two needs agreement over a network neither side controls (see
   What was rejected). A `Policy` judges a request by the process's local
