@@ -1,6 +1,7 @@
 package grpcproc
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"maps"
@@ -13,15 +14,16 @@ import (
 // and remote sends alike; it is verified again on delivery, because types do
 // not cross the wire.
 type Addr[M proto.Message] struct {
-	pid  PID
-	name string
+	pid    PID
+	name   string
+	global string // a Global's name, resolved on each send
 }
 
 // AddrOf types an untyped target. Nothing checks that the process behind it
-// really accepts M until a message is delivered.
+// really accepts M until a message is delivered. An Addr of a Global stays
+// one: each send resolves the name afresh.
 func AddrOf[M proto.Message](t Target) Addr[M] {
-	pid, name := t.target()
-	return Addr[M]{pid: pid, name: name}
+	return Addr[M](destOf(t))
 }
 
 // Named addresses the process registered as name on node.
@@ -35,10 +37,14 @@ func (a Addr[M]) PID() PID { return a.pid }
 // Node returns the node the address points at.
 func (a Addr[M]) Node() string { return a.pid.Node }
 
-// Name returns the registered name, or "" for a PID address.
-func (a Addr[M]) Name() string { return a.name }
+// Name returns the registered name, or "" for a PID address. For an address
+// of a Global, it is the global name.
+func (a Addr[M]) Name() string { return cmp.Or(a.global, a.name) }
 
 func (a Addr[M]) String() string {
+	if a.global != "" {
+		return Global{a.global}.String()
+	}
 	if a.name != "" {
 		return Name{Node: a.pid.Node, Name: a.name}.String()
 	}
@@ -46,6 +52,7 @@ func (a Addr[M]) String() string {
 }
 
 func (a Addr[M]) target() (PID, string) { return a.pid, a.name }
+func (a Addr[M]) globalName() string    { return a.global }
 
 // Call sends req to the address and waits for the reply, typed as R:
 //
@@ -131,6 +138,7 @@ func (o origin) callWatch(ctx context.Context, to dest, req proto.Message, link 
 		return Ref{}, errWatchFromNode
 	}
 	n := o.n
+	to = n.resolveDest(to)
 	ref := Ref{Node: n.id.Name, ID: n.nextRef.Add(1)}
 	if !p.awaitWatch(ref, to.pid.Node, link) {
 		return Ref{}, ErrNoProc
@@ -184,15 +192,20 @@ func (p *proc) origin(ctx context.Context) origin {
 // dest is a target as the send path carries it: a plain value, where a
 // Target would be boxed on the heap for every message.
 type dest struct {
-	pid  PID
-	name string
+	pid    PID
+	name   string
+	global string
 }
 
 func (a Addr[M]) dest() dest { return dest(a) }
 
 func destOf(t Target) dest {
 	pid, name := t.target()
-	return dest{pid, name}
+	d := dest{pid: pid, name: name}
+	if g, ok := t.(globalTarget); ok {
+		d.global = g.globalName()
+	}
+	return d
 }
 
 // typed asserts a reply to the type the caller asked for. A reply of another

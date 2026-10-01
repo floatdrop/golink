@@ -8,6 +8,7 @@ import (
 	"maps"
 	"reflect"
 	"runtime/debug"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -81,6 +82,7 @@ type proc struct {
 	awaiting map[Ref]*awaited      // watches my calls asked for, until they are answered
 	open     map[openCall]answerTo // calls queued or taken, not yet answered
 	timers   map[*Timer]struct{}   // SendAfter timers not yet fired
+	claims   map[*Claim]struct{}   // global names held, released when it exits
 }
 
 type openCall struct {
@@ -112,8 +114,9 @@ type awaited struct {
 }
 
 type monitorTarget struct {
-	pid  PID
-	name string
+	pid    PID
+	name   string
+	global string // the Global it was placed on, resolved to pid, for Down.Name
 }
 
 // target makes a monitorTarget the Target it was placed on: a name, with
@@ -633,11 +636,12 @@ func (p *proc) Exit(to Target, reason string) error {
 // A second link to the same target is the same link. Linking to itself, or
 // from a process that has exited, does nothing.
 func (p *proc) Link(target Target) {
+	target, global := p.n.resolveTarget(target)
 	pid, name := target.target()
 	if name == "" && pid == p.pid || name != "" && name == p.name && pid.Node == p.n.id.Name {
 		return // itself
 	}
-	t := monitorTarget{pid: pid, name: name}
+	t := monitorTarget{pid: pid, name: name, global: global}
 	ref := Ref{Node: p.n.id.Name, ID: p.n.nextRef.Add(1)}
 	p.mu.Lock()
 	if _, linked := p.linkTo(t); linked || p.exited {
@@ -657,8 +661,9 @@ func (p *proc) Link(target Target) {
 // Unlink removes p's link to target. An Exited already in the mailbox stays
 // there.
 func (p *proc) Unlink(target Target) {
+	target, global := p.n.resolveTarget(target)
 	pid, name := target.target()
-	t := monitorTarget{pid: pid, name: name}
+	t := monitorTarget{pid: pid, name: name, global: global}
 	p.mu.Lock()
 	ref, linked := p.linkTo(t)
 	delete(p.links, ref)
@@ -695,6 +700,7 @@ func (p *proc) Parent() PID { return p.parent }
 // this process receives a Msg with Down set and the returned Ref. Monitoring
 // a process that does not exist yields Down{Reason: "noproc"}.
 func (p *proc) Monitor(target Target) Ref {
+	target, global := p.n.resolveTarget(target)
 	pid, name := target.target()
 	ref := Ref{Node: p.n.id.Name, ID: p.n.nextRef.Add(1)}
 	p.mu.Lock()
@@ -705,7 +711,7 @@ func (p *proc) Monitor(target Target) Ref {
 	if p.monitors == nil {
 		p.monitors = map[Ref]monitorTarget{}
 	}
-	p.monitors[ref] = monitorTarget{pid: pid, name: name}
+	p.monitors[ref] = monitorTarget{pid: pid, name: name, global: global}
 	p.mu.Unlock()
 	p.placeWatch(target, ref)
 	return ref
@@ -1022,12 +1028,15 @@ func typeString[M proto.Message]() string {
 func (p *proc) info() ProcessInfo {
 	p.mu.Lock()
 	monitors, links, watchers := len(p.monitors), len(p.links), len(p.watchers)
+	globals := p.claimNames()
 	p.mu.Unlock()
+	slices.Sort(globals)
 	info := ProcessInfo{
 		PID:           p.pid,
 		Name:          p.name,
 		Label:         p.label,
 		Type:          p.typ,
+		Globals:       globals,
 		Parent:        p.parent,
 		State:         ProcessState(p.state.Load()),
 		StartedAt:     p.started,
@@ -1182,13 +1191,20 @@ func (p *proc) terminate(reason string) {
 	p.setState(StateExiting)
 	p.mu.Lock()
 	p.exited = true
-	watchers, monitors, links, open, timers := p.watchers, p.monitors, p.links, p.open, p.timers
-	p.watchers, p.monitors, p.links, p.awaiting, p.open, p.timers = nil, nil, nil, nil, nil, nil
+	watchers, monitors, links, open, timers, claims := p.watchers, p.monitors, p.links, p.open, p.timers, p.claims
+	p.watchers, p.monitors, p.links, p.awaiting, p.open, p.timers, p.claims = nil, nil, nil, nil, nil, nil, nil
 	p.mu.Unlock()
 	for tm := range timers {
 		tm.t.Stop()
 	}
 	p.cancel(nil)
+	// Its global names go before its watchers hear of the exit, though in
+	// the background: a store out of reach must not hold up its Downs.
+	for c := range claims {
+		if c.end() {
+			p.n.release(c.nc)
+		}
+	}
 
 	n := p.n
 	n.mu.Lock()

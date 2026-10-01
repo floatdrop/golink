@@ -94,6 +94,7 @@ func (s *Server) Register(r grpc.ServiceRegistrar) { inspectv1.RegisterInspector
 const (
 	defaultInspectTimeout = time.Second
 	defaultWatchBuffer    = 256
+	defaultListNames      = 1000
 	maxWatchBuffer        = 4096 // a client picks the size, and the server allocates it
 )
 
@@ -163,6 +164,48 @@ func (s *Server) GetNode(ctx context.Context, req *inspectv1.GetNodeRequest) (*i
 		return forward(node, err, func() (*inspectv1.GetNodeResponse, error) { return c.GetNode(ctx, req) })
 	}
 	return &inspectv1.GetNodeResponse{Node: nodeInfoTo(s.node.Info())}, nil
+}
+
+// names is the node's Config.Names, or FailedPrecondition.
+func (s *Server) names() (grpcproc.Names, error) {
+	if names := s.node.Names(); names != nil {
+		return names, nil
+	}
+	return nil, status.Errorf(codes.FailedPrecondition, "inspect: %s has no global names (Config.Names)", s.node.Name())
+}
+
+func (s *Server) LookupName(ctx context.Context, req *inspectv1.LookupNameRequest) (*inspectv1.LookupNameResponse, error) {
+	if c, node, err := s.remote(ctx, req.GetNode(), nil); c != nil || err != nil {
+		return forward(node, err, func() (*inspectv1.LookupNameResponse, error) { return c.LookupName(ctx, req) })
+	}
+	names, err := s.names()
+	if err != nil {
+		return nil, err
+	}
+	pid, ok := names.Lookup(req.GetName())
+	if !ok {
+		return &inspectv1.LookupNameResponse{}, nil
+	}
+	return &inspectv1.LookupNameResponse{Found: true, Pid: pid.Proto()}, nil
+}
+
+func (s *Server) ListNames(ctx context.Context, req *inspectv1.ListNamesRequest) (*inspectv1.ListNamesResponse, error) {
+	if c, node, err := s.remote(ctx, req.GetNode(), nil); c != nil || err != nil {
+		return forward(node, err, func() (*inspectv1.ListNamesResponse, error) { return c.ListNames(ctx, req) })
+	}
+	names, err := s.names()
+	if err != nil {
+		return nil, err
+	}
+	lister, ok := names.(grpcproc.NameLister)
+	if !ok {
+		return nil, status.Errorf(codes.Unimplemented, "inspect: %s's global names cannot be listed", s.node.Name())
+	}
+	resp := &inspectv1.ListNamesResponse{}
+	for _, g := range lister.List(req.GetPrefix(), cmp.Or(int(req.GetLimit()), defaultListNames)) {
+		resp.Names = append(resp.Names, &inspectv1.GlobalName{Name: g.Name, Pid: g.PID.Proto()})
+	}
+	return resp, nil
 }
 
 func (s *Server) ListProcesses(ctx context.Context, req *inspectv1.ListProcessesRequest) (*inspectv1.ListProcessesResponse, error) {

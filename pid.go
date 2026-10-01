@@ -75,7 +75,7 @@ type Down struct {
 	// it would have been is not known: PID has only its Node, and Name says
 	// what was monitored.
 	PID    PID
-	Name   string // the registered name, when the monitor was placed by name
+	Name   string // the registered or global name, when the monitor was placed by one
 	Reason string
 }
 
@@ -89,7 +89,7 @@ type Exited struct {
 	// it would have been is not known: PID has only its Node, and Name says
 	// what was linked to.
 	PID    PID
-	Name   string // the registered name, when the link was placed by name
+	Name   string // the registered or global name, when the link was placed by one
 	Reason string
 }
 
@@ -105,7 +105,9 @@ const (
 	ReasonShutdown     = "shutdown"
 	ReasonKilled       = "killed"
 	ReasonType         = "type"
-	ReasonDenied       = "denied" // a dead letter a peer's Policy refused
+	ReasonDenied       = "denied"        // a dead letter a peer's Policy refused
+	ReasonNameLost     = "name lost"     // a global name's claim was lost (see Process.Claim)
+	ReasonNameConflict = "name conflict" // a KeepOnLoss claim found its name taken (see KeepOnLoss)
 )
 
 var (

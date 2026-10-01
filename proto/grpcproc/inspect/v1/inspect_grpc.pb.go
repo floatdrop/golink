@@ -32,6 +32,8 @@ const (
 	Inspector_Call_FullMethodName          = "/grpcproc.inspect.v1.Inspector/Call"
 	Inspector_Exit_FullMethodName          = "/grpcproc.inspect.v1.Inspector/Exit"
 	Inspector_Watch_FullMethodName         = "/grpcproc.inspect.v1.Inspector/Watch"
+	Inspector_LookupName_FullMethodName    = "/grpcproc.inspect.v1.Inspector/LookupName"
+	Inspector_ListNames_FullMethodName     = "/grpcproc.inspect.v1.Inspector/ListNames"
 )
 
 // InspectorClient is the client API for Inspector service.
@@ -59,6 +61,12 @@ type InspectorClient interface {
 	Exit(ctx context.Context, in *ExitRequest, opts ...grpc.CallOption) (*ExitResponse, error)
 	// Watch streams events until the client cancels.
 	Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchResponse], error)
+	// LookupName says who holds a global name, as the node's copy of the
+	// names has it. FailedPrecondition for a node without Config.Names.
+	LookupName(ctx context.Context, in *LookupNameRequest, opts ...grpc.CallOption) (*LookupNameResponse, error)
+	// ListNames lists global names by prefix. FailedPrecondition for a node
+	// without Config.Names, Unimplemented for one whose Names cannot list.
+	ListNames(ctx context.Context, in *ListNamesRequest, opts ...grpc.CallOption) (*ListNamesResponse, error)
 }
 
 type inspectorClient struct {
@@ -158,6 +166,26 @@ func (c *inspectorClient) Watch(ctx context.Context, in *WatchRequest, opts ...g
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Inspector_WatchClient = grpc.ServerStreamingClient[WatchResponse]
 
+func (c *inspectorClient) LookupName(ctx context.Context, in *LookupNameRequest, opts ...grpc.CallOption) (*LookupNameResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LookupNameResponse)
+	err := c.cc.Invoke(ctx, Inspector_LookupName_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *inspectorClient) ListNames(ctx context.Context, in *ListNamesRequest, opts ...grpc.CallOption) (*ListNamesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListNamesResponse)
+	err := c.cc.Invoke(ctx, Inspector_ListNames_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // InspectorServer is the server API for Inspector service.
 // All implementations must embed UnimplementedInspectorServer
 // for forward compatibility.
@@ -183,6 +211,12 @@ type InspectorServer interface {
 	Exit(context.Context, *ExitRequest) (*ExitResponse, error)
 	// Watch streams events until the client cancels.
 	Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error
+	// LookupName says who holds a global name, as the node's copy of the
+	// names has it. FailedPrecondition for a node without Config.Names.
+	LookupName(context.Context, *LookupNameRequest) (*LookupNameResponse, error)
+	// ListNames lists global names by prefix. FailedPrecondition for a node
+	// without Config.Names, Unimplemented for one whose Names cannot list.
+	ListNames(context.Context, *ListNamesRequest) (*ListNamesResponse, error)
 	mustEmbedUnimplementedInspectorServer()
 }
 
@@ -216,6 +250,12 @@ func (UnimplementedInspectorServer) Exit(context.Context, *ExitRequest) (*ExitRe
 }
 func (UnimplementedInspectorServer) Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error {
 	return status.Error(codes.Unimplemented, "method Watch not implemented")
+}
+func (UnimplementedInspectorServer) LookupName(context.Context, *LookupNameRequest) (*LookupNameResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method LookupName not implemented")
+}
+func (UnimplementedInspectorServer) ListNames(context.Context, *ListNamesRequest) (*ListNamesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListNames not implemented")
 }
 func (UnimplementedInspectorServer) mustEmbedUnimplementedInspectorServer() {}
 func (UnimplementedInspectorServer) testEmbeddedByValue()                   {}
@@ -375,6 +415,42 @@ func _Inspector_Watch_Handler(srv interface{}, stream grpc.ServerStream) error {
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Inspector_WatchServer = grpc.ServerStreamingServer[WatchResponse]
 
+func _Inspector_LookupName_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LookupNameRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InspectorServer).LookupName(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Inspector_LookupName_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InspectorServer).LookupName(ctx, req.(*LookupNameRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Inspector_ListNames_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListNamesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InspectorServer).ListNames(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Inspector_ListNames_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InspectorServer).ListNames(ctx, req.(*ListNamesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Inspector_ServiceDesc is the grpc.ServiceDesc for Inspector service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -409,6 +485,14 @@ var Inspector_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Exit",
 			Handler:    _Inspector_Exit_Handler,
+		},
+		{
+			MethodName: "LookupName",
+			Handler:    _Inspector_LookupName_Handler,
+		},
+		{
+			MethodName: "ListNames",
+			Handler:    _Inspector_ListNames_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

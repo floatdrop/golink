@@ -205,6 +205,8 @@ if errors.Is(err, grpcproc.ErrNoConnection) {
 							['what Exit asked for', <>A process or the node called <C>Exit</C> with that reason. It is never trapped.</>],
 							[<C>shutdown</C>, <>The node is stopping, or a supervisor is stopping its child, or a supervisor ended itself because its significant children ended.</>],
 							[<C>killed</C>, <>The Inspector's <C>Exit</C>, and <C>grpcprocctl exit</C>, with no reason given.</>],
+							[<C>name lost</C>, <>The process held a global name, and the store lost its claim: its node cut off from etcd past its lease. Abnormal, so a supervisor restarts it. See <A to="concepts/addressing/#global">Global names</A>.</>],
+							[<C>name conflict</C>, <>A <C>KeepOnLoss</C> claim, made again once the store was back, found its name held by another process. Abnormal.</>],
 							[<C>max restarts</C>, <>A supervisor restarted its children more often than its <C>Spec</C> allows. Abnormal, so its own supervisor restarts it.</>],
 							[<C>noproc</C>, <>Only in a <C>Down</C> or through a link: the monitored process does not exist. No process ever exits with it.</>],
 							[<C>noconnection</C>, <>Only in a <C>Down</C> or through a link: the node the process runs on cannot be reached. Its monitors and links fire with it; the process itself may still run.</>],

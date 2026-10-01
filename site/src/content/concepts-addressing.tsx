@@ -80,11 +80,61 @@ pid, ok := warehouse.Whereis("stock") // on this node, now`}</Code>
 						name fires at once with <C>noproc</C>.
 					</p>
 					<p>
-						There is no cluster-wide registry. A process is found by knowing which node it is on,
-						from configuration or from a message that carried its PID. A global registry with a
-						fencing token is listed under open work in the{' '}
-						<Ext href={file('docs/DESIGN.md')}>design notes</Ext>; Erlang keeps <C>global</C> apart
-						from local registration for the same reason.
+						A local name is found by knowing which node it is on, from configuration or from a
+						message that carried its PID. A name of the whole installation is a global name, below;
+						Erlang keeps <C>global</C> apart from local registration for the same reason.
+					</p>
+				</>
+			)
+		},
+		{
+			id: 'global',
+			title: 'Global names',
+			body: (
+				<>
+					<p>
+						A global name belongs to the installation, not to a node: whichever process holds it,
+						wherever it runs, is what <C>{'Global{"room:42"}'}</C> reaches. It is for a process that
+						moves, restarted on another node or placed where there is room, and for many of them:
+						one per room, per tenant, per order. A process claims the name itself, and holds it until
+						it exits or releases it:
+					</p>
+					<Code>{`func room(p *grpcproc.Process[*roomspb.Command]) error {
+	claim, err := p.Claim(p.Context(), "room:42", grpcproc.KeepOnLoss())
+	if err != nil {
+		return err // a *grpcproc.TakenError names the holder; errors.Is(err, grpcproc.ErrTaken)
+	}
+	_ = claim.Revision() // the fencing token for what it writes elsewhere
+	// … serve the room; the name goes when this function returns
+}
+
+// From any node: the node looks the name up and sends to the holder's PID.
+r, err := grpcproc.AddrOf[*roomspb.Command](grpcproc.Global{Name: "room:42"}).
+	Call[*roomspb.Joined](ctx, node, join)`}</Code>
+					<p>
+						The names live in a store, <C>Config.Names</C>: etcd in production, an in-memory one in
+						every <C>grpcproctest</C> cluster. Each node keeps a copy, so a send never waits on the
+						store; a message sent a moment after the holder moved can reach the old one, and fail as
+						a process that does not exist would. A name no one holds is exactly that: a call fails
+						with <C>ErrNoProc</C>, a monitor gets <C>Down{'{'}noproc{'}'}</C> with the global name
+						in <C>Down.Name</C>, a message is a dead letter. Where the copy's lag matters, before
+						starting what another node may have started, <C>node.Names().Resolve</C> asks the store
+						itself.
+					</p>
+					<Table
+						head={['Option', 'What it changes']}
+						rows={[
+							['none', <>If the store loses the claim, the node cut off from etcd past its lease, the holder ends with <C>name lost</C> before another node can claim the name: never two holders. For what must be unique, a ledger.</>],
+							[<C>KeepOnLoss()</C>, <>The holder runs on, <C>Held()</C> false, and holds the name again once the store is back. If another process claimed it meanwhile, the old holder ends with <C>name conflict</C>. For what must stay up, a room whose calls go on while etcd is away.</>],
+							[<C>WaitForName()</C>, <>A held name does not fail the claim: it waits, until its ctx is done, for the name to be free, and claims it then. A standby: the same process on every node, one active.</>]
+						]}
+					/>
+					<p>
+						In a test, <C>c.CutNames("b")</C> cuts node b off from the store as a partition from
+						etcd would, and <C>c.RestoreNames("b")</C> lets it back.{' '}
+						<C>ProcessInfo.Globals</C>, and the Inspector, show what a process holds. The{' '}
+						<Ext href={file('docs/DESIGN.md')}>design notes</Ext> have the rest: what the store does,
+						the release on exit, the cost at a hundred thousand names.
 					</p>
 				</>
 			)

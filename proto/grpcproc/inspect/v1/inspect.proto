@@ -34,6 +34,12 @@ service Inspector {
   rpc Exit(ExitRequest) returns (ExitResponse);
   // Watch streams events until the client cancels.
   rpc Watch(WatchRequest) returns (stream WatchResponse);
+  // LookupName says who holds a global name, as the node's copy of the
+  // names has it. FailedPrecondition for a node without Config.Names.
+  rpc LookupName(LookupNameRequest) returns (LookupNameResponse);
+  // ListNames lists global names by prefix. FailedPrecondition for a node
+  // without Config.Names, Unimplemented for one whose Names cannot list.
+  rpc ListNames(ListNamesRequest) returns (ListNamesResponse);
 }
 
 message NodeID {
@@ -118,6 +124,8 @@ message ProcessInfo {
   uint32 links = 17;
   // Whether the exits of processes it is linked to reach it as messages.
   bool trap_exit = 18;
+  // The global names it holds (Process.Claim), ordered.
+  repeated string globals = 19;
 }
 
 // Target names a process by pid or by name, on the request's node.
@@ -126,6 +134,32 @@ message Target {
     grpcproc.v1.PID pid = 1;
     string name = 2;
   }
+}
+
+message LookupNameRequest {
+  string node = 1;
+  string name = 2;
+}
+
+message LookupNameResponse {
+  bool found = 1;
+  grpcproc.v1.PID pid = 2;
+}
+
+message ListNamesRequest {
+  string node = 1;
+  string prefix = 2;
+  // At most this many, ordered by name; 0 is 1000.
+  uint32 limit = 3;
+}
+
+message GlobalName {
+  string name = 1;
+  grpcproc.v1.PID pid = 2;
+}
+
+message ListNamesResponse {
+  repeated GlobalName names = 1;
 }
 
 message GetNodeRequest {

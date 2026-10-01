@@ -31,6 +31,7 @@ export const guidesConfiguration: Doc = {
 						[<C>Advertise</C>, 'None. Where peers dial this node; published by the Registrar.'],
 						[<C>Incarnation</C>, 'The start time in nanoseconds. Must grow with each start.'],
 						[<C>Registrar</C>, 'None. Publishes the node on Start, withdraws it on Stop.'],
+						[<C>Names</C>, <>None. The store of the installation's global names, which <C>{'Global'}</C> targets resolve through and <C>Process.Claim</C> claims in.</>],
 						[<C>Metadata</C>, 'None. What this start of the node tells the cluster about itself: version, zone. Published with its Member.'],
 						[<C>Membership</C>, 'None. The cluster\'s view of who is alive, watched from Start.'],
 						[<C>DialOptions</C>, 'None. Credentials, keepalive and interceptors for every outbound connection.'],
