@@ -75,6 +75,8 @@ message NodeInfo {
   uint64 exited = 6;
   uint64 dead_letters = 7;
   repeated Link links = 8;
+  // The node's Config.Metadata: its version, its zone.
+  map<string, string> metadata = 9;
 }
 
 enum ProcessState {

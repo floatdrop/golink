@@ -30,7 +30,8 @@ export const conceptsDiscovery: Doc = {
 type Member struct {
 	Name        string
 	Incarnation uint64
-	Addr        string // where peers dial it: its Config.Advertise
+	Addr        string            // where peers dial it: its Config.Advertise
+	Metadata    map[string]string // its Config.Metadata: version, zone
 }
 
 type Registrar interface {
@@ -103,6 +104,30 @@ type MemberEvent struct {
 						that saw the node leave the cluster before they saw its processes exit would report{' '}
 						<C>noconnection</C> where the truth is <C>shutdown</C>. An error from <C>Register</C>{' '}
 						must leave the node unpublished, because <C>Start</C> may call it again.
+					</p>
+					<p>
+						<C>Config.Metadata</C> goes with the member: the application's version, its zone,
+						whatever choosing a node for work decides by. grpcproc reads none of it, and it is fixed
+						for the node's life, so a new version is a new start. A <C>Membership</C> that carries it
+						brings it to every node, where <C>node.Members()</C> lists the members it reports up,
+						each with its metadata, this node included:
+					</p>
+					<Code>{`node, _ := grpcproc.NewNode(grpcproc.Config{
+	Name:     "orders-3",
+	Metadata: map[string]string{"version": buildVersion, "zone": "eu-1"},
+	// Resolver, Registrar, Membership …
+})
+
+// Later: start the child on a node of this zone that runs the new version.
+for _, m := range node.Members() {
+	if m.Metadata["zone"] == "eu-1" && m.Metadata["version"] == buildVersion {
+		// actor.StartChildFrom(ctx, node, grpcproc.Name{Node: m.Name, Name: "workers"}, "worker", arg)
+	}
+}`}</Code>
+					<p>
+						<C>NodeInfo.Metadata</C> and the Inspector show a node's own, so a rollout can be
+						followed node by node. Metadata is what a node says about itself, not what it has
+						proven: authorization decides by credentials, in <C>Config.Admit</C>.
 					</p>
 				</>
 			)
