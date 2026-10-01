@@ -15,9 +15,11 @@ cluster := grpcprocetcd.New(etcdClient, "/grpcproc/prod") // WithTTL, WithRetry,
 node, err := grpcproc.NewNode(grpcproc.Config{
     Name:       "orders-1",
     Advertise:  "10.0.0.5:9000", // this node's gRPC server, as peers reach it
+    Metadata:   map[string]string{"version": buildVersion}, // in its record, for every node's Members
     Resolver:   cluster,
     Registrar:  cluster,
     Membership: cluster,
+    Names:      cluster.Names(), // global names: Global targets and Process.Claim
 })
 node.Start(ctx) // registers; Stop withdraws
 ```
@@ -31,7 +33,7 @@ follows the node's.
 
 | grpcproc role | etcd |
 | --- | --- |
-| `Registrar` | one key per node, `<prefix>/nodes/<name>`, holding `{"name","incarnation","addr"}`, attached to a lease kept alive. If the lease is lost (etcd unreachable longer than the TTL), the node registers again every retry interval until it succeeds, or until it finds a newer incarnation registered. `Stop` revokes the lease, which removes the key at once. |
+| `Registrar` | one key per node, `<prefix>/nodes/<name>`, holding `{"name","incarnation","addr","metadata"}`, attached to a lease kept alive. If the lease is lost (etcd unreachable longer than the TTL), the node registers again every retry interval until it succeeds, or until it finds a newer incarnation registered. `Stop` revokes the lease, which removes the key at once. |
 | `Resolver` | reads the key. |
 | `Membership` | lists the keys (every node is reported up), then watches the prefix: a put is a member up, a delete a member down, with the incarnation from the previous value. If the watch breaks (compaction, etcd restarting), it lists again and reports what changed in between. |
 
@@ -55,3 +57,29 @@ connection or a network partition, is noticed only when keepalive gives up,
 or never if keepalive is not configured. Its lease ends after the TTL
 regardless: every watching node then drops its links, monitors across them
 fire `Down{noconnection}`, and pending calls fail with "left the cluster".
+
+## Global names
+
+`cluster.Names()` is the store of the installation's
+[global names](https://floatdrop.github.io/grpcproc/concepts/addressing/#global):
+one key per name, `<prefix>/names/<name>`, holding its holder's PID, under
+the lease of the holder's node, which this `Cluster` must have registered.
+
+| | etcd |
+| --- | --- |
+| A claim | a transaction that creates the key, if it does not exist; else a `*grpcproc.TakenError` naming the holder |
+| A claim that waits (`WaitForName`) | a watch of the key, until it is deleted, then the claim again |
+| A release | a delete, if the key's create revision is still the claim's, so that a newer claim is never deleted |
+| The fencing token (`Claim.Revision`) | the key's create revision |
+| `Lookup`, `List` | one copy per process, listed a page at a time when its first node starts, then watched; a broken watch lists again |
+| `Resolve` | a read of the key |
+
+A node's claims are **lost** once its lease has not been kept alive for
+three quarters of the TTL: the holders end with `name lost` before etcd can
+let the lease end and another node claim their names, as long as the clocks
+run at the same rate; `Claim.Revision` fences what they cannot promise.
+Claims made with `KeepOnLoss` are made again once the node has registered
+again, all at once: a key that outlived the old lease moves to the new one
+with its revision, a free name is claimed with a new one, and a name another
+process took meanwhile ends the holder with `name conflict`. A node that
+dies takes its names with its lease, as its peers drop their links to it.
