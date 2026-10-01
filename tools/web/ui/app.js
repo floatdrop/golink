@@ -424,6 +424,7 @@ function clusterPage() {
 					[
 						{ t: 'Node', get: (n) => [h('b', null, n.name), n === nodes[0] ? ' ' : null, n === nodes[0] ? pill('inspector', 'info') : null] },
 						{ t: 'Advertise', get: (n) => h('span', { class: 'mono' }, n.advertise) },
+						{ t: 'Metadata', get: (n) => h('span', { class: 'mono' }, metadata(n.metadata)) },
 						{ t: 'Uptime', get: (n) => n.uptime },
 						{ t: 'Processes', num: true, get: (n) => fmtInt(n.error ? null : n.processes) },
 						{ t: 'Spawns / s', num: true, get: (n) => fmtRate(nr.get(n.name)?.spawned) },
@@ -540,6 +541,7 @@ function nodePage(node) {
 				card('Queued to peers', fmtInt(queued), queued ? fmtBytes(sum(ls, (l) => l.queued_bytes)) : 'nothing waits', queued > 0 && 'warn'),
 				card('Uptime', n.uptime || '–', 'since this incarnation started'),
 				card('Advertise', h('span', { class: 'mono' }, n.advertise || '–'), 'what peers dial'),
+				...(n.metadata ? [card('Metadata', h('span', { class: 'mono' }, metadata(n.metadata)), 'what it tells the cluster about itself')] : []),
 			);
 			cProc.push(n.processes);
 			cLife.push(d?.spawned, d?.exited);
@@ -951,6 +953,51 @@ function cronPage(_node, params) {
 	};
 }
 
+// metadata renders a node's metadata as key=value pairs, ordered by key.
+const metadata = (md) =>
+	Object.keys(md || {})
+		.sort()
+		.map((k) => `${k}=${md[k]}`)
+		.join(' ');
+
+function namesPage(node, params) {
+	let p = params;
+	const b = banner();
+	const prefix = h('input', { type: 'search', placeholder: 'prefix, such as room:', value: p.prefix || '', oninput: debounce((e) => set({ prefix: e.target.value }), 300) });
+	const list = h('div');
+	const page = {
+		every: 2000,
+		el: h(
+			'div',
+			null,
+			head('Global names', `The installation's global names, as ${node}'s copy has them, and the processes that hold them, wherever they run.`),
+			b.el,
+			h('div', { class: 'scope' }, h('label', null, 'names starting with', prefix)),
+			list,
+		),
+		banner: b.set,
+		update(np) {
+			const refetch = (np.prefix || '') !== (p.prefix || '');
+			p = np;
+			if (refetch) run(page);
+		},
+		async tick() {
+			const names = await api('/api/names', { node, prefix: p.prefix || '' });
+			list.replaceChildren(
+				table(
+					[
+						{ t: 'Name', get: (x) => h('b', null, x.name) },
+						{ t: 'Held by', get: (x) => pidLink(x.pid) },
+					],
+					names,
+					{ empty: p.prefix ? `No global name starts with ${p.prefix}.` : 'No process holds a global name.' },
+				),
+			);
+		},
+	};
+	return page;
+}
+
 function electionsPage() {
 	const b = banner();
 	const list = h('div');
@@ -1139,6 +1186,7 @@ function procDrawer(pid) {
 			cBox.push(v.mailbox);
 			const kv = [
 				['parent', pidLink(v.parent) || h('span', { class: 'muted' }, 'none: spawned by the node')],
+				['global names', v.globals?.length ? h('span', { class: 'mono' }, v.globals.join(', ')) : h('span', { class: 'muted' }, 'none')],
 				['last message', v.last_message],
 				['monitors', `${v.monitors || 0} held`],
 				['links', `${v.links || 0}${v.trap_exit ? ', trapping exits' : ''}`],
@@ -1165,6 +1213,7 @@ const pages = {
 	cluster: { make: clusterPage, title: 'Cluster' },
 	node: { make: nodePage, node: true, title: 'Node' },
 	processes: { make: processesPage, node: true, title: 'Processes' },
+	names: { make: namesPage, node: true, title: 'Global names' },
 	tree: { make: treePage, node: true, title: 'Supervision' },
 	events: { make: eventsPage, node: true, title: 'Events' },
 	cron: { make: cronPage, title: 'Cron' },

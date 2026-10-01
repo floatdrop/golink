@@ -92,7 +92,8 @@ monitors:              2
 				<>
 					<p>
 						<C>nodes</C> walks the cluster from the node it asks, following links, and says which
-						peers it could not reach. <C>node [name]</C> shows one: its processes, dead letters, and
+						peers it could not reach, with each node's metadata, its version say, which follows a
+						rolling deploy node by node. <C>node [name]</C> shows one: its processes, dead letters, and
 						each link with its traffic, the envelopes queued on it and their bytes, and its last
 						error. A down outbound link with a <C>RETRY IN</C> is a peer whose dials failed: sends to
 						it fail at once until then.
@@ -245,7 +246,7 @@ b     billing  yearly  @yearly     UTC   disabled                    0`}</Output
 			title: 'JSON',
 			body: (
 				<p>
-					<C>--json</C>, before <C>node</C>, <C>nodes</C>, <C>ps</C>, <C>inspect</C>, <C>watch</C>,{' '}
+					<C>--json</C>, before <C>node</C>, <C>nodes</C>, <C>ps</C>, <C>inspect</C>, <C>names</C>, <C>watch</C>,{' '}
 					<C>leader</C> or <C>cron</C>, prints what the table shows as JSON: one indented value, or
 					for <C>watch</C> one compact event per line. The objects are those the{' '}
 					<A to="guides/mcp/">MCP tools</A> return, which wrap lists in an object of their own, so a
@@ -273,6 +274,13 @@ b     billing  yearly  @yearly     UTC   disabled                    0`}</Output
 							<C>inspect &lt;pid|name&gt;</C>,
 							<>
 								One process, with what it says about itself: <C>--node</C>, <C>--wait</C>.
+							</>
+						],
+						[
+							<C>names [name]</C>,
+							<>
+								<A to="concepts/addressing/#global">Global names</A>: who holds one, or a list:{' '}
+								<C>--node</C>, <C>--prefix</C>, <C>--limit</C>.
 							</>
 						],
 						[

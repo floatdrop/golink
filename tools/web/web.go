@@ -69,6 +69,10 @@ func New(c *client.Client, o Options) http.Handler {
 	mux.HandleFunc("GET /api/node", s.read(func(ctx context.Context, q url.Values) (any, error) { return s.c.Node(ctx, q.Get("node")) }))
 	mux.HandleFunc("GET /api/processes", s.read(s.processes))
 	mux.HandleFunc("GET /api/process", s.read(s.process))
+	mux.HandleFunc("GET /api/names", s.read(func(ctx context.Context, q url.Values) (any, error) {
+		limit, _ := strconv.Atoi(q.Get("limit")) // 0, the node's default, unless a number
+		return s.c.Names(ctx, q.Get("node"), q.Get("prefix"), limit)
+	}))
 	mux.HandleFunc("GET /api/crons", s.read(func(ctx context.Context, q url.Values) (any, error) { return s.c.Crons(ctx, q.Get("node")) }))
 	mux.HandleFunc("GET /api/elections", s.read(func(ctx context.Context, _ url.Values) (any, error) { return s.c.Elections(ctx) }))
 	mux.HandleFunc("GET /api/events", s.events)

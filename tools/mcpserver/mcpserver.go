@@ -64,6 +64,7 @@ func New(c *client.Client, o Options) *mcp.Server {
 	mcp.AddTool(s, &mcp.Tool{Name: "list_processes", Description: "Processes of a node, filtered and sorted. Sort by mailbox to find backlogs.", Annotations: readOnly}, t.listProcesses)
 	mcp.AddTool(s, &mcp.Tool{Name: "get_process", Description: "One process by pid or name, with what it says about itself.", Annotations: readOnly}, t.getProcess)
 	mcp.AddTool(s, &mcp.Tool{Name: "watch_events", Description: "Collect a node's events for a few seconds: spawns, exits with reasons, links up and down, dead letters.", Annotations: readOnly}, t.watchEvents)
+	mcp.AddTool(s, &mcp.Tool{Name: "global_names", Description: "The installation's global names and the processes that hold them: one name, or every name with a prefix. A process found by its global name can be inspected by its pid.", Annotations: readOnly}, t.globalNames)
 	mcp.AddTool(s, &mcp.Tool{Name: "cron_jobs", Description: "The grpcproc/cron processes of a node, or of every node, and their jobs: schedule, next and last run, runs going, last failure.", Annotations: readOnly}, t.cronJobs)
 	mcp.AddTool(s, &mcp.Tool{Name: "election", Description: "A grpcproc/leader election, as each node that takes part sees it: role, term, leader, view, cordoned nodes, unreachable nodes.", Annotations: readOnly}, t.election)
 	if o.AllowWrites {
@@ -156,6 +157,35 @@ func (t tools) getProcess(ctx context.Context, _ *mcp.CallToolRequest, in proces
 	defer cancel()
 	p, err := t.c.Process(ctx, in.Node, in.Process, !in.NoInspect, wait)
 	return nil, p, err
+}
+
+type namesIn struct {
+	Node   string `json:"node,omitempty" jsonschema:"node whose copy of the names to read; empty for the node serving the Inspector"`
+	Name   string `json:"name,omitempty" jsonschema:"one global name to look up; empty to list"`
+	Prefix string `json:"prefix,omitempty" jsonschema:"list only names that start with this, such as room:"`
+	Limit  uint   `json:"limit,omitempty" jsonschema:"list at most this many; default 100"`
+}
+
+type namesOut struct {
+	Names []client.NameView `json:"names"`
+}
+
+func (t tools) globalNames(ctx context.Context, _ *mcp.CallToolRequest, in namesIn) (*mcp.CallToolResult, namesOut, error) {
+	ctx, cancel := t.ctx(ctx)
+	defer cancel()
+	out := namesOut{Names: []client.NameView{}}
+	if in.Name != "" {
+		n, ok, err := t.c.LookupName(ctx, in.Node, in.Name)
+		if ok {
+			out.Names = append(out.Names, n)
+		}
+		return nil, out, err
+	}
+	names, err := t.c.Names(ctx, in.Node, in.Prefix, int(min(cmp.Or(in.Limit, 100), 1<<20)))
+	if names != nil {
+		out.Names = names
+	}
+	return nil, out, err
 }
 
 type watchIn struct {
