@@ -1064,6 +1064,7 @@ Config.Names Names
 type Holder interface{ PID() grpcproc.PID; Node() *grpcproc.Node } // a *grpcproc.Process of any M
 func (c *Cluster) Claim(ctx context.Context, p Holder, name string, opts ...ClaimOption) (*Claim, error) // *TakenError{Holder}
 func KeepOnLoss() ClaimOption    // keep the holder running when the claim is lost, and claim again
+func Wait() ClaimOption          // wait for a name that is held to be free, and claim it then
 func (c *Claim) Revision() int64 // the fencing token; a new one after a claim made again
 func (c *Claim) Held() bool      // false while a KeepOnLoss claim is lost
 func (c *Claim) Release(ctx context.Context) error
@@ -1138,6 +1139,24 @@ func (c *Claim) Release(ctx context.Context) error
   `random_exit_name`. Between the two, two rooms carry one name: the
   application chooses that by the option, for a process whose duplicate is
   a nuisance and whose absence is an outage.
+- **Waiting for a name: a standby.** The same binary on five nodes, each
+  with a `billing-gateway` process, of which one may be active: one
+  connection to an outside API, one consumer of a queue in order. With
+  `Wait()`, `Claim` does not fail with `ErrTaken` but blocks, until ctx
+  is done, for the name to be free, and claims it then: the holder exited,
+  or its node's lease ended. That is etcd's election, and the light
+  alternative to `leader` for a singleton with no state to hand over: etcd
+  elects, not a Raft group of the nodes, and the standby takes over within
+  a TTL and a watch event, without a supervisor elsewhere to restart
+  anything. What it waits on is the key, deleted, and not the holder's
+  `Down`: `Down{noconnection}` says this node lost its link, not that the
+  holder is gone, and a standby that claims again on it fails the
+  compare-and-swap, as it should, and spins. Standbys race for the
+  compare-and-swap when the key goes, and one wins; no queue orders them,
+  since with a few standbys the race costs a few failed writes and which
+  one wins does not matter. A process per name that waits is fine for a
+  few singletons; per-key processes, rooms and orders, are started when
+  needed and do not wait.
 - **A directory, not placement.** A global name says where a process is,
   not where it should go. The node with the most room is decided by load,
   which changes by the second and is not `Member.Metadata`, fixed for a
@@ -1166,9 +1185,8 @@ func (c *Claim) Release(ctx context.Context) error
 - **Tests.** `grpcproctest` gets an in-memory `Names` with the same claims,
   shared by a cluster's nodes, so a test of a moving service needs no etcd.
 
-Open: whether `Claim` should be able to wait for a name to be free (a
-standby), and whether the Inspector and `grpcprocctl` list global names
-beside local ones.
+Open: whether the Inspector and `grpcprocctl` list global names beside
+local ones.
 
 ## What was rejected, and why
 
