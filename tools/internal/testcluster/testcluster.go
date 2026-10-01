@@ -23,7 +23,7 @@ type Fixture struct {
 	C        *grpcproctest.Cluster
 	Sup      grpcproc.PID // a supervisor with children "w1" and "w2"
 	Stuck    grpcproc.PID // "stuck": busy in a handler, 3 messages waiting
-	Talker   grpcproc.PID // "talker": publishes state=ready through WithInspect
+	Talker   grpcproc.PID // "talker": publishes state=ready through WithInspect, holds the global name "room:talker"
 	Echo     grpcproc.PID // "echo" on node "b"
 	Release  func()       // unblocks "stuck"
 	Resolver grpcproc.Resolver
@@ -37,17 +37,28 @@ func worker(p *grpcproc.Process[*testpb.Ping]) error {
 	}
 }
 
+// unlisted is a store of global names that cannot list them.
+type unlisted struct{ grpcproc.Names }
+
 // Start runs nodes a and b (and any others named) with Inspectors that
 // forward to each other, and links a to b. Node a backs off from a peer whose
-// dials fail (Config.DialBackoff), so a test can show it a down link.
+// dials fail (Config.DialBackoff), so a test can show it a down link, and
+// says version=1.0 in its metadata. A node named "nonames" has no global
+// names, and one named "unlisted" has names it cannot list.
 func Start(t *testing.T, more ...string) *Fixture {
 	t.Helper()
 	// Each Inspector reaches the others as its node does, through the node's
 	// Dial (so a Partition cuts it off too).
 	c := grpcproctest.NewWith(t, []grpcproctest.Option{
 		grpcproctest.WithConfig(func(name string, cfg *grpcproc.Config) {
-			if name == "a" {
+			switch name {
+			case "a":
 				cfg.DialBackoff = time.Hour
+				cfg.Metadata = map[string]string{"version": "1.0"}
+			case "nonames":
+				cfg.Names = nil
+			case "unlisted":
+				cfg.Names = unlisted{cfg.Names}
 			}
 		}),
 		grpcproctest.WithServices(func(n *grpcproc.Node, s *grpc.Server) {
@@ -86,7 +97,10 @@ func Start(t *testing.T, more ...string) *Fixture {
 	for range 4 {
 		_ = stuck.Send(t.Context(), a, &testpb.Ping{})
 	}
+	claimed := make(chan error, 1)
 	talker, _ := a.Spawn[proto.Message](func(p *grpcproc.Process[proto.Message]) error {
+		_, err := p.Claim(p.Context(), "room:talker")
+		claimed <- err
 		for {
 			if _, err := p.Receive(); err != nil {
 				return err
@@ -94,6 +108,9 @@ func Start(t *testing.T, more ...string) *Fixture {
 		}
 	}, grpcproc.WithName("talker"), grpcproc.WithInspect(func() map[string]string { return map[string]string{"state": "ready"} }))
 	f.Talker = talker.PID()
+	if err := <-claimed; err != nil {
+		t.Fatal(err)
+	}
 	echo, _ := b.Spawn[*testpb.Ping](func(p *grpcproc.Process[*testpb.Ping]) error {
 		for {
 			m, err := p.Receive()

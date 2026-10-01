@@ -69,6 +69,7 @@ monitors:              2
 | `nodes` | every node reachable from this one, following links |
 | `ps` | processes: `--node`, `--name`, `--label`, `--state`, `--min-mailbox`, `--sort pid\|mailbox\|received\|sent`, `--limit` |
 | `inspect <pid\|name>` | one process, with what it says about itself: `--node`, `--wait` |
+| `names [name]` | [global names](https://floatdrop.github.io/grpcproc/concepts/addressing/#global): who holds one, or a list: `--node`, `--prefix`, `--limit` |
 | `watch` | stream spawns, exits, links, dead letters: `--node`, `--kind`, `--count` |
 | `exit <pid\|name> [reason]` | ask a process to exit |
 | `loglevel <pid\|name> <level>` | change one process's log level |
@@ -87,7 +88,7 @@ what its MCP server reports.
 
 A pid is written as grpcproc prints it, `<node.incarnation.id>`; a name is
 looked up on `--node`, by default the node serving the Inspector.
-`--json` before `node`, `nodes`, `ps`, `inspect`, `watch`, `leader` or `cron` prints the same
+`--json` before `node`, `nodes`, `ps`, `inspect`, `names`, `watch`, `leader` or `cron` prints the same
 data as JSON: one indented value, or for `watch` one compact event per line,
 so `grpcprocctl --json watch | jq` sees events as they happen. The objects
 are those the MCP tools return, which wrap lists in an object of their own.
@@ -208,6 +209,7 @@ or a busy process means) and offers:
 | `watch_events` | collect events for a few seconds |
 | `election` | a leader election, as each node sees it |
 | `cron_jobs` | cron processes and their jobs, on a node or all of them |
+| `global_names` | who holds a global name, or every name with a prefix |
 | `exit_process`, `set_log_level`, `move_leader`, `cordon_node`, `uncordon_node`, `enable_cron_job`, `disable_cron_job`, `remove_cron_job` | only with `--allow-writes` |
 
 So "orders are slow since the deploy" becomes: list processes by mailbox,

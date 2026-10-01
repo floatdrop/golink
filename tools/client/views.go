@@ -8,16 +8,17 @@ import (
 
 // NodeView is a node as grpcprocctl shows it and its MCP tools return it.
 type NodeView struct {
-	Name        string     `json:"name" jsonschema:"node name"`
-	Incarnation uint64     `json:"incarnation,omitzero" jsonschema:"changes every time the node starts"`
-	Advertise   string     `json:"advertise,omitempty" jsonschema:"address peers dial"`
-	Uptime      string     `json:"uptime,omitempty"`
-	Processes   int        `json:"processes"`
-	Spawned     uint64     `json:"spawned"`
-	Exited      uint64     `json:"exited"`
-	DeadLetters uint64     `json:"dead_letters" jsonschema:"messages that could not be delivered"`
-	Links       []LinkView `json:"links,omitempty"`
-	Error       string     `json:"error,omitempty" jsonschema:"why the node could not be inspected"`
+	Name        string            `json:"name" jsonschema:"node name"`
+	Incarnation uint64            `json:"incarnation,omitzero" jsonschema:"changes every time the node starts"`
+	Advertise   string            `json:"advertise,omitempty" jsonschema:"address peers dial"`
+	Metadata    map[string]string `json:"metadata,omitempty" jsonschema:"what the node says about itself to the cluster: its version, its zone (Config.Metadata)"`
+	Uptime      string            `json:"uptime,omitempty"`
+	Processes   int               `json:"processes"`
+	Spawned     uint64            `json:"spawned"`
+	Exited      uint64            `json:"exited"`
+	DeadLetters uint64            `json:"dead_letters" jsonschema:"messages that could not be delivered"`
+	Links       []LinkView        `json:"links,omitempty"`
+	Error       string            `json:"error,omitempty" jsonschema:"why the node could not be inspected"`
 }
 
 // LinkView is one direction of traffic with a peer.
@@ -43,6 +44,7 @@ type ProcessView struct {
 	Label         string            `json:"label" jsonschema:"what metrics aggregate by; the message type by default"`
 	Type          string            `json:"type" jsonschema:"Go type of the messages it accepts"`
 	Parent        string            `json:"parent,omitempty" jsonschema:"the process that started it, such as its supervisor"`
+	Globals       []string          `json:"globals,omitempty" jsonschema:"the installation's global names it holds"`
 	State         string            `json:"state" jsonschema:"idle (waiting in Receive), running, waiting-reply (in a Call), exiting"`
 	Uptime        string            `json:"uptime"`
 	Mailbox       int               `json:"mailbox" jsonschema:"messages waiting"`
@@ -59,6 +61,12 @@ type ProcessView struct {
 	LogLevel      string            `json:"log_level"`
 	Inspect       map[string]string `json:"inspect,omitempty" jsonschema:"what the process says about itself"`
 	InspectError  string            `json:"inspect_error,omitempty" jsonschema:"why inspect is empty: busy, or gone"`
+}
+
+// NameView is a global name and the process that holds it.
+type NameView struct {
+	Name string `json:"name"`
+	PID  string `json:"pid" jsonschema:"the process that holds it"`
 }
 
 // EventView is something that happened on a node.
@@ -105,7 +113,7 @@ func pidString(p grpcproc.PID) string {
 
 func (c *Client) nodeView(n grpcproc.NodeInfo) NodeView {
 	v := NodeView{
-		Name: n.ID.Name, Incarnation: n.ID.Incarnation, Advertise: n.Advertise,
+		Name: n.ID.Name, Incarnation: n.ID.Incarnation, Advertise: n.Advertise, Metadata: n.Metadata,
 		Uptime: c.since(n.StartedAt), Processes: n.Processes,
 		Spawned: n.Spawned, Exited: n.Exited, DeadLetters: n.DeadLetters,
 	}
@@ -125,7 +133,7 @@ func (c *Client) nodeView(n grpcproc.NodeInfo) NodeView {
 
 func (c *Client) processView(p grpcproc.ProcessInfo) ProcessView {
 	return ProcessView{
-		PID: p.PID.String(), Name: p.Name, Label: p.Label, Type: p.Type, Parent: pidString(p.Parent),
+		PID: p.PID.String(), Name: p.Name, Label: p.Label, Type: p.Type, Parent: pidString(p.Parent), Globals: p.Globals,
 		State: p.State.String(), Uptime: c.since(p.StartedAt),
 		Mailbox: p.Mailbox.Depth, MailboxPeak: p.Mailbox.Peak, OldestWait: short(p.Mailbox.OldestAge),
 		Received: p.Received, Sent: p.Sent, CallsInFlight: p.CallsInFlight, LastMessage: p.LastMessage,

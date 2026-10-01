@@ -58,7 +58,8 @@ export const guidesMcp: Doc = {
 							[<C>get_process</C>, 'One process by pid or name, with what it says about itself, waiting a while for a busy one.'],
 							[<C>watch_events</C>, 'A node’s events, collected for a few seconds: spawns, exits with reasons, links, dead letters.'],
 							[<C>election</C>, 'A leader election, as each node that takes part sees it, and who leads.'],
-							[<C>cron_jobs</C>, 'Cron processes and their jobs, on a node or all of them.']
+							[<C>cron_jobs</C>, 'Cron processes and their jobs, on a node or all of them.'],
+							[<C>global_names</C>, 'Who holds a global name, or every name with a prefix, such as room:.']
 						]}
 					/>
 					<p>

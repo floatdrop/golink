@@ -83,6 +83,7 @@ Commands:
   nodes                       every node reachable from this one
   ps                          processes (--node, --name, --label, --state, --min-mailbox, --sort, --limit)
   inspect <pid|name>          one process, and what it says about itself (--node, --wait)
+  names [name]                global names: who holds one, or a list (--node, --prefix, --limit)
   watch                       stream events (--node, --kind, --count)
   exit <pid|name> [reason]    ask a process to exit (--node)
   loglevel <pid|name> <level> set a process's log level (--node)
@@ -247,7 +248,7 @@ func init() {
 	commands = map[string]command{
 		"node": cmdNode, "nodes": cmdNodes, "ps": cmdPS, "inspect": cmdInspect, "watch": cmdWatch,
 		"exit": cmdExit, "loglevel": cmdLogLevel, "dot": cmdDot, "mcp": cmdMCP, "leader": cmdLeader, "cron": cmdCron,
-		"web": cmdWeb,
+		"web": cmdWeb, "names": cmdNames,
 	}
 }
 
@@ -297,8 +298,12 @@ func cmdNode(ctx context.Context, a *app, args []string) error {
 	if a.json {
 		return a.printJSON(n)
 	}
-	fmt.Fprintf(a.env.Stdout, "node:          %s#%d\nadvertise:     %s\nuptime:        %s\nprocesses:     %d (spawned %d, exited %d)\ndead letters:  %d\n\n",
-		n.Name, n.Incarnation, n.Advertise, n.Uptime, n.Processes, n.Spawned, n.Exited, n.DeadLetters)
+	fmt.Fprintf(a.env.Stdout, "node:          %s#%d\nadvertise:     %s\n", n.Name, n.Incarnation, n.Advertise)
+	if len(n.Metadata) > 0 {
+		fmt.Fprintf(a.env.Stdout, "metadata:      %s\n", metadata(n.Metadata))
+	}
+	fmt.Fprintf(a.env.Stdout, "uptime:        %s\nprocesses:     %d (spawned %d, exited %d)\ndead letters:  %d\n\n",
+		n.Uptime, n.Processes, n.Spawned, n.Exited, n.DeadLetters)
 	rows := make([][]string, 0, len(n.Links))
 	for _, l := range n.Links {
 		queued, queuedBytes := "", "" // only an out link has a queue
@@ -340,9 +345,59 @@ func cmdNodes(ctx context.Context, a *app, args []string) error {
 				peers[i] = peer + "(down)"
 			}
 		}
-		rows = append(rows, []string{n.Name, n.Advertise, n.Uptime, strconv.Itoa(n.Processes), u(n.DeadLetters), strings.Join(peers, ","), n.Error})
+		rows = append(rows, []string{n.Name, n.Advertise, n.Uptime, strconv.Itoa(n.Processes), u(n.DeadLetters), strings.Join(peers, ","), metadata(n.Metadata), n.Error})
 	}
-	return a.table("NODE\tADVERTISE\tUPTIME\tPROCESSES\tDEAD LETTERS\tPEERS\tERROR", rows)
+	return a.table("NODE\tADVERTISE\tUPTIME\tPROCESSES\tDEAD LETTERS\tPEERS\tMETADATA\tERROR", rows)
+}
+
+// metadata renders a node's metadata as key=value pairs, ordered by key.
+func metadata(md map[string]string) string {
+	pairs := make([]string, 0, len(md))
+	for _, k := range slices.Sorted(maps.Keys(md)) {
+		pairs = append(pairs, k+"="+md[k])
+	}
+	return strings.Join(pairs, " ")
+}
+
+func cmdNames(ctx context.Context, a *app, args []string) error {
+	var node, prefix string
+	var limit int
+	fs, err := a.flags("names", args, func(fs *flag.FlagSet) {
+		fs.StringVar(&node, "node", "", "node whose copy of the names to read, by default the one serving the Inspector")
+		fs.StringVar(&prefix, "prefix", "", "only names that start with this")
+		fs.IntVar(&limit, "limit", 0, "show at most this many (0: the node's default, 1000)")
+	})
+	if err != nil {
+		return err
+	}
+	ctx, cancel := a.request(ctx)
+	defer cancel()
+	var names []client.NameView
+	switch fs.NArg() {
+	case 0:
+		if names, err = a.client.Names(ctx, node, prefix, limit); err != nil {
+			return err
+		}
+	case 1:
+		n, ok, err := a.client.LookupName(ctx, node, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("no process holds %q", fs.Arg(0))
+		}
+		names = []client.NameView{n}
+	default:
+		return usageError{"want at most one name"}
+	}
+	if a.json {
+		return a.printJSON(names)
+	}
+	rows := make([][]string, 0, len(names))
+	for _, n := range names {
+		rows = append(rows, []string{n.Name, n.PID})
+	}
+	return a.table("NAME\tPID", rows)
 }
 
 func cmdPS(ctx context.Context, a *app, args []string) error {
@@ -409,7 +464,7 @@ func cmdInspect(ctx context.Context, a *app, args []string) error {
 	}
 	w := tabwriter.NewWriter(a.env.Stdout, 0, 0, 2, ' ', 0)
 	for _, kv := range [][2]string{
-		{"pid", p.PID}, {"name", p.Name}, {"label", p.Label}, {"type", p.Type},
+		{"pid", p.PID}, {"name", p.Name}, {"globals", strings.Join(p.Globals, ", ")}, {"label", p.Label}, {"type", p.Type},
 		{"parent", p.Parent}, {"state", p.State}, {"uptime", p.Uptime},
 		{"mailbox", fmt.Sprintf("%d (peak %d, oldest %s)", p.Mailbox, p.MailboxPeak, cmp.Or(p.OldestWait, "-"))},
 		{"received", u(p.Received)}, {"sent", u(p.Sent)}, {"calls in flight", strconv.Itoa(int(p.CallsInFlight))},
