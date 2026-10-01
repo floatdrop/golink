@@ -31,7 +31,8 @@ type Resolver interface {
 type Member struct {
 	Name        string
 	Incarnation uint64
-	Addr        string // where peers dial it: its Config.Advertise
+	Addr        string            // where peers dial it: its Config.Advertise
+	Metadata    map[string]string // its Config.Metadata; not to be modified
 }
 
 // Registrar publishes a node to the cluster, so that peers resolve it and
@@ -119,6 +120,13 @@ type Config struct {
 	Resolver Resolver
 	// Registrar, if set, publishes the node on Start and withdraws it on Stop.
 	Registrar Registrar
+	// Metadata describes this start of the node to the cluster: the
+	// application's version, its zone, whatever placement or a rolling
+	// deploy decides by. grpcproc reads none of it. It is published with the
+	// node's Member through the Registrar, so peers find it in their
+	// Membership (Node.Members), and NodeInfo and the Inspector show it. It
+	// is fixed for the node's life, so a change is a new start.
+	Metadata map[string]string
 	// Membership, if set, is watched from Start: a peer that leaves the
 	// cluster, or comes back as a newer incarnation, has its links dropped,
 	// which fires Down{noconnection} for monitors across them and fails
@@ -225,6 +233,7 @@ type Node struct {
 	backoff  map[string]*redial // peers whose last dial failed
 	dials    map[string]uint64  // per peer, for LinkInfo.Reconnects
 	newest   map[string]uint64  // per peer, the newest incarnation seen (see meet)
+	members  map[string]Member  // what Membership reports up, by name (see Members)
 	stopping bool               // Stop began: no new processes
 	stopped  bool               // links closed: no new links
 	// settling counts, per peer, the changes to its links that were decided
@@ -290,6 +299,7 @@ func NewNode(cfg Config) (*Node, error) {
 	if cfg.Incarnation == 0 {
 		cfg.Incarnation = nextIncarnation()
 	}
+	cfg.Metadata = maps.Clone(cfg.Metadata)
 	cfg.Logger = cmp.Or(cfg.Logger, slog.Default())
 	cfg.DialTimeout = cmp.Or(cfg.DialTimeout, 5*time.Second)
 	cfg.DialBackoff = cmp.Or(cfg.DialBackoff, 5*time.Second)
@@ -309,6 +319,7 @@ func NewNode(cfg Config) (*Node, error) {
 		backoff:  map[string]*redial{},
 		dials:    map[string]uint64{},
 		newest:   map[string]uint64{},
+		members:  map[string]Member{},
 		settling: map[string]int{},
 	}
 	n.settled = sync.NewCond(&n.mu)
@@ -394,7 +405,7 @@ func (n *Node) Start(ctx context.Context) error {
 		close(watched)
 	}
 	if r := n.cfg.Registrar; r != nil {
-		withdraw, err := r.Register(ctx, Member{Name: n.id.Name, Incarnation: n.id.Incarnation, Addr: n.cfg.Advertise})
+		withdraw, err := r.Register(ctx, Member{Name: n.id.Name, Incarnation: n.id.Incarnation, Addr: n.cfg.Advertise, Metadata: maps.Clone(n.cfg.Metadata)})
 		if err != nil {
 			return failed(fmt.Errorf("grpcproc: register: %w", err))
 		}
@@ -415,10 +426,47 @@ func (n *Node) Start(ctx context.Context) error {
 
 func (n *Node) watchMembers(events <-chan MemberEvent) {
 	for ev := range events {
+		n.recordMember(ev)
 		if ev.Member.Name != n.id.Name {
 			n.memberEvent(ev)
 		}
 	}
+}
+
+// recordMember keeps Members up to date: a member reported up replaces one
+// of the same name, unless it is an older incarnation, and one reported down
+// goes, if it is the incarnation kept or the event says whichever.
+func (n *Node) recordMember(ev MemberEvent) {
+	m := ev.Member
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	kept, ok := n.members[m.Name]
+	switch {
+	case ev.Up && (!ok || m.Incarnation == 0 || m.Incarnation >= kept.Incarnation):
+		n.members[m.Name] = m
+	case !ev.Up && ok && (m.Incarnation == 0 || m.Incarnation == kept.Incarnation):
+		delete(n.members, m.Name)
+	}
+}
+
+// Members lists the nodes Config.Membership reports up, this one included,
+// ordered by name, each as the newest incarnation reported and with the
+// Metadata it registered: what placement chooses among, by version or zone
+// say. It is this node's view, as current as the Membership's events, and
+// empty without a Membership. The Metadata maps are shared: do not modify
+// them.
+func (n *Node) Members() []Member {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return slices.SortedFunc(maps.Values(n.members), func(a, b Member) int { return cmp.Compare(a.Name, b.Name) })
+}
+
+// Member returns the member named name, as Members has it.
+func (n *Node) Member(name string) (Member, bool) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	m, ok := n.members[name]
+	return m, ok
 }
 
 // memberEvent drops the links to a peer that left, or that came back as a
@@ -622,6 +670,7 @@ func (n *Node) Info() NodeInfo {
 	info := NodeInfo{
 		ID:          n.id,
 		Advertise:   n.cfg.Advertise,
+		Metadata:    maps.Clone(n.cfg.Metadata),
 		Processes:   len(n.procs),
 		Spawned:     n.spawned.Load(),
 		Exited:      n.exited.Load(),

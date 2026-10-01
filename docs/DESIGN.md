@@ -452,7 +452,7 @@ a link and, when it admits one, returns what the peer may ask over it.
 
 ```go
 type Resolver interface { Resolve(ctx, node string) (addr string, err error) }
-type Member struct { Name string; Incarnation uint64; Addr string }
+type Member struct { Name string; Incarnation uint64; Addr string; Metadata map[string]string }
 type Registrar interface {
     Register(ctx, self Member) (withdraw func(context.Context) error, err error)
 }
@@ -474,6 +474,29 @@ fail with the cause ("left the cluster", "restarted as incarnation N"). It
 catches a crashed peer behind a half-open connection even when keepalive is
 not configured. An `up` for an older incarnation than a node has seen is
 ignored, as a link from it would be refused.
+
+**Member metadata.** `Config.Metadata` describes one start of a node: the
+application's version, its zone, whatever placement or a rolling deploy
+decides by. grpcproc reads none of it. `Start` registers it with the
+node's `Member`, so a `Membership` carries it to every node, and
+`Node.Members()` is what the node's `Membership` reports up, each member
+with its metadata: the newest incarnation of each name, this node
+included, as current as the events. It is the input for choosing where a
+child goes (the newest version, the caller's zone) without a lookup of its
+own; `NodeInfo.Metadata` and the Inspector show a node's own, so a tool
+sees a rollout's progress node by node.
+
+- **Fixed for the node's life.** A version or a zone does not change while
+  a process runs, and metadata that did would need publishing again and
+  ordering against the links. A change is a new start, whose newer
+  incarnation replaces the old member everywhere, as it already does.
+- **Not on the links.** It reaches peers through `Membership`, not the
+  `Hello`: a node needs the metadata of nodes it has no link to, to choose
+  among them, and without a `Membership` the Inspector still shows each
+  node's own. The wire is unchanged.
+- **Not identity.** A node claims its metadata; nothing checks it. `Admit`
+  decides by what transport credentials prove, not by what a peer says it
+  is.
 
 ### grpcproctest
 
@@ -549,7 +572,7 @@ type ProcessInfo struct {
 
 func (n *Node) Processes() []ProcessInfo          // ordered by PID.ID
 func (n *Node) Process(pid PID) (ProcessInfo, bool)
-func (n *Node) Info() NodeInfo                   // name, incarnation, uptime, counts, Links []LinkInfo
+func (n *Node) Info() NodeInfo                   // name, incarnation, metadata, uptime, counts, Links []LinkInfo
 ```
 
 `LinkInfo` per peer: state, established at, reconnects, messages and bytes in
@@ -1166,9 +1189,11 @@ OpenTelemetry are.
   an actor.
 - **More discovery**: a DNS SRV resolver, standard library only, so in the
   core, and a Kubernetes one, a nested module for client-go.
-- **Metadata on `Member`**, the application's version above all, so that a
-  rolling deploy keeps new work and leadership on new nodes, as Akka's
-  `app-version` does, and `Cordon` keeps old ones from leading.
+- **Member metadata, the rest of it** (see Discovery interfaces): the etcd
+  record carrying it, `grpcprocctl nodes` showing it, both once a core with
+  it is released; then `leader` preferring new versions to lead, as Akka's
+  `app-version` keeps new work on new nodes, and `Cordon` keeping old ones
+  from leading during a rollout.
 - **An operations guide**: keepalive values, static `Voters` or etcd
   `Membership` for an election, the two election timeouts in which two nodes
   can each believe they lead and `Lease.Term` against it, and the order of a

@@ -65,5 +65,8 @@ func TestEventConversions(t *testing.T) {
 		if n := inspect.NodeInfo(inspect.NodeInfoToProto(grpcproc.NodeInfo{Links: []grpcproc.LinkInfo{down}})); !n.Links[0].RetryAt.Equal(now) || n.Links[0].State != grpcproc.LinkDown || n.Links[0].Queued != 5 || n.Links[0].QueuedBytes != 7 {
 			t.Fatalf("%+v", n.Links[0])
 		}
+		if n := inspect.NodeInfo(inspect.NodeInfoToProto(grpcproc.NodeInfo{Metadata: map[string]string{"version": "2"}})); n.Metadata["version"] != "2" {
+			t.Fatalf("metadata %v", n.Metadata)
+		}
 	})
 }

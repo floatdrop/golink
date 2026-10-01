@@ -69,6 +69,7 @@ func nodeInfoTo(n grpcproc.NodeInfo) *inspectv1.NodeInfo {
 	out := &inspectv1.NodeInfo{
 		Id:          nodeIDTo(n.ID),
 		Advertise:   n.Advertise,
+		Metadata:    n.Metadata,
 		StartedAt:   timeTo(n.StartedAt),
 		Processes:   uint32(n.Processes),
 		Spawned:     n.Spawned,
@@ -144,6 +145,7 @@ func NodeInfo(n *inspectv1.NodeInfo) grpcproc.NodeInfo {
 	out := grpcproc.NodeInfo{
 		ID:          nodeIDFrom(n.GetId()),
 		Advertise:   n.GetAdvertise(),
+		Metadata:    n.GetMetadata(),
 		Processes:   int(n.GetProcesses()),
 		Spawned:     n.GetSpawned(),
 		Exited:      n.GetExited(),

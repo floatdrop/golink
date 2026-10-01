@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -158,13 +159,15 @@ func TestRegistrarLifecycle(t *testing.T) {
 		c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithConfig(func(name string, cfg *grpcproc.Config) {
 			if name == "a" {
 				cfg.Registrar = r
+				cfg.Metadata = map[string]string{"version": "1.2.3"}
 			}
 		})}, "a", "b")
 		a, b := c.Node("a"), c.Node("b")
 		if err := a.Start(t.Context()); err != nil { // a second Start does nothing
 			t.Fatal(err)
 		}
-		if len(r.members) != 1 || r.members[0] != (grpcproc.Member{Name: "a", Incarnation: a.ID().Incarnation, Addr: "a"}) {
+		want := grpcproc.Member{Name: "a", Incarnation: a.ID().Incarnation, Addr: "a", Metadata: map[string]string{"version": "1.2.3"}}
+		if len(r.members) != 1 || !reflect.DeepEqual(r.members[0], want) {
 			t.Fatalf("registered %+v", r.members)
 		}
 		// Withdrawing comes last: by then a's processes are gone and b has seen
@@ -307,5 +310,74 @@ func TestMembershipIsTheConfigs(t *testing.T) {
 	}
 	if with.Membership() != m || without.Membership() != nil {
 		t.Fatalf("%v %v", with.Membership(), without.Membership())
+	}
+}
+
+// Members is what Membership reports up, with the Metadata each member
+// registered: a newer incarnation replaces an older one, which is not let
+// back, and a member goes when its incarnation, or whichever, is reported
+// down.
+func TestMembers(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m := &fakeMembership{events: make(chan grpcproc.MemberEvent)}
+		c := grpcproctest.NewWith(t, []grpcproctest.Option{grpcproctest.WithConfig(func(name string, cfg *grpcproc.Config) {
+			cfg.Membership = m
+		})}, "a")
+		a := c.Node("a")
+		members := func() string {
+			var out []string
+			for _, mb := range a.Members() {
+				out = append(out, fmt.Sprintf("%s#%d%v", mb.Name, mb.Incarnation, mb.Metadata))
+			}
+			return strings.Join(out, " ")
+		}
+		up := func(name string, inc uint64, version string) {
+			m.events <- grpcproc.MemberEvent{Up: true, Member: grpcproc.Member{Name: name, Incarnation: inc, Metadata: map[string]string{"version": version}}}
+		}
+		down := func(name string, inc uint64) {
+			m.events <- grpcproc.MemberEvent{Member: grpcproc.Member{Name: name, Incarnation: inc}}
+		}
+		check := func(want string) {
+			t.Helper()
+			flush(m) // a down event for zzz, which a never had
+			if got := members(); got != want {
+				t.Fatalf("members %q, want %q", got, want)
+			}
+		}
+
+		up("a", a.ID().Incarnation, "2")
+		up("x", 5, "1")
+		check("a#" + fmt.Sprint(a.ID().Incarnation) + "map[version:2] x#5map[version:1]")
+		up("x", 4, "0") // older: not let back
+		up("x", 6, "2")
+		down("x", 5) // not the one kept
+		check("a#" + fmt.Sprint(a.ID().Incarnation) + "map[version:2] x#6map[version:2]")
+		if mb, ok := a.Member("x"); !ok || mb.Metadata["version"] != "2" {
+			t.Fatalf("Member(x): %+v, %v", mb, ok)
+		}
+		down("x", 0) // whichever
+		up("y", 0, "3")
+		check("a#" + fmt.Sprint(a.ID().Incarnation) + "map[version:2] y#0map[version:3]")
+		if _, ok := a.Member("x"); ok {
+			t.Fatal("x is still a member")
+		}
+	})
+}
+
+// A node's Metadata is its own copy, in NodeInfo too.
+func TestNodeMetadata(t *testing.T) {
+	md := map[string]string{"zone": "eu-1"}
+	n, err := grpcproc.NewNode(grpcproc.Config{Name: "a", Resolver: grpcproc.StaticResolver{}, Metadata: md})
+	if err != nil {
+		t.Fatal(err)
+	}
+	md["zone"] = "us-1"
+	info := n.Info()
+	info.Metadata["zone"] = "ap-1"
+	if got := n.Info().Metadata["zone"]; got != "eu-1" {
+		t.Fatalf("zone %q", got)
+	}
+	if len(n.Members()) != 0 {
+		t.Fatalf("members without Membership: %v", n.Members())
 	}
 }

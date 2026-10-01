@@ -101,6 +101,7 @@ type LinkInfo struct {
 type NodeInfo struct {
 	ID          NodeID
 	Advertise   string
+	Metadata    map[string]string // Config.Metadata
 	StartedAt   time.Time
 	Processes   int
 	Spawned     uint64
