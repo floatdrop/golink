@@ -116,9 +116,9 @@ as long as clocks agree to within the time between two starts, and a random
 one would be refused whenever it came out lower than the last. It fences grpcproc traffic only: an old instance
 can still write to a database, which needs fencing of its own.
 
-Names are per node. A cluster-wide registry is open work, etcd-backed (see
-Open work); it is deliberately separate from local registration, as
-Erlang's `global` is.
+Names are per node. Names of the whole installation are proposed, on etcd
+(see Global names); they are deliberately separate from local
+registration, as Erlang's `global` is.
 
 ### Wire protocol
 
@@ -1014,6 +1014,95 @@ leader's singleton, and its state the singleton's.
   `ElectionTimeout` goes up. `Lease.Term` is the fencing token for external
   resources; `Confirm` makes leadership wait for an external lock.
 
+## Global names (proposed, not built)
+
+A process's name is its node's: `Named[M]("warehouse", "stock")` reaches it
+only if the caller knows the node. A global name belongs to the
+installation, and whichever process holds it, wherever it runs, is what
+`Global{"ledger"}` reaches. It is for a service that moves, restarted by a
+supervisor on another node or placed by `StartChildFrom`, and for many of
+them: one coordinator per tenant or per order, where a `leader` election
+per name would cost a Raft group each. `grpcproc/etcd` knows nodes, not
+processes, and an application that writes the keys itself gets the parts
+below wrong, the claim's lifetime first.
+
+```go
+// core
+type Global struct{ Name string } // a Target: whoever holds Name in this installation
+type Names interface {
+    Watch(ctx context.Context) error   // from Start, before Registrar; returns once every name is known
+    Lookup(name string) (PID, bool)    // must not block: the implementation keeps what it watches
+}
+Config.Names Names
+
+// grpcproc/etcd: *Cluster implements Names, and claims
+type Holder interface{ PID() grpcproc.PID; Node() *grpcproc.Node } // a *grpcproc.Process of any M
+func (c *Cluster) Claim(ctx context.Context, p Holder, name string) (*Claim, error) // ErrTaken, with the holder
+func (c *Claim) Revision() int64 // the fencing token
+func (c *Claim) Release(ctx context.Context) error
+```
+
+- **Resolved on the sender's node, to a PID.** `Send`, `Call`, `Monitor`,
+  `Link` and `Exit` to a `Global`, and an `AddrOf[M](Global{…})`, look the
+  name up in `Config.Names` and go to the PID it gives, as if addressed by
+  it. Nothing on the wire changes, and every API that takes a `Target`, an
+  actor's supervisor or a pubsub topic say, takes a global name too.
+  `Lookup` must not block, since `Process.SendTo` has no ctx: the etcd
+  implementation lists `<prefix>/names/` and watches it, as `Membership`
+  does `<prefix>/nodes/`, and `Start` waits for the list. A name no one
+  holds is a process that does not exist: a call fails with `ErrNoProc`, a
+  monitor gets `Down{noproc}` with the name in `Down.Name`, a message is a
+  dead letter.
+- **Stale for a moment, never wrong for long.** A lookup reads this node's
+  copy, which lags etcd by a watch event. A send in that gap reaches the old
+  holder's PID: `noproc` once it has exited, `noconnection` if its node is
+  gone, both of which delivery at most once already allows. A monitor
+  follows the process it found, not the name: its `Down` says that holder
+  ended, and the caller looks again, as a monitor of a restarted child
+  does.
+- **A claim lives as long as its process.** `Claim` is a compare-and-swap
+  that creates `<prefix>/names/<name>`, holding the PID, under the lease of
+  the holder's node's registration, and fails with `ErrTaken` and the
+  holder's PID if it exists: `StartChild`'s `ErrAlreadyStarted`, so a
+  caller that lost the race reaches the winner. A process per node, started
+  with the first claim, monitors every holder of that node and deletes the
+  key when it exits, comparing the key's create revision, so that a newer
+  claim of the name is never deleted. A monitor and not `Node.Subscribe`,
+  whose events can be dropped. A node that dies takes its claims with its
+  lease, at the same time as its peers drop their links to it.
+- **Losing the claim ends the holder.** When the node's lease is lost,
+  etcd out of reach longer than the TTL, its keys go, and another node may
+  claim the name. The holder must have stopped by then, so the per-node
+  process exits every holder of the node, with reason `name lost`, once the
+  TTL has passed since the last keepalive that succeeded, counted from when
+  it was sent: etcd counts from when it arrived, which is later, so the
+  holder stops first, as long as the two clocks run at the same rate. That
+  is `leader`'s rule, leadership as a process's lifetime: a holder does not
+  ask whether it still holds the name, and its context ends with it. `name
+  lost` is abnormal, so a supervisor restarts it, and its claim at start
+  then waits for etcd, or reaches the new holder. For what clocks cannot
+  promise, `Revision` is the fencing token: create revisions grow, so a
+  write fenced by it refuses a holder that lost the name.
+- **Uniqueness over availability.** In a partition, the side that cannot
+  reach etcd cannot claim, and its holders end when their leases do; the
+  other side claims the names again. Erlang's `global` keeps both sides
+  registering and resolves the clash when they meet again
+  (`random_exit_name` and its kin), and Horde sends the loser a
+  `name_conflict` exit: duplicates the application must handle. With a
+  lease there is no clash to resolve, at the price of a quiet minority, as
+  with Akka's lease-majority downing.
+- **One installation.** Names do not cross installations: a registry
+  spanning two needs agreement over a network neither side controls (see
+  What was rejected). A `Policy` judges a request by the process's local
+  name, so a process that another installation reaches by its global name
+  has a local one to export.
+- **Tests.** `grpcproctest` gets an in-memory `Names` with the same claims,
+  shared by a cluster's nodes, so a test of a moving service needs no etcd.
+
+Open: whether `Claim` should be able to wait for a name to be free (a
+standby), and whether the Inspector and `grpcprocctl` list global names
+beside local ones.
+
 ## What was rejected, and why
 
 | Idea | Seen in | Why not |
@@ -1066,11 +1155,8 @@ OpenTelemetry are.
   Temporal's replay of a history, whose determinism rules forbid the
   `select` and goroutines processes are written with. The leader takes over
   the sagas of a node that left. Steps' timeouts need durable timers (below).
-- **A global name registry**, per installation: a name claimed by
-  compare-and-swap under an etcd lease, the lease as fencing token, on top of
-  `grpcproc/etcd`. A minority partition cannot register, as with Akka's
-  lease-majority downing; in exchange there is no conflict to settle when it
-  heals, which Erlang's `global` and Horde leave to the application.
+- **Global names**, per installation, on `grpcproc/etcd`: designed in
+  Global names, above, and next to build.
 - **Process groups**, Erlang's `pg` and Akka's Receptionist: the live
   members of a group, found and watched. Pub/sub topics already monitor their
   subscribers through a relay per node, so it is a thin module.
