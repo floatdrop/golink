@@ -39,7 +39,7 @@ func TestCallsLeaveNothingPending(t *testing.T) {
 		if err := encodeBody(reply, &ping{}); err != nil {
 			t.Fatal(err)
 		}
-		n.dispatch("b", reply)
+		n.dispatch("b", nil, reply)
 		if err := <-answered; err != nil {
 			t.Fatal(err)
 		}

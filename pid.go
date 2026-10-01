@@ -105,6 +105,7 @@ const (
 	ReasonShutdown     = "shutdown"
 	ReasonKilled       = "killed"
 	ReasonType         = "type"
+	ReasonDenied       = "denied" // a dead letter a peer's Policy refused
 )
 
 var (

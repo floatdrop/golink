@@ -226,9 +226,14 @@ message Envelope {                                   // one flat message, decode
   process, wrong type) to a peer this node has no link to yet are queued on
   the dial, and written first, in order, once it is up.
 - **Node identity travels in the stream's metadata** (`name`, `incarnation`,
-  protocol version). `Config.Authorize(ctx, peer NodeID) error`, with the
-  peer's transport credentials in ctx (`grpc/peer`), lets mTLS deployments
-  refuse a node whose certificate does not match the name it claims.
+  protocol version). `Config.Admit(ctx, peer NodeID) (Policy, error)`, with
+  the peer's transport credentials in ctx (`grpc/peer`), lets mTLS
+  deployments refuse a node whose certificate does not match the name it
+  claims, and says what an admitted one may ask (see Admission).
+- **Connections to one peer can have options of their own.**
+  `Config.DialOptionsFor(peer)` adds to `DialOptions` for that peer's link
+  and for `Node.Dial`, after them, so that they win: the credentials of
+  another installation, whose nodes present certificates of another CA.
 - **Bodies are `proto.Message`, sent as their type's full name and their
   encoding.** Generated types register themselves, so there is no
   `Register()` step. Local sends pass the pointer
@@ -400,6 +405,48 @@ cleanly is not stopped by the link. They also need both nodes to agree:
 Erlang's link protocol gained unlink ids and acknowledgements in OTP 23 to
 settle races between link, unlink and crossing exits. A one-way link is a
 monitor, which each side already handles alone.
+
+### Admission
+
+```go
+type Op uint8 // OpSend, OpCall, OpMonitor (a link travels as one), OpExit
+type Policy func(op Op, name string) bool
+
+Admit func(ctx context.Context, peer NodeID) (Policy, error) // in Config
+func Export(names ...string) Policy
+```
+
+An admitted peer may otherwise ask anything of any process, `Exit`
+included, which a process cannot trap: right for the nodes of one
+installation, wrong for a partner's or a tenant's. So `Admit` both refuses
+a link and, when it admits one, returns what the peer may ask over it.
+
+- **One hook, once per link.** Whether a peer may link and what it may do
+  come from the same evidence, its certificate or its name, so they are one
+  decision, made where the link is accepted; two hooks would read the
+  certificate twice and could disagree. The `Policy` is kept on the inbound
+  link and judges every envelope the peer sends on it; a nil one, as a nil
+  `Admit`, is a nil check per envelope and nothing else.
+- **By the name of the process.** A request by name is judged by that name,
+  one by PID by the name the process was spawned with, "" if none. A name
+  is what a node offers others; a PID is not a capability, since
+  incarnations and ids can be guessed. `Export(names…)` is the usual
+  policy: those names, by name or PID, for sends, calls and monitors, and
+  no exits.
+- **Refused is not there.** What a policy refuses is answered as for a
+  process that does not exist: a call fails with `ErrNoProc`, a monitor or
+  a link gets `Down{noproc}`, and a message or an exit is dropped. The peer
+  learns nothing of what this node runs that it may not reach, and nothing
+  on the wire changed, so a peer of any version gets the answers it knows.
+  This node counts a dead letter with reason `denied` (`ReasonDenied`), for
+  `OnDeadLetter` and the events, so a wrong export list shows in
+  `grpcprocctl watch`.
+- **Answers always pass.** Replies and `Down`s answer what this node asked,
+  and a demonitor takes back what the peer placed; none is judged. A
+  process here can call and monitor any process of the peer, whatever the
+  peer may reach here.
+- **Only the links.** The Inspector is a second gRPC service, guarded by the
+  server's interceptors and `inspect.ReadOnly()`, not by a node's `Policy`.
 
 ### Discovery interfaces
 
@@ -981,7 +1028,7 @@ leader's singleton, and its state the singleton's.
 | gob / custom codec | first prototype | protobuf is already the service's contract; a body travels as its full name and bytes, and generated types register themselves |
 | Delivery beyond at-most-once in the core | Akka Reliable Delivery, GoAkt | Every send would pay for a store and acknowledgements most do not need, and both Akka and GoAkt made it a layer one opts into. Here it is a module, open work below; the core's `LinkError.Unsent` tells it what is safe to send again |
 | Sagas that live in memory | ergo `gen.Saga` (v2, gone in v3), Elixir's Sage | A crashed coordinator leaves steps done and nothing to undo them. Every saga framework that calls itself production-ready (Akka's workflows, Dapr Workflow, Commanded) has a coordinator that outlives a crash, and steps that are idempotent for it. A recipe and a durable module are open work, below |
-| One membership across installations | Orleans multi-cluster (removed in 3.2), Akka ClusterClient (deprecated in 2.6) | Two installations are operated apart: a registry or a singleton spanning both needs agreement over a network neither side controls, and the systems that tried went back to an explicit boundary. The boundary is open work, below |
+| One membership across installations | Orleans multi-cluster (removed in 3.2), Akka ClusterClient (deprecated in 2.6) | Two installations are operated apart: a registry or a singleton spanning both needs agreement over a network neither side controls, and the systems that tried went back to an explicit boundary: grpcproc's is `Admit` and `DialOptionsFor` (see Admission) |
 
 ## Open work
 
@@ -989,20 +1036,14 @@ What production use asks for next, roughly in order. The core gets hooks and
 interfaces only; whatever needs a dependency is a nested module, as etcd and
 OpenTelemetry are.
 
-- **A boundary between installations.** Two installations can talk today:
-  a resolver that answers the other's node names is enough, and `Send`,
-  `Call`, `Monitor` and `Link` work across. Three things make it unsafe.
-  `Config.DialOptions` is one set for every peer, so there is one trust root.
-  `Authorize` admits a link once, and then every kind of envelope on it is
-  dispatched, `exit` included; since `Exit` cannot be trapped, any admitted
-  peer can end any process it can name. And node names must be unique across
-  both. Two optional hooks, nil by default as `Authorize` is, would close it:
-  dial options per peer, and a policy per inbound link, decided once when it
-  is admitted, of which kinds of envelope and which names that peer may
-  reach. They serve a multi-tenant installation as well. A federation module
-  on top would add qualified names (`installation/node`) and tables of what
-  each installation exports, as NATS accounts export services and Temporal's
-  Nexus endpoints list their callers; a supervisor never links across. Only
+- **Federation between installations.** Two installations can talk: a
+  resolver that answers the other's node names, `DialOptionsFor` with its
+  credentials, and an `Admit` that gives its nodes an `Export` policy (see
+  Admission). What is left is convenience and naming: node names must be
+  unique across both. A federation module would add qualified names
+  (`installation/node`) and tables of what each installation exports, as
+  NATS accounts export services and Temporal's Nexus endpoints list their
+  callers; a supervisor never links across. Only
   if one side can dial out and not in (a customer's VPC, a factory floor)
   does the link need turning around: a bridge with a gRPC service of its own,
   so the core keeps one link per direction.
