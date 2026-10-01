@@ -120,6 +120,10 @@ type Config struct {
 	Resolver Resolver
 	// Registrar, if set, publishes the node on Start and withdraws it on Stop.
 	Registrar Registrar
+	// Names, if set, is the store of the installation's global names, which
+	// Global targets resolve through and Process.Claim claims in. Start
+	// watches it before the Registrar; grpcproc/etcd keeps it in etcd.
+	Names Names
 	// Metadata describes this start of the node to the cluster: the
 	// application's version, its zone, whatever placement or a rolling
 	// deploy decides by. grpcproc reads none of it. It is published with the
@@ -204,9 +208,10 @@ type Node struct {
 
 	linkBound bound // Config.MaxQueued and MaxQueuedBytes, for messages and calls
 
-	ctx    context.Context // parent of every process; cancelled first by Stop
-	cancel context.CancelFunc
-	dialWG sync.WaitGroup // finishDial goroutines; Stop waits for them
+	ctx      context.Context // parent of every process; cancelled first by Stop
+	cancel   context.CancelFunc
+	dialWG   sync.WaitGroup // finishDial goroutines; Stop waits for them
+	releases sync.WaitGroup // global names given up by processes that exited; Stop waits for them
 
 	nextID   atomic.Uint64
 	nextRef  atomic.Uint64
@@ -404,6 +409,16 @@ func (n *Node) Start(ctx context.Context) error {
 	} else {
 		close(watched)
 	}
+	if names := n.cfg.Names; names != nil {
+		stop := context.AfterFunc(ctx, unwatch) // ctx bounds the Watch call too
+		err := names.Watch(watching)
+		if !stop() && err == nil {
+			err = context.Cause(ctx)
+		}
+		if err != nil {
+			return failed(fmt.Errorf("grpcproc: names: %w", err))
+		}
+	}
 	if r := n.cfg.Registrar; r != nil {
 		withdraw, err := r.Register(ctx, Member{Name: n.id.Name, Incarnation: n.id.Incarnation, Addr: n.cfg.Advertise, Metadata: maps.Clone(n.cfg.Metadata)})
 		if err != nil {
@@ -585,6 +600,17 @@ func (n *Node) Stop(ctx context.Context) error {
 			if err == nil {
 				err = fmt.Errorf("grpcproc: stop: %w", ctx.Err())
 			}
+		}
+	}
+	// Global names its processes held are given up before the node is
+	// withdrawn, which, with etcd, would drop them all at once anyway.
+	released := make(chan struct{})
+	go func() { n.releases.Wait(); close(released) }()
+	select {
+	case <-released:
+	case <-ctx.Done():
+		if err == nil {
+			err = fmt.Errorf("grpcproc: stop: %w", ctx.Err())
 		}
 	}
 	n.mu.Lock()
@@ -821,6 +847,7 @@ func (n *Node) hookSend(from PID, sender *proc, pid PID, name string, body proto
 }
 
 func (n *Node) send(ctx context.Context, from PID, sender *proc, to dest, body proto.Message, md Metadata) (err error) {
+	to = n.resolveDest(to)
 	pid, name := to.pid, to.name
 	md, done := n.hookSend(from, sender, pid, name, body, md, false)
 	if done != nil {
@@ -848,6 +875,7 @@ func (n *Node) send(ctx context.Context, from PID, sender *proc, to dest, body p
 // call goes by, and asks the callee to place its caller's watch under (see
 // WatchedBy).
 func (n *Node) doCall(ctx context.Context, from PID, caller *proc, to dest, req proto.Message, md Metadata, watch uint64) (r callResult) {
+	to = n.resolveDest(to)
 	pid, name := to.pid, to.name
 	md, done := n.hookSend(from, caller, pid, name, req, md, true)
 	if done != nil {
@@ -1074,6 +1102,7 @@ func (n *Node) down(from, to PID, ref uint64, reason string, dispatching bool) e
 }
 
 func (n *Node) exit(ctx context.Context, from PID, to Target, reason string) error {
+	to, _ = n.resolveTarget(to)
 	pid, name := to.target()
 	if pid.Node == n.id.Name {
 		n.deliverExit(pid, name, reason)
@@ -1180,9 +1209,9 @@ func (n *Node) deliverDown(from, to PID, ref uint64, reason string) {
 	switch t, link, ok := p.dropWatch(r, reason); {
 	case !ok: // demonitored or unlinked meanwhile
 	case link:
-		p.exitSignal(from, t.name, reason)
+		p.exitSignal(from, cmp.Or(t.name, t.global), reason)
 	default:
-		p.push(item{from: from, down: &Down{Ref: r, PID: from, Name: t.name, Reason: reason}})
+		p.push(item{from: from, down: &Down{Ref: r, PID: from, Name: cmp.Or(t.name, t.global), Reason: reason}})
 	}
 }
 

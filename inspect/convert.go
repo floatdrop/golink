@@ -100,6 +100,7 @@ func processInfoTo(p grpcproc.ProcessInfo) *inspectv1.ProcessInfo {
 		Name:      p.Name,
 		Label:     p.Label,
 		Type:      p.Type,
+		Globals:   p.Globals,
 		Parent:    p.Parent.Proto(),
 		State:     stateTo(p.State),
 		StartedAt: timeTo(p.StartedAt),
@@ -173,12 +174,13 @@ func NodeInfo(n *inspectv1.NodeInfo) grpcproc.NodeInfo {
 // ProcessInfo converts a wire ProcessInfo back to grpcproc's.
 func ProcessInfo(p *inspectv1.ProcessInfo) grpcproc.ProcessInfo {
 	return grpcproc.ProcessInfo{
-		PID:    grpcproc.PIDFromProto(p.GetPid()),
-		Parent: grpcproc.PIDFromProto(p.GetParent()), // the zero PID for none
-		Name:   p.GetName(),
-		Label:  p.GetLabel(),
-		Type:   p.GetType(),
-		State:  stateFrom(p.GetState()),
+		PID:     grpcproc.PIDFromProto(p.GetPid()),
+		Parent:  grpcproc.PIDFromProto(p.GetParent()), // the zero PID for none
+		Name:    p.GetName(),
+		Label:   p.GetLabel(),
+		Type:    p.GetType(),
+		Globals: p.GetGlobals(),
+		State:   stateFrom(p.GetState()),
 		Mailbox: grpcproc.MailboxInfo{
 			Depth:     int(p.GetMailbox().GetDepth()),
 			Peak:      int(p.GetMailbox().GetPeak()),

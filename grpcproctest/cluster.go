@@ -63,6 +63,7 @@ type Cluster struct {
 	cut   map[[2]string]bool // {from, to}: dials refused
 	conns map[string]*grpc.ClientConn
 	incs  atomic.Uint64
+	names *Names
 }
 
 type member struct {
@@ -89,6 +90,7 @@ func NewWith(t testing.TB, opts []Option, names ...string) *Cluster {
 		nodes:  map[string]*member{},
 		cut:    map[[2]string]bool{},
 		conns:  map[string]*grpc.ClientConn{},
+		names:  NewNames(),
 	}
 	for _, o := range opts {
 		o(c)
@@ -180,6 +182,22 @@ func (c *Cluster) Partition(a, b string) {
 	}
 }
 
+// Names is the store of the cluster's global names: every node's
+// Config.Names is a view of it, unless WithConfig sets another.
+func (c *Cluster) Names() *Names { return c.names }
+
+// CutNames cuts name off from the global names, as from etcd for longer than
+// its lease: its processes' claims are lost, which ends them with
+// ReasonNameLost, or, made with KeepOnLoss, leaves them running, not held;
+// their names are free for the other nodes; and its claims and Resolves fail
+// with ErrNamesUnreachable until RestoreNames.
+func (c *Cluster) CutNames(name string) { c.names.cutOff(name) }
+
+// RestoreNames lets name reach the global names again. Its KeepOnLoss claims
+// are made again: each holds its name once more, unless another process
+// claimed it meanwhile, which ends the old holder with ReasonNameConflict.
+func (c *Cluster) RestoreNames(name string) { c.names.restore(name) }
+
 // Heal lets a and b reach each other again.
 func (c *Cluster) Heal(a, b string) {
 	c.mu.Lock()
@@ -233,6 +251,7 @@ func (c *Cluster) Kill(name string) {
 		m.node.Disconnect(peer)
 	}
 	stopMember(m, 100*time.Millisecond)
+	c.names.drop(name) // as its lease would end
 	for _, peer := range peers {
 		peer.Disconnect(name)
 	}
@@ -293,6 +312,7 @@ func (c *Cluster) start(name string) *grpcproc.Node {
 		Hooks:       c.hooks,
 		DialTimeout: 2 * time.Second,
 		DialBackoff: -1,
+		Names:       c.names.For(name),
 	}
 	for _, fn := range c.configure {
 		fn(name, &cfg)

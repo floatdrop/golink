@@ -116,9 +116,9 @@ as long as clocks agree to within the time between two starts, and a random
 one would be refused whenever it came out lower than the last. It fences grpcproc traffic only: an old instance
 can still write to a database, which needs fencing of its own.
 
-Names are per node. Names of the whole installation are proposed, on etcd
-(see Global names); they are deliberately separate from local
-registration, as Erlang's `global` is.
+Names are per node. Names of the whole installation are global names (see
+Global names), claimed by a process and kept in a store, deliberately
+separate from local registration, as Erlang's `global` is.
 
 ### Wire protocol
 
@@ -1037,7 +1037,7 @@ leader's singleton, and its state the singleton's.
   `ElectionTimeout` goes up. `Lease.Term` is the fencing token for external
   resources; `Confirm` makes leadership wait for an external lock.
 
-## Global names (proposed, not built)
+## Global names (core built; the etcd store next)
 
 A process's name is its node's: `Named[M]("warehouse", "stock")` reaches it
 only if the caller knows the node. A global name belongs to the
@@ -1051,28 +1051,41 @@ nodes, not processes, and an application that writes the keys itself gets
 the parts below wrong, the claim's lifetime first.
 
 ```go
-// core
+// core: the target, the claim, and what a store does
 type Global struct{ Name string } // a Target: whoever holds Name in this installation
-type Names interface {
-    Watch(ctx context.Context) error                      // from Start, before Registrar; returns once every name is known
-    Lookup(name string) (PID, bool)                       // must not block: the implementation keeps what it watches
-    Resolve(ctx context.Context, name string) (PID, bool, error) // asks the store itself, when Lookup's lag matters
-}
-type NameLister interface {         // optional, for a Names that keeps every name
-    List(prefix string) []GlobalName // ordered by name; GlobalName{Name string; PID PID}
-}
-Config.Names Names
-
-// grpcproc/etcd: *Cluster implements Names, and claims
-type Holder interface{ PID() grpcproc.PID; Node() *grpcproc.Node } // a *grpcproc.Process of any M
-func (c *Cluster) Claim(ctx context.Context, p Holder, name string, opts ...ClaimOption) (*Claim, error) // *TakenError{Holder}
+func (p *Process[M]) Claim(ctx context.Context, name string, opts ...ClaimOption) (*Claim, error) // *TakenError{Name, Holder}
+func WaitForName() ClaimOption   // wait for a name that is held to be free, and claim it then
 func KeepOnLoss() ClaimOption    // keep the holder running when the claim is lost, and claim again
-func Wait() ClaimOption          // wait for a name that is held to be free, and claim it then
 func (c *Claim) Revision() int64 // the fencing token; a new one after a claim made again
 func (c *Claim) Held() bool      // false while a KeepOnLoss claim is lost
 func (c *Claim) Release(ctx context.Context) error
+
+type Names interface { // Config.Names; Node.Names() for components that resolve
+    Watch(ctx context.Context) error                             // from Start, before Registrar; returns once every name is known
+    Lookup(name string) (PID, bool)                              // must not block: the implementation keeps what it watches
+    Resolve(ctx context.Context, name string) (PID, bool, error) // asks the store itself, when Lookup's lag matters
+    Claim(ctx context.Context, name string, holder PID, opts ClaimOptions, notify func(ClaimEvent)) (NameClaim, error)
+}
+type NameClaim interface{ Revision() int64; Release(ctx context.Context) error }
+type ClaimEvent struct{ Kind ClaimEventKind; Revision int64 } // ClaimLost, ClaimRegained, ClaimConflict
+type NameLister interface{ List(prefix string, limit int) []GlobalName } // optional: a store that keeps every name
+
+// grpcproctest: an in-memory store every test cluster's nodes share
+c.Names(); c.CutNames("b"); c.RestoreNames("b")
+
+// grpcproc/etcd (next, once a core with Names is released): *Cluster is a Names
 ```
 
+- **The core keeps the claims; a store keeps the names.** What a claim
+  means, that it lives as long as its process, that losing it ends the
+  holder or, with `KeepOnLoss`, does not, that a conflict ends the old
+  holder, is the core's, in `Process.Claim`, and the same whatever keeps
+  the names. A store does storage and says when it can no longer vouch for
+  a claim: `ClaimLost`, then for a `KeepOnLoss` claim `ClaimRegained` or
+  `ClaimConflict`. So an application's room process claims its name the
+  same way in a `grpcproctest` cluster and on etcd, and the rules are
+  tested once, in the core, against the in-memory store, which a test cuts
+  off from a node (`CutNames`) as a partition from etcd would.
 - **Resolved on the sender's node, to a PID.** `Send`, `Call`, `Monitor`,
   `Link` and `Exit` to a `Global`, and an `AddrOf[M](Global{…})`, look the
   name up in `Config.Names` and go to the PID it gives, as if addressed by
@@ -1103,12 +1116,18 @@ func (c *Claim) Release(ctx context.Context) error
   room started on an SFU node through `StartChildFrom` from a signaling
   node that loses its claim fails the call with `ErrTaken`, and the
   signaling node then asks `Resolve` for the winner, which etcd knows by
-  then, rather than its own copy, which may not. A process per node, started
-  with the first claim, monitors every holder of that node and deletes the
-  key when it exits, comparing the key's create revision, so that a newer
-  claim of the name is never deleted. A monitor and not `Node.Subscribe`,
-  whose events can be dropped. A node that dies takes its claims with its
-  lease, at the same time as its peers drop their links to it.
+  then, rather than its own copy, which may not. The core releases a
+  process's claims when it exits, in the background, before its watchers
+  hear of the exit, so that a store out of reach does not hold up its
+  `Down`s, and `Stop` waits for the releases before it withdraws the node.
+  A watcher may therefore see the `Down` a moment before the name is free:
+  a claim then fails with `ErrTaken` naming the old holder, whose call
+  answers `ErrNoProc`, and the claimer tries again, or waits with
+  `WaitForName`. The etcd store releases by comparing the key's create
+  revision, so that a newer claim of the name is never deleted, and a node
+  that dies takes its claims with its lease, at the same time as its peers
+  drop their links to it. `ProcessInfo.Globals` lists what a process
+  holds.
 - **Losing the claim ends the holder, by default.** When the node's lease
   is lost, etcd out of reach longer than the TTL, its keys go, and another
   node may claim the name. The holder must have stopped by then, so the
@@ -1116,7 +1135,8 @@ func (c *Claim) Release(ctx context.Context) error
   once the TTL has passed since the last keepalive that succeeded, counted
   from when it was sent: etcd counts from when it arrived, which is later,
   so the holder stops first, as long as the two clocks run at the same
-  rate. That is `leader`'s rule, leadership as a process's lifetime: a
+  rate. The store decides when (`ClaimLost`), and the core ends the
+  holder. That is `leader`'s rule, leadership as a process's lifetime: a
   holder does not ask whether it still holds the name, and its context ends
   with it. `name lost` is abnormal, so a supervisor restarts it, and its
   claim at start then waits for etcd, or reaches the new holder. For what
@@ -1133,8 +1153,9 @@ func (c *Claim) Release(ctx context.Context) error
   everywhere if etcd itself is down for longer than the TTL, to avoid a
   duplicate that costs far less. So a claim made with `KeepOnLoss` keeps
   its holder running when the lease is lost: `Held` turns false, and the
-  per-node process claims the name again once etcd is back, with a new
-  `Revision`. If another process claimed it meanwhile, a room that the
+  store claims the name again once etcd is back, all of a node's at once
+  rather than each holder trying on its own, and the claim holds it with a
+  new `Revision`. If another process claimed it meanwhile, a room that the
   other side started for a join that could not reach this one, the holder
   etcd has wins, since every other node already routes to it, and the one
   claiming again exits with reason `name conflict`, as Horde sends the
@@ -1145,7 +1166,7 @@ func (c *Claim) Release(ctx context.Context) error
 - **Waiting for a name: a standby.** The same binary on five nodes, each
   with a `billing-gateway` process, of which one may be active: one
   connection to an outside API, one consumer of a queue in order. With
-  `Wait()`, `Claim` does not fail with `ErrTaken` but blocks, until ctx
+  `WaitForName()`, `Claim` does not fail with `ErrTaken` but blocks, until ctx
   is done, for the name to be free, and claims it then: the holder exited,
   or its node's lease ended. That is etcd's election, and the light
   alternative to `leader` for a singleton with no state to hand over: etcd
@@ -1185,22 +1206,26 @@ func (c *Claim) Release(ctx context.Context) error
   What was rejected). A `Policy` judges a request by the process's local
   name, so a process that another installation reaches by its global name
   has a local one to export.
-- **Tests.** `grpcproctest` gets an in-memory `Names` with the same claims,
-  shared by a cluster's nodes, so a test of a moving service needs no etcd.
+- **Tests.** Every `grpcproctest` cluster's nodes share an in-memory
+  `Names`, so a test of a moving service needs no etcd, and `CutNames` and
+  `RestoreNames` play a node's partition from the store: its claims lost,
+  its `KeepOnLoss` holders running on, then held again or in conflict.
 
 - **In the tools, as far as the node can tell.** A node with `Names`
   resolves any one name, so `grpcprocctl names room:42` answers wherever
-  the room is, through the Inspector's `Lookup` of that node. Listing them
+  the room is, through the Inspector's `LookupName` of that node. Listing them
   needs a `Names` that keeps them all, as the etcd one and `grpcproctest`'s
   do, and not one that would ask etcd on a miss past hundreds of thousands
   of names: so listing is the optional `NameLister`, and the Inspector's
   `ListNames` (a prefix, a limit, since there may be a hundred thousand
   rooms) answers `Unimplemented` for a node whose `Names` cannot list, and
   `grpcprocctl names` says so rather than show an empty list. Where it can
-  list, `grpcprocctl inspect` shows the global names a process holds,
-  found by its PID in the list, `names` lists them by prefix, and the MCP
-  server and the web UI show the same. A node without `Names` has none to
-  show.
+  list, `names` lists them by prefix. `grpcprocctl inspect` shows the
+  global names a process holds whatever the store, from
+  `ProcessInfo.Globals`, since the core keeps the claims; the MCP server
+  and the web UI show the same. A node without `Names` has none to show,
+  and its Inspector answers `FailedPrecondition`. The Inspector's RPCs are
+  in the core; `grpcprocctl` follows with the etcd store.
 
 ## What was rejected, and why
 
@@ -1254,8 +1279,9 @@ OpenTelemetry are.
   Temporal's replay of a history, whose determinism rules forbid the
   `select` and goroutines processes are written with. The leader takes over
   the sagas of a node that left. Steps' timeouts need durable timers (below).
-- **Global names**, per installation, on `grpcproc/etcd`: designed in
-  Global names, above, and next to build.
+- **Global names on etcd**: the core and `grpcproctest` have them (see
+  Global names); the etcd store, `grpcprocctl names` and the MCP and web
+  views follow a release of the core.
 - **Process groups**, Erlang's `pg` and Akka's Receptionist: the live
   members of a group, found and watched. Pub/sub topics already monitor their
   subscribers through a relay per node, so it is a thin module.
