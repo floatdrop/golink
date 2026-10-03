@@ -97,70 +97,66 @@ var (
 // without moving: a vote request, a vote, a follower's heartbeat, a
 // leader's acks.
 //
-// It is built in init, for the same reason as lifecycle.
-var election *fsm.Machine[stance]
+// Like lifecycle, it is fired through the elector (see machines).
+var election = fsm.MustNew("election",
+	fsm.Initial(follower),
 
-func init() {
-	election = fsm.MustNew("election",
-		fsm.Initial(follower),
+	// Every stance answers a vote request, and follows a newer term;
+	// whether it grants the vote is the vote's own rule (see
+	// elector.vote).
+	fsm.FromGroup(anyStance).On(evVoteRequest).Stay().Action(answerVote),
+	fsm.FromGroup(anyStance).On(evNewerTerm).To(follower),
 
-		// Every stance answers a vote request, and follows a newer term;
-		// whether it grants the vote is the vote's own rule (see
-		// elector.vote).
-		fsm.FromGroup(anyStance).On(evVoteRequest).Stay().Action(answerVote),
-		fsm.FromGroup(anyStance).On(evNewerTerm).To(follower),
+	// Campaigning: the pre-vote, then the vote, each counted as it comes
+	// and settled by a quorum event whose guard counts.
+	fsm.FromGroup(notLeading).On(evElectionTimeout).To(preCandidate).
+		Guard("no backoff, not cordoned, the view may elect", mayCampaign),
+	fsm.From(preCandidate).On(evPreVoteGranted).Stay().
+		Guard("for the term it would begin", forNextTerm).Action(countPreVote),
+	fsm.From(preCandidate).On(evPreVoteQuorum).To(candidate).
+		Guard("a majority of the view would elect it", preVoteMajority),
+	// A pre-candidate still follows its leader, which may hand over to it.
+	fsm.FromEach(follower, preCandidate).On(evTimeoutNow).To(candidate).
+		Guard("sent by this term's leader, to a node not cordoned", fromOurLeader),
+	fsm.From(candidate).On(evVoteGranted).Stay().
+		Guard("of this term", ofThisTerm).Action(countVote),
+	fsm.From(candidate).On(evVoteQuorum).To(leading).
+		Guard("a majority of the view voted for it", voteMajority),
 
-		// Campaigning: the pre-vote, then the vote, each counted as it comes
-		// and settled by a quorum event whose guard counts.
-		fsm.FromGroup(notLeading).On(evElectionTimeout).To(preCandidate).
-			Guard("no backoff, not cordoned, the view may elect", mayCampaign),
-		fsm.From(preCandidate).On(evPreVoteGranted).Stay().
-			Guard("for the term it would begin", forNextTerm).Action(countPreVote),
-		fsm.From(preCandidate).On(evPreVoteQuorum).To(candidate).
-			Guard("a majority of the view would elect it", preVoteMajority),
-		// A pre-candidate still follows its leader, which may hand over to it.
-		fsm.FromEach(follower, preCandidate).On(evTimeoutNow).To(candidate).
-			Guard("sent by this term's leader, to a node not cordoned", fromOurLeader),
-		fsm.From(candidate).On(evVoteGranted).Stay().
-			Guard("of this term", ofThisTerm).Action(countVote),
-		fsm.From(candidate).On(evVoteQuorum).To(leading).
-			Guard("a majority of the view voted for it", voteMajority),
+	// A heartbeat of this term makes a campaigning node a follower, and a
+	// follower stays one: the group's rule, and the follower's own.
+	fsm.FromGroup(notLeading).On(evLeaderOfTerm).To(follower).
+		Guard("of this term", ofThisTerm).Action(follow),
+	fsm.From(follower).On(evLeaderOfTerm).Stay().
+		Guard("of this term", ofThisTerm).Action(follow),
 
-		// A heartbeat of this term makes a campaigning node a follower, and a
-		// follower stays one: the group's rule, and the follower's own.
-		fsm.FromGroup(notLeading).On(evLeaderOfTerm).To(follower).
-			Guard("of this term", ofThisTerm).Action(follow),
-		fsm.From(follower).On(evLeaderOfTerm).Stay().
-			Guard("of this term", ofThisTerm).Action(follow),
+	// Leading, and handing over to a successor, are both the leader.
+	fsm.FromGroup(leader).On(evAck).Stay().
+		Guard("of this term", ofThisTerm).Action(recordAck),
+	fsm.From(leading).On(evResign).To(handingOver).
+		Guard("a successor it may hand over to", maySucceed),
+	fsm.From(handingOver).On(evResign).Stay().
+		Guard("not handing over already", func(context.Context, turn) error { return errResigningOnce }),
+	fsm.From(handingOver).On(evHandedOver).To(follower),
+	fsm.FromGroup(leader).On(evLostQuorum).To(follower),
+	fsm.FromGroup(leader).On(evSingletonFailed).To(follower),
 
-		// Leading, and handing over to a successor, are both the leader.
-		fsm.FromGroup(leader).On(evAck).Stay().
-			Guard("of this term", ofThisTerm).Action(recordAck),
-		fsm.From(leading).On(evResign).To(handingOver).
-			Guard("a successor it may hand over to", maySucceed),
-		fsm.From(handingOver).On(evResign).Stay().
-			Guard("not handing over already", func(context.Context, turn) error { return errResigningOnce }),
-		fsm.From(handingOver).On(evHandedOver).To(follower),
-		fsm.FromGroup(leader).On(evLostQuorum).To(follower),
-		fsm.FromGroup(leader).On(evSingletonFailed).To(follower),
-
-		fsm.OnEnterWith(preCandidate, askPreVotes),
-		fsm.OnExitWith(preCandidate, dropPreVotes),
-		fsm.OnEnterWith(candidate, campaign),
-		fsm.OnExitWith(candidate, dropVotes),
-		fsm.OnEnterWith(leading, lead),
-		fsm.OnEnterVia(handingOver, evResign, beginHandOver),
-		fsm.OnExitGroupWith(leader, stepDown),
-		fsm.OnEnterVia(follower, evNewerTerm, adoptTerm),
-	)
-}
+	fsm.OnEnterWith(preCandidate, askPreVotes),
+	fsm.OnExitWith(preCandidate, dropPreVotes),
+	fsm.OnEnterWith(candidate, campaign),
+	fsm.OnExitWith(candidate, dropVotes),
+	fsm.OnEnterWith(leading, lead),
+	fsm.OnEnterVia(handingOver, evResign, beginHandOver),
+	fsm.OnExitGroupWith(leader, stepDown),
+	fsm.OnEnterVia(follower, evNewerTerm, adoptTerm),
+)
 
 // move fires ev at the elector's stance, and reports whether the stance
 // took it, moving or not. A refusal is no news: a stance that does not take
 // ev has nothing to do on it, and a guard that holds it back says so.
 func (e *elector) move(ev fsm.Event[turn], t turn) bool {
 	t.e = e
-	return fire(e, election, &e.role, ev, t)
+	return fire(e, e.machines.election, &e.role, ev, t)
 }
 
 // fire fires ev at st with TryFire, and reports whether it was taken. An
@@ -179,7 +175,7 @@ func fire[S comparable, A any](e *elector, m *fsm.Machine[S], st *S, ev fsm.Even
 // over to), or ErrNotLeader from a stance that takes no Resign. Taken,
 // reconcile stops the singleton, and the hand-over goes on once it has.
 func (e *elector) beginResign(m grpcproc.Msg[proto.Message], r *resignation, now time.Time) {
-	_, err := election.Fire(e.p.Context(), &e.role, evResign, turn{e: e, now: now, resign: r})
+	_, err := e.machines.election.Fire(e.p.Context(), &e.role, evResign, turn{e: e, now: now, resign: r})
 	_, unknown := errors.AsType[*fsm.NoTransitionError[stance]](err)
 	switch ge, refused := errors.AsType[*fsm.GuardError[stance]](err); {
 	case refused:

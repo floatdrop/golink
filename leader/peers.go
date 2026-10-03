@@ -76,50 +76,44 @@ var viewRules = fsm.Rules(
 )
 
 // fixedView is a fixed set of Voters: every one counts, whatever becomes of
-// it, so none leaves the view, and one whose elector is gone is silent.
-// openView is a dynamic view, from Peers, Membership and whoever talks: a peer
-// whose elector is gone leaves it, as does a ghost after GhostTTL unless
-// Membership decides, and Membership's reports move peers in and out.
-//
-// Both are built in init, as the other machines are; an elector takes the
-// one its Spec calls for (see run).
-var fixedView, openView *fsm.Machine[standing]
+// it, so none leaves the view, and one whose elector is gone is silent. An
+// elector fires it, or openView, as its Spec calls for (see machines).
+var fixedView = fsm.MustNew("fixed view",
+	fsm.Initial(live),
+	viewRules,
+	fsm.From(live).On(evElectorGone).To(silent),
+	fsm.OnExitGroupWith(fsm.NewGroup("unwatched", ghost, silent), watchAgain),
+)
 
-func init() {
-	fixedView = fsm.MustNew("fixed view",
-		fsm.Initial(live),
-		viewRules,
-		fsm.From(live).On(evElectorGone).To(silent),
-		fsm.OnExitGroupWith(fsm.NewGroup("unwatched", ghost, silent), watchAgain),
-	)
+// openView is a dynamic view, from Peers, Membership and whoever talks: a
+// peer whose elector is gone leaves it, as does a ghost after GhostTTL
+// unless Membership decides, and Membership's reports move peers in and
+// out. Away is where Membership's report put a peer, and only its report of
+// it up brings it back: unnamed, it is neither heard from nor greeted.
+var openView = fsm.MustNew("open view",
+	fsm.Initial(live),
+	viewRules,
+	fsm.FromEach(live, away).On(evElectorGone).To(gone).Action(greetLater),
+	fsm.From(away).On(evLinkLost).To(gone),
+	fsm.From(ghost).On(evGhostTimeout).To(gone).
+		Guard("a ghost for GhostTTL, with no Membership", ghostExpired),
+	fsm.From(gone).On(evHeard).To(live).
+		Guard("Membership reports it up, or Peers named it, or there is no Membership", admissible),
+	fsm.From(gone).On(evGreetDue).Stay().
+		Guard("named, and GhostTTL since the last greeting", namedAndDue).Action(sendGreeting),
 
-	// Away is where Membership's report put a peer, and only its report of
-	// it up brings it back: unnamed, it is neither heard from nor greeted.
-	openView = fsm.MustNew("open view",
-		fsm.Initial(live),
-		viewRules,
-		fsm.FromEach(live, away).On(evElectorGone).To(gone).Action(greetLater),
-		fsm.From(away).On(evLinkLost).To(gone),
-		fsm.From(ghost).On(evGhostTimeout).To(gone).
-			Guard("a ghost for GhostTTL, with no Membership", ghostExpired),
-		fsm.From(gone).On(evHeard).To(live).
-			Guard("Membership reports it up, or Peers named it, or there is no Membership", admissible),
-		fsm.From(gone).On(evGreetDue).Stay().
-			Guard("named, and GhostTTL since the last greeting", namedAndDue).Action(sendGreeting),
+	fsm.From(live).On(evReportedOff).To(away).Action(undeclare),
+	fsm.FromEach(ghost, silent).On(evReportedOff).To(gone).Action(undeclare),
+	fsm.FromEach(away, gone).On(evReportedOff).Stay().Action(undeclare),
+	fsm.From(away).On(evReportedUp).To(live).Action(declare),
+	fsm.From(gone).On(evReportedUp).To(silent).Action(declare),
+	fsm.FromEach(live, ghost, silent).On(evReportedUp).Stay().Action(declare),
 
-		fsm.From(live).On(evReportedOff).To(away).Action(undeclare),
-		fsm.FromEach(ghost, silent).On(evReportedOff).To(gone).Action(undeclare),
-		fsm.FromEach(away, gone).On(evReportedOff).Stay().Action(undeclare),
-		fsm.From(away).On(evReportedUp).To(live).Action(declare),
-		fsm.From(gone).On(evReportedUp).To(silent).Action(declare),
-		fsm.FromEach(live, ghost, silent).On(evReportedUp).Stay().Action(declare),
-
-		fsm.OnEnterGroupWith(fsm.NewGroup("view", live, ghost, silent), joined),
-		fsm.OnEnterVia(live, evReportedUp, greetNow),
-		fsm.OnEnterVia(silent, evReportedUp, greetNow),
-		fsm.OnExitGroupWith(fsm.NewGroup("unwatched", ghost, silent, gone), watchAgain),
-	)
-}
+	fsm.OnEnterGroupWith(fsm.NewGroup("view", live, ghost, silent), joined),
+	fsm.OnEnterVia(live, evReportedUp, greetNow),
+	fsm.OnEnterVia(silent, evReportedUp, greetNow),
+	fsm.OnExitGroupWith(fsm.NewGroup("unwatched", ghost, silent, gone), watchAgain),
+)
 
 // counts reports whether a peer standing so is in the view.
 func (s standing) counts() bool { return s == live || s == ghost || s == silent }
@@ -130,7 +124,7 @@ func (s standing) unreachable() bool { return s == ghost || s == silent }
 
 // tell fires ev at p's standing, and reports whether p took it.
 func (e *elector) tell(p *peer, ev fsm.Event[news], now time.Time) bool {
-	return fire(e, e.peering, &p.standing, ev, news{e: e, p: p, now: now})
+	return fire(e, e.machines.view, &p.standing, ev, news{e: e, p: p, now: now})
 }
 
 func greetDue(_ context.Context, n news) error {

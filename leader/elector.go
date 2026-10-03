@@ -49,9 +49,9 @@ func (es *electors[S]) run(p *grpcproc.Process[proto.Message]) error {
 	if len(e.spec.Voters) == 0 && e.spec.Membership == nil {
 		e.spec.Membership = p.Node().Membership()
 	}
-	e.peering = openView
+	e.machines = machines{election: election, lifecycle: lifecycle, view: openView}
 	if e.static() {
-		e.peering = fixedView
+		e.machines.view = fixedView
 	}
 	es.cur = e
 	return e.loop()
@@ -107,12 +107,21 @@ func (es *electors[S]) build(p *grpcproc.Process[proto.Message]) func(term uint6
 	}
 }
 
+// machines are what an elector fires its events at. Callbacks reach them
+// through it, not by the package variables' names: a machine whose
+// callbacks named it would be a variable initialized with itself.
+type machines struct {
+	election  *fsm.Machine[stance]
+	lifecycle *fsm.Machine[phase]
+	view      *fsm.Machine[standing] // fixedView or openView, as the Spec calls for
+}
+
 // elector is one node's part in an election. It is touched by its own
 // goroutine only.
 type elector struct {
 	spec       config
 	build      func(term uint64, value *anypb.Any) (func() (actor.ChildSpec, error), error)
-	peering    *fsm.Machine[standing] // fixedView or openView, as the Spec calls for
+	machines   machines
 	p          *grpcproc.Process[proto.Message]
 	self, name string
 
@@ -495,7 +504,7 @@ func (e *elector) admit(from string, m *leaderv1.Peer, now time.Time) *peer {
 	case p == nil:
 		p = e.add(from, false)
 	}
-	if !e.peering.Can(e.p.Context(), p.standing, evHeard, news{e: e, p: p, now: now}) {
+	if !e.machines.view.Can(e.p.Context(), p.standing, evHeard, news{e: e, p: p, now: now}) {
 		return nil // out of the view, and Membership has not reported it
 	}
 	// The reply goes before the relay is told to watch again, which may

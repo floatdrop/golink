@@ -70,33 +70,29 @@ var (
 // one that fails to start, or exits by itself, holds off the next campaign
 // (see elector.failed).
 //
-// It is built in init: launch fires it, so a variable initialized with it
-// would refer to itself.
-var lifecycle *fsm.Machine[phase]
+// Its callbacks fire it through the elector (see machines), never by name,
+// which would make the variable refer to itself.
+var lifecycle = fsm.MustNew("singleton",
+	fsm.Initial(idle),
 
-func init() {
-	lifecycle = fsm.MustNew("singleton",
-		fsm.Initial(idle),
+	fsm.From(idle).On(evReconcile).To(starting).
+		Guard("this node leads, and does not hand over", leads).
+		Action(saveTerm),
+	fsm.From(starting).On(evStarted).To(running),
+	fsm.From(starting).On(evStartFailed).To(idle),
+	fsm.From(running).On(evReconcile).To(stopping).
+		Guard("this node stopped leading, or its term is over", outlived),
+	fsm.From(running).On(evDown).To(idle),
+	fsm.From(stopping).On(evDown).To(idle),
 
-		fsm.From(idle).On(evReconcile).To(starting).
-			Guard("this node leads, and does not hand over", leads).
-			Action(saveTerm),
-		fsm.From(starting).On(evStarted).To(running),
-		fsm.From(starting).On(evStartFailed).To(idle),
-		fsm.From(running).On(evReconcile).To(stopping).
-			Guard("this node stopped leading, or its term is over", outlived),
-		fsm.From(running).On(evDown).To(idle),
-		fsm.From(stopping).On(evDown).To(idle),
-
-		fsm.OnEnterVia(starting, evReconcile, launch),
-		fsm.OnEnterVia(running, evStarted, watch),
-		fsm.OnEnterVia(stopping, evReconcile, demote),
-		fsm.OnExitVia(starting, evStartFailed, startFailed),
-		fsm.OnExitVia(running, evDown, exited),
-		fsm.OnEnterVia(idle, evDown, stopped),
-		fsm.OnEnterWith(idle, forget),
-	)
-}
+	fsm.OnEnterVia(starting, evReconcile, launch),
+	fsm.OnEnterVia(running, evStarted, watch),
+	fsm.OnEnterVia(stopping, evReconcile, demote),
+	fsm.OnExitVia(starting, evStartFailed, startFailed),
+	fsm.OnExitVia(running, evDown, exited),
+	fsm.OnEnterVia(idle, evDown, stopped),
+	fsm.OnEnterWith(idle, forget),
+)
 
 // live fires ev at the elector's singleton. A refusal is no news: the
 // machine refuses a reconcile with nothing to do, by its phase or a guard,
@@ -104,7 +100,7 @@ func init() {
 // whose term could not be saved ends the elector's loop (see fire).
 func (e *elector) live(ev fsm.Event[life], l life) {
 	l.e = e
-	fire(e, lifecycle, &e.single.phase, ev, l)
+	fire(e, e.machines.lifecycle, &e.single.phase, ev, l)
 }
 
 func leads(_ context.Context, l life) error {
