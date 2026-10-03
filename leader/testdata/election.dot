@@ -2,28 +2,51 @@ digraph "election" {
 	rankdir=LR;
 	compound=true;
 	"__start" [shape=point];
-	subgraph "cluster_not leading" {
-		label="not leading";
+	subgraph "cluster_any stance" {
+		label="any stance";
 		style=rounded;
-		"follower" [shape=box];
-		"pre-candidate" [shape=box];
-		"candidate" [shape=box];
+		subgraph "cluster_not leading" {
+			label="not leading";
+			style=rounded;
+			"follower" [shape=box];
+			"pre-candidate" [shape=box];
+			"candidate" [shape=box];
+		}
+		subgraph "cluster_leader" {
+			label="leader";
+			style=rounded;
+			"leading" [shape=box];
+			"handing over" [shape=box];
+		}
 	}
-	"leader" [shape=box];
 	"__start" -> "follower";
-	"pre-candidate" -> "candidate" [label="pre-vote quorum"];
+	"pre-candidate" -> "pre-candidate" [label="pre-vote\n[for the term it would begin]", style=dashed];
+	"pre-candidate" -> "candidate" [label="pre-vote quorum\n[a majority of the view would elect it]"];
 	"follower" -> "candidate" [label="timeout now\n[sent by this term's leader, to a node not cordoned]"];
-	"candidate" -> "leader" [label="vote quorum"];
-	"pre-candidate" -> "follower" [label="heartbeat of this term"];
-	"candidate" -> "follower" [label="heartbeat of this term"];
-	"leader" -> "follower" [label="lost quorum"];
-	"leader" -> "follower" [label="singleton failed"];
-	"leader" -> "follower" [label="handed over"];
-	"leader" -> "follower" [label="newer term"];
-	"follower" -> "pre-candidate" [label="election timeout\n[no backoff, not cordoned, the view may elect]"];
-	"pre-candidate" -> "pre-candidate" [label="election timeout\n[no backoff, not cordoned, the view may elect]"];
-	"candidate" -> "pre-candidate" [label="election timeout\n[no backoff, not cordoned, the view may elect]"];
+	"pre-candidate" -> "candidate" [label="timeout now\n[sent by this term's leader, to a node not cordoned]"];
+	"candidate" -> "candidate" [label="vote\n[of this term]", style=dashed];
+	"candidate" -> "leading" [label="vote quorum\n[a majority of the view voted for it]"];
+	"follower" -> "follower" [label="heartbeat\n[of this term]", style=dashed];
+	"leading" -> "handing over" [label="resign\n[a successor it may hand over to]"];
+	"handing over" -> "handing over" [label="resign\n[not handing over already]", style=dashed];
+	"handing over" -> "follower" [label="handed over"];
+	"follower" -> "follower" [label="vote request", style=dashed];
+	"pre-candidate" -> "pre-candidate" [label="vote request", style=dashed];
+	"candidate" -> "candidate" [label="vote request", style=dashed];
+	"leading" -> "leading" [label="vote request", style=dashed];
+	"handing over" -> "handing over" [label="vote request", style=dashed];
 	"follower" -> "follower" [label="newer term"];
 	"pre-candidate" -> "follower" [label="newer term"];
 	"candidate" -> "follower" [label="newer term"];
+	"leading" -> "follower" [label="newer term"];
+	"handing over" -> "follower" [label="newer term"];
+	"follower" -> "pre-candidate" [label="election timeout\n[no backoff, not cordoned, the view may elect]"];
+	"pre-candidate" -> "pre-candidate" [label="election timeout\n[no backoff, not cordoned, the view may elect]"];
+	"candidate" -> "pre-candidate" [label="election timeout\n[no backoff, not cordoned, the view may elect]"];
+	"pre-candidate" -> "follower" [label="heartbeat\n[of this term]"];
+	"candidate" -> "follower" [label="heartbeat\n[of this term]"];
+	"leading" -> "leading" [label="ack\n[of this term]", style=dashed];
+	"handing over" -> "handing over" [label="ack\n[of this term]", style=dashed];
+	"leading" -> "follower" [label="lost quorum", ltail="cluster_leader"];
+	"leading" -> "follower" [label="singleton failed", ltail="cluster_leader"];
 }

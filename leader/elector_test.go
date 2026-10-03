@@ -374,7 +374,72 @@ func TestLeaderStopsGracefully(t *testing.T) {
 	})
 }
 
-// A leader that hears of a newer term steps down.
+// A pre-vote counts only for the term its candidate would begin: a lone
+// elector, which no other answers, takes one for another term as nothing,
+// and one for its next term, with its own, as the majority it is.
+func TestPreVoteCountsOnlyForTheTermItWouldBegin(t *testing.T) {
+	nodes(t, []string{"a", "b", "c"}, []string{"a"}, func(j *journal, _ string) leader.Spec[counter] { return spec(j) },
+		func(t *testing.T, c *grpcproctest.Cluster, j *journal) {
+			settle(time.Second) // a asks for pre-votes nobody answers
+			preVote := func(term uint64) {
+				t.Helper()
+				msg := &leaderv1.Peer{Term: term, Kind: &leaderv1.Peer_Vote{Vote: &leaderv1.Vote{Pre: true, Granted: true}}}
+				if err := c.Node("b").SendTo(t.Context(), grpcproc.Name{Node: "a", Name: leader.ElectorName("test")}, msg); err != nil {
+					t.Fatal(err)
+				}
+				settle(time.Millisecond)
+			}
+			preVote(5)
+			if info := status(t, c, "a"); info.Role != leader.Follower || info.Term != 0 {
+				t.Errorf("after a pre-vote for term 5: %v in term %d, want a follower in term 0", info.Role, info.Term)
+			}
+			preVote(1)
+			if info := status(t, c, "a"); info.Role != leader.Candidate || info.Term != 1 {
+				t.Errorf("after a pre-vote for term 1: %v in term %d, want a candidate in term 1", info.Role, info.Term)
+			}
+		})
+}
+
+// A heartbeat of another term is not from this node's leader: a follower
+// keeps the one it follows.
+func TestHeartbeatOfAnotherTermIsNotFollowed(t *testing.T) {
+	cluster(t, spec, func(t *testing.T, c *grpcproctest.Cluster, j *journal) {
+		settle(2 * time.Second)
+		lead, term := elected(t, c, "a", "b", "c")
+		f, g := others(lead)[0], others(lead)[1]
+		msg := &leaderv1.Peer{Term: term - 1, Kind: &leaderv1.Peer_Heartbeat{Heartbeat: &leaderv1.Heartbeat{}}}
+		if err := c.Node(g).SendTo(t.Context(), grpcproc.Name{Node: f, Name: leader.ElectorName("test")}, msg); err != nil {
+			t.Fatal(err)
+		}
+		settle(time.Millisecond)
+		if info := status(t, c, f); info.Leader != lead || info.Term != term {
+			t.Errorf("%s follows %q in term %d, want %s in term %d", f, info.Leader, info.Term, lead, term)
+		}
+	})
+}
+
+// A follower cut off from its leader long enough to hold a pre-vote still
+// follows it, so a hand-over to it goes through: TimeoutNow makes it
+// campaign, and win.
+func TestTimeoutNowReachesAPreCandidate(t *testing.T) {
+	cluster(t, spec, func(t *testing.T, c *grpcproctest.Cluster, j *journal) {
+		settle(2 * time.Second)
+		first, term := elected(t, c, "a", "b", "c")
+		f := others(first)[0]
+		c.Partition(first, f)
+		settle(time.Second) // f asks for pre-votes, which the other follower, hearing first, ignores
+		c.Heal(first, f)
+		msg := &leaderv1.Peer{Term: term, Kind: &leaderv1.Peer_TimeoutNow{TimeoutNow: &leaderv1.TimeoutNow{}}}
+		if err := c.Node(first).SendTo(t.Context(), grpcproc.Name{Node: f, Name: leader.ElectorName("test")}, msg); err != nil {
+			t.Fatal(err)
+		}
+		settle(time.Second)
+		if lead, _ := elected(t, c, "a", "b", "c"); lead != f {
+			t.Errorf("%s leads, want %s, which first handed over to", lead, f)
+		}
+	})
+}
+
 // A TimeoutNow from a node that is not the leader is no hand-over: the
 // follower that gets it does not campaign.
 func TestTimeoutNowFromAnotherFollower(t *testing.T) {
@@ -393,6 +458,7 @@ func TestTimeoutNowFromAnotherFollower(t *testing.T) {
 	})
 }
 
+// A leader that hears of a newer term steps down.
 func TestNewerTerm(t *testing.T) {
 	cluster(t, spec, func(t *testing.T, c *grpcproctest.Cluster, j *journal) {
 		settle(2 * time.Second)

@@ -20,7 +20,7 @@ func TestMachines(t *testing.T) {
 	if got := election.Unreachable(follower); len(got) != 0 {
 		t.Errorf("unreachable stances %v", got)
 	}
-	if got, want := election.States(), []stance{follower, preCandidate, candidate, leading}; !slices.Equal(got, want) {
+	if got, want := election.States(), []stance{follower, preCandidate, candidate, leading, handingOver}; !slices.Equal(got, want) {
 		t.Errorf("stances %v, want %v", got, want)
 	}
 	golden(t, "testdata/election.dot", election.DOT())

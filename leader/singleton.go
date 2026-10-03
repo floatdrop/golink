@@ -93,33 +93,29 @@ func init() {
 		fsm.OnEnterVia(stopping, evReconcile, demote),
 		fsm.OnExitVia(starting, evStartFailed, startFailed),
 		fsm.OnExitVia(running, evDown, exited),
-		fsm.OnExitVia(stopping, evDown, stopped),
+		fsm.OnEnterVia(idle, evDown, stopped),
 		fsm.OnEnterWith(idle, forget),
 	)
 }
 
-// live fires ev at the elector's singleton. The machine refuses a reconcile
-// with nothing to do, by its phase or a guard, and a start whose term could
-// not be saved, which ends the elector's loop (see elector.save); the other
-// events come only in the phase that takes them. So a refusal is no news.
+// live fires ev at the elector's singleton. A refusal is no news: the
+// machine refuses a reconcile with nothing to do, by its phase or a guard,
+// and the other events come only in the phase that takes them. A start
+// whose term could not be saved ends the elector's loop (see fire).
 func (e *elector) live(ev fsm.Event[life], l life) {
 	l.e = e
-	_, _ = lifecycle.Fire(e.p.Context(), &e.single.phase, ev, l)
+	fire(e, lifecycle, &e.single.phase, ev, l)
 }
 
-// holds reports whether this node leads and means to go on: it does not
-// hand over.
-func (e *elector) holds() bool { return e.role == leading && e.resign == nil }
-
 func leads(_ context.Context, l life) error {
-	if !l.e.holds() {
+	if l.e.role != leading {
 		return errNotLeading
 	}
 	return nil
 }
 
 func outlived(_ context.Context, l life) error {
-	if l.e.holds() && l.e.single.term == l.e.term {
+	if l.e.role == leading && l.e.single.term == l.e.term {
 		return errCurrent
 	}
 	return nil
@@ -179,8 +175,15 @@ func exited(_ context.Context, _ fsm.Transition[phase], l life) {
 	l.e.failed(l.now, "the singleton exited: "+l.reason)
 }
 
-// stopped ends the failures in a row: the singleton did as it was told.
-func stopped(_ context.Context, _ fsm.Transition[phase], l life) { l.e.fails = 0 }
+// stopped follows a singleton that exited as it was told, from stopping:
+// it ends the failures in a row, and a hand-over waiting for it goes on.
+// It runs on entry, since the hand-over waits for idle.
+func stopped(_ context.Context, tr fsm.Transition[phase], l life) {
+	if tr.From == stopping {
+		l.e.fails = 0
+		l.e.handOver(l.now, false)
+	}
+}
 
 // forget drops what the elector knew of the singleton that is gone, all
 // but its phase, which is the machine's.

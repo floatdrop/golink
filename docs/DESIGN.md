@@ -1001,18 +1001,38 @@ leader's singleton, and its state the singleton's.
   requests (stickiness); and pre-votes, so a node cut off from the others
   does not raise its term and depose the leader when it is back.
 - **Two state machines, on `github.com/floatdrop/fsm`.** `election`
-  (`role.go`) is where a node stands (follower, pre-candidate, candidate,
-  leader) and what moves it; `lifecycle` (`singleton.go`) is the
-  singleton's phase (idle, starting, running, stopping). Guards name the
-  conditions ("no backoff, not cordoned, the view may elect"), entry and
-  exit hooks do what a stance or phase begins and ends with, and the
-  elector's loop fires the events. What moves no state stays plain code:
-  granting and counting votes, a follower's heartbeat, terms and quorums,
-  and persistence, which happens where messages leave rather than on any
-  transition. The singleton's machine is a level-triggered controller: one
-  `reconcile` event every turn, and guards that say whether to start or
-  stop. `leader/testdata/*.dot` are the machines' diagrams, which a test
-  keeps current, and asserts no stance or phase is a dead end.
+  (`role.go`) is where a node stands — follower, pre-candidate, candidate,
+  leading, handing over — and what it does with every message;
+  `lifecycle` (`singleton.go`) is the singleton's phase (idle, starting,
+  running, stopping). Guards name the conditions ("no backoff, not
+  cordoned, the view may elect", "a majority of the view voted for it"),
+  entry and exit hooks do what a stance or phase begins and ends with, and
+  the elector's loop fires the events with `TryFire`, to which a refusal is
+  no news.
+  - The messages a stance takes without moving are internal transitions
+    (`Stay`): a vote request, in every stance; a vote or pre-vote, counted
+    by the candidate; a follower's heartbeat of its term; a leader's acks.
+    So the table says what every stance does with every message, and a
+    message it refuses is one it ignores.
+  - Leading and handing over are the `leader` group, whose exit hook is
+    stepping down: it fails the checkpoints waiting and answers a Resign
+    when either is left for a follower, and not when a leader starts to
+    hand over. A Resign is the event between them, and what it may hand
+    over to is its guard.
+  - A candidate whose election times out holds a pre-vote again, as etcd's
+    Raft does, so it no longer counts late votes of the term it left, and
+    Status shows it as the follower a pre-candidate is. A pre-candidate
+    still follows its leader, so a hand-over to it goes through.
+  - A quorum is an event fired after every vote counted, whose guard
+    counts. What stays plain code is Raft's arithmetic — terms, one vote
+    per term, the up-to-date check, quorums over the view — and
+    persistence, which happens where messages leave rather than on any
+    transition.
+
+  The singleton's machine is a level-triggered controller: one `reconcile`
+  event every turn, and guards that say whether to start or stop.
+  `leader/testdata/*.dot` are the machines' diagrams, which a test keeps
+  current, and asserts no stance or phase is a dead end.
 - **One relay process per peer.** A remote send or monitor waits for the
   dial (up to `DialTimeout`), and a heartbeat loop cannot. The elector sends
   locally to relays, which send on and monitor the peer's elector: a hung
