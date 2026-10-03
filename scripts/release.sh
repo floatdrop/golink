@@ -111,7 +111,10 @@ else
 	echo "then tag $(list $(printf "%s/$version " "${modules[@]}")) on that commit."
 fi
 if ! $dry && ! $yes; then
-	read -r -p "Proceed? [y/N] " ok
+	# read fails at once without a terminal, which set -e would end the
+	# script on without a word.
+	[ -t 0 ] || die "no terminal to confirm on: pass -y once the plan above is right"
+	read -r -p "Proceed? [y/N] " ok || true
 	[ "$ok" = y ] || die "stopped"
 fi
 

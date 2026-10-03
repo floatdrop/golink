@@ -37,6 +37,10 @@ scripts/release.sh v0.6.1        # a patch of the core
 scripts/release.sh otel/v0.6.1   # a patch of a nested module
 ```
 
+It asks before it changes anything. From a shell with no terminal to ask
+on, an editor's or an agent's, it stops instead: check the plan with `-n`,
+then run it again with `-y`.
+
 A minor release:
 
 1. tags the core and pushes the tag, so that the module proxy serves it;
