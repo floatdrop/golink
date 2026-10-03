@@ -412,15 +412,41 @@ func (s *scenario) kill(node string) {
 }
 
 // settle heals every partition and lets everything in flight land: calls
-// time out, Downs arrive, links end what they end.
+// time out, Downs arrive, links end what they end. A probe's commands queue
+// behind its calls, and a call to itself waits out its timeout, so there is
+// no fixed bound: it waits until a minute passes in which nothing happens.
 func (s *scenario) settle() {
 	for k, parted := range s.parted {
 		if parted {
 			s.c.Heal(k[0], k[1])
 		}
 	}
-	time.Sleep(time.Minute)
-	synctest.Wait()
+	for seen := -1; ; {
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		n := s.seen()
+		if n == seen {
+			return
+		}
+		seen = n
+	}
+}
+
+// seen counts what the probes have seen and done, ending included.
+func (s *scenario) seen() int {
+	s.mu.Lock()
+	probes := s.probes
+	s.mu.Unlock()
+	n := 0
+	for _, pr := range probes {
+		pr.mu.Lock()
+		n += len(pr.log)
+		if pr.ended {
+			n++
+		}
+		pr.mu.Unlock()
+	}
+	return n
 }
 
 func (s *scenario) history() string { return strings.Join(s.ops, "\n") }
