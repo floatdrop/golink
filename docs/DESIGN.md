@@ -1000,11 +1000,21 @@ leader's singleton, and its state the singleton's.
   (check-quorum); followers that heard from a leader lately ignore vote
   requests (stickiness); and pre-votes, so a node cut off from the others
   does not raise its term and depose the leader when it is back.
-- **Two state machines, on `github.com/floatdrop/fsm`.** `election`
+- **State machines, on `github.com/floatdrop/fsm`.** `election`
   (`role.go`) is where a node stands — follower, pre-candidate, candidate,
   leading, handing over — and what it does with every message;
   `lifecycle` (`singleton.go`) is the singleton's phase (idle, starting,
-  running, stopping). Guards name the conditions ("no backoff, not
+  running, stopping); and each peer stands with this node as one of five
+  (`peers.go`): live, a ghost, silent (in the view, and not watched),
+  away or gone (out of it). That last machine is shared by every peer,
+  each holding its own standing, and comes in two kinds, built from the
+  same rules: `fixedView` for Voters, where none ever leaves the view and
+  one whose elector is gone is silent, and `openView` for a dynamic view,
+  which such a peer leaves, as a ghost does after GhostTTL without
+  Membership, and which Membership's reports move peers in and out of. A
+  peer leaving the unwatched states has its relay watch again, and one
+  entering the view counts as having just acknowledged the leader: group
+  hooks, so no path in or out can skip them. Guards name the conditions ("no backoff, not
   cordoned, the view may elect", "a majority of the view voted for it"),
   entry and exit hooks do what a stance or phase begins and ends with, and
   the elector's loop fires the events with `TryFire`, to which a refusal is
@@ -1032,7 +1042,7 @@ leader's singleton, and its state the singleton's.
   The singleton's machine is a level-triggered controller: one `reconcile`
   event every turn, and guards that say whether to start or stop.
   `leader/testdata/*.dot` are the machines' diagrams, which a test keeps
-  current, and asserts no stance or phase is a dead end.
+  current, and asserts no state of any is a dead end.
 - **One relay process per peer.** A remote send or monitor waits for the
   dial (up to `DialTimeout`), and a heartbeat loop cannot. The elector sends
   locally to relays, which send on and monitor the peer's elector: a hung

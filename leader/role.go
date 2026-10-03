@@ -241,7 +241,7 @@ func maySucceed(_ context.Context, t turn) error {
 		return nil
 	case to == e.self:
 		return fmt.Errorf("leader: %s leads already", to)
-	case p == nil || !p.inView:
+	case p == nil || !p.standing.counts():
 		return fmt.Errorf("leader: %s is not in the view", to)
 	case e.cordoned(to):
 		return fmt.Errorf("leader: %s is cordoned", to)

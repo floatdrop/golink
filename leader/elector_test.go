@@ -635,6 +635,43 @@ func TestDynamicViewFromPeers(t *testing.T) {
 	})
 }
 
+// A node Membership reports down while it cannot be reached is gone from
+// the view: once it is back and talks, it is not listened to, nor greeted,
+// until Membership reports it up again.
+func TestReportedDownWhileUnreachable(t *testing.T) {
+	m := &members{initial: []string{"a", "b", "c"}}
+	dynamic := func(j *journal, _ string) leader.Spec[counter] {
+		s := spec(j)
+		s.Voters, s.Membership, s.MinClusterSize = nil, m, 2
+		return s
+	}
+	nodes(t, []string{"a", "b", "c"}, []string{"a", "b", "c"}, dynamic, func(t *testing.T, c *grpcproctest.Cluster, j *journal) {
+		settle(2 * time.Second)
+		lead, _ := elected(t, c, "a", "b", "c")
+		x := others(lead)[0]
+		rest := []string{lead, others(lead)[1]}
+		slices.Sort(rest)
+		c.Partition(lead, x)
+		settle(time.Second) // x is a ghost to the leader
+		m.emit(x, false)
+		settle(time.Second)
+		want := "leader " + strings.Join(rest, ",")
+		if got := view(t, c, lead); got != want {
+			t.Errorf("with %s reported down: %s, want %s", x, got, want)
+		}
+		c.Heal(lead, x)
+		settle(time.Second) // x talks again
+		if got := view(t, c, lead); got != want {
+			t.Errorf("with %s back but not reported: %s, want %s", x, got, want)
+		}
+		m.emit(x, true)
+		settle(time.Second)
+		if got := view(t, c, lead); got != "leader a,b,c" {
+			t.Errorf("with %s reported up: %s", x, got)
+		}
+	})
+}
+
 // Without a Membership of its own, an elector follows its node's: c runs an
 // elector and talks, but the nodes' Membership has not reported it, so a
 // and b do not listen to it. Without any Membership, it would join.

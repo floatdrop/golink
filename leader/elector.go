@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/floatdrop/fsm"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -48,6 +49,10 @@ func (es *electors[S]) run(p *grpcproc.Process[proto.Message]) error {
 	if len(e.spec.Voters) == 0 && e.spec.Membership == nil {
 		e.spec.Membership = p.Node().Membership()
 	}
+	e.peering = openView
+	if e.static() {
+		e.peering = fixedView
+	}
 	es.cur = e
 	return e.loop()
 }
@@ -56,18 +61,15 @@ func (es *electors[S]) run(p *grpcproc.Process[proto.Message]) error {
 type peer struct {
 	node  string
 	relay grpcproc.Addr[proto.Message]
-	// inView says it counts towards the quorum. Every voter does.
-	inView bool
+	// standing is whether it is in the view and watched (see fixedView
+	// and openView).
+	standing standing
 	// declared says Peers or Membership named it: it may take part.
 	declared bool
 	// greetAt is when to greet it next, while it is out of the view or has
 	// not been heard from since it was lost.
 	greetAt time.Time
-	// down says the relay's monitor fired: it watches again once the peer
-	// is heard from.
-	down bool
-	// ghostSince is when its link broke, if it has not been heard from
-	// since.
+	// ghostSince is when it became a ghost.
 	ghostSince time.Time
 	// On a leader: when it last acknowledged a heartbeat (or joined the
 	// view), the state version it holds, and which version it was last
@@ -110,6 +112,7 @@ func (es *electors[S]) build(p *grpcproc.Process[proto.Message]) func(term uint6
 type elector struct {
 	spec       config
 	build      func(term uint64, value *anypb.Any) (func() (actor.ChildSpec, error), error)
+	peering    *fsm.Machine[standing] // fixedView or openView, as the Spec calls for
 	p          *grpcproc.Process[proto.Message]
 	self, name string
 
@@ -168,7 +171,7 @@ func (e *elector) loop() error {
 	}
 	for _, node := range slices.Concat(e.spec.Voters, e.spec.Peers) {
 		if node != e.self {
-			e.add(node).declared = true
+			e.add(node, true)
 		}
 	}
 	for {
@@ -273,19 +276,16 @@ func (e *elector) timers(now time.Time) {
 	}
 }
 
-// peersNow looks after the peers: in a dynamic view ghosts leave it, and
-// peers lost, or named but out of the view, are greeted every GhostTTL, to
-// hear from them once they are back.
+// peersNow looks after the peers: a ghost leaves a dynamic view once its
+// time is up, and a peer this node does not watch, or that is named but out
+// of the view, is greeted every GhostTTL, to hear from it once it is back.
+// The guards say which (see fixedView and openView).
 func (e *elector) peersNow(now time.Time) {
 	for _, p := range e.peers {
-		if !e.static() && p.inView && e.spec.Membership == nil && !p.ghostSince.IsZero() && now.Sub(p.ghostSince) >= e.spec.GhostTTL {
-			p.inView = false
+		if !e.static() { // Voters never leave the view
+			e.tell(p, evGhostTimeout, now)
 		}
-		lost := p.inView && (p.down || !p.ghostSince.IsZero())
-		absent := !p.inView && p.declared
-		if (lost || absent) && !now.Before(p.greetAt) {
-			e.greet(p, now, false)
-		}
+		e.tell(p, evGreetDue, now)
 	}
 	if !e.static() && e.spec.Membership != nil && e.bridge == (grpcproc.Ref{}) && !now.Before(e.bridgeAt) {
 		// It fails only while the node stops.
@@ -377,9 +377,10 @@ func (e *elector) change(m grpcproc.Msg[proto.Message], st *leaderv1.State, now 
 	e.heartbeatAt = now // replicate at once
 }
 
-// add starts knowing node, with a relay to its elector.
-func (e *elector) add(node string) *peer {
-	p := &peer{node: node, inView: true, lastAck: time.Now()}
+// add starts knowing node, with a relay to its elector: live, in the view,
+// and declared if Voters, Peers or Membership named it.
+func (e *elector) add(node string, declared bool) *peer {
+	p := &peer{node: node, standing: live, declared: declared, lastAck: time.Now()}
 	// It fails only while the node stops.
 	p.relay, _ = e.p.Spawn(relay(node, e.name), grpcproc.LinkParent(), grpcproc.WithLabel("leader relay"))
 	e.peers[node] = p
@@ -408,7 +409,7 @@ func (e *elector) send(p *peer, m *leaderv1.Peer) {
 func (e *elector) view() []string {
 	v := []string{e.self}
 	for node, p := range e.peers {
-		if p.inView {
+		if p.standing.counts() {
 			v = append(v, node)
 		}
 	}
@@ -492,20 +493,17 @@ func (e *elector) admit(from string, m *leaderv1.Peer, now time.Time) *peer {
 	case p == nil && (e.static() || e.spec.Membership != nil):
 		return nil
 	case p == nil:
-		p = e.add(from)
-	case !p.inView && e.spec.Membership != nil && !p.declared:
-		return nil
-	case !p.inView:
-		p.inView, p.lastAck = true, now
+		p = e.add(from, false)
 	}
+	if !e.peering.Can(e.p.Context(), p.standing, evHeard, news{e: e, p: p, now: now}) {
+		return nil // out of the view, and Membership has not reported it
+	}
+	// The reply goes before the relay is told to watch again, which may
+	// wait for a dial.
 	if h := m.GetHello(); h != nil && !h.GetReply() {
 		e.greet(p, now, true)
 	}
-	p.ghostSince = time.Time{}
-	if p.down {
-		p.down = false
-		_ = p.relay.Send(e.p.Context(), e.p, &leaderv1.Watch{})
-	}
+	e.tell(p, evHeard, now)
 	return p
 }
 
@@ -683,19 +681,13 @@ func (e *elector) peerDown(b *leaderv1.PeerDown, now time.Time) {
 	if p == nil {
 		return // not from a relay of this elector's
 	}
-	p.down = true
 	if b.GetReason() == grpcproc.ReasonNoConnection {
 		// Maybe cut off, maybe gone: it counts, for now.
-		if p.ghostSince.IsZero() {
-			p.ghostSince = now
-		}
+		e.tell(p, evLinkLost, now)
 		return
 	}
 	// Its elector exited, or it never ran one.
-	if !e.static() {
-		p.inView = false
-		p.greetAt = now.Add(e.spec.GhostTTL)
-	}
+	e.tell(p, evElectorGone, now)
 	if p.node == e.leader {
 		e.leader = ""
 		e.electionAt = now.Add(rand.N(e.spec.ElectionTimeout))
@@ -710,16 +702,12 @@ func (e *elector) member(b *leaderv1.MemberEvent, now time.Time) {
 	switch {
 	case !b.GetUp():
 		if p != nil {
-			p.inView, p.declared, p.ghostSince = false, false, time.Time{}
+			e.tell(p, evReportedOff, now)
 		}
 	case p == nil:
-		e.add(b.GetNode()).declared = true
+		e.add(b.GetNode(), true)
 	default:
-		p.declared = true
-		if !p.inView {
-			p.inView, p.ghostSince, p.lastAck = true, time.Time{}, now
-			e.greet(p, now, false)
-		}
+		e.tell(p, evReportedUp, now)
 	}
 }
 
@@ -768,7 +756,7 @@ func (e *elector) inspect() map[string]string {
 	}
 	var unreachable []string
 	for _, p := range e.inView() {
-		if p.down || !p.ghostSince.IsZero() {
+		if p.standing.unreachable() {
 			unreachable = append(unreachable, p.node)
 		}
 	}

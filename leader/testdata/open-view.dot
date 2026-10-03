@@ -1,0 +1,38 @@
+digraph "open view" {
+	rankdir=LR;
+	compound=true;
+	"__start" [shape=point];
+	subgraph "cluster_view" {
+		label="view";
+		style=rounded;
+		"live" [shape=box];
+		"ghost" [shape=box];
+		"silent" [shape=box];
+	}
+	// group unwatched overlaps another without containing it, so it is not drawn as a cluster
+	"gone" [shape=box];
+	"away" [shape=box];
+	"__start" -> "live";
+	"live" -> "live" [label="heard from", style=dashed];
+	"ghost" -> "live" [label="heard from"];
+	"silent" -> "live" [label="heard from"];
+	"live" -> "ghost" [label="link lost"];
+	"ghost" -> "ghost" [label="greet\n[GhostTTL since the last greeting]", style=dashed];
+	"silent" -> "silent" [label="greet\n[GhostTTL since the last greeting]", style=dashed];
+	"live" -> "gone" [label="elector gone"];
+	"away" -> "gone" [label="elector gone"];
+	"away" -> "gone" [label="link lost"];
+	"ghost" -> "gone" [label="ghost timeout\n[a ghost for GhostTTL, with no Membership]"];
+	"gone" -> "live" [label="heard from\n[Membership reports it up, or Peers named it, or there is no Membership]"];
+	"gone" -> "gone" [label="greet\n[named, and GhostTTL since the last greeting]", style=dashed];
+	"live" -> "away" [label="reported down"];
+	"ghost" -> "gone" [label="reported down"];
+	"silent" -> "gone" [label="reported down"];
+	"away" -> "away" [label="reported down", style=dashed];
+	"gone" -> "gone" [label="reported down", style=dashed];
+	"away" -> "live" [label="reported up"];
+	"gone" -> "silent" [label="reported up"];
+	"live" -> "live" [label="reported up", style=dashed];
+	"ghost" -> "ghost" [label="reported up", style=dashed];
+	"silent" -> "silent" [label="reported up", style=dashed];
+}

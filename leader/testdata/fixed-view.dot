@@ -1,0 +1,20 @@
+digraph "fixed view" {
+	rankdir=LR;
+	compound=true;
+	"__start" [shape=point];
+	subgraph "cluster_unwatched" {
+		label="unwatched";
+		style=rounded;
+		"ghost" [shape=box];
+		"silent" [shape=box];
+	}
+	"live" [shape=box];
+	"__start" -> "live";
+	"live" -> "live" [label="heard from", style=dashed];
+	"ghost" -> "live" [label="heard from"];
+	"silent" -> "live" [label="heard from"];
+	"live" -> "ghost" [label="link lost"];
+	"ghost" -> "ghost" [label="greet\n[GhostTTL since the last greeting]", style=dashed];
+	"silent" -> "silent" [label="greet\n[GhostTTL since the last greeting]", style=dashed];
+	"live" -> "silent" [label="elector gone"];
+}
