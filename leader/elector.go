@@ -78,26 +78,6 @@ type peer struct {
 	sent        time.Time
 }
 
-type phase uint8
-
-const (
-	idle phase = iota
-	starting
-	running
-	stopping
-)
-
-var phases = [...]string{"none", "starting", "running", "stopping"}
-
-// singleton is the elector's singleton: its lifecycle, and the term it was
-// started for.
-type singleton struct {
-	phase phase
-	term  uint64
-	pid   grpcproc.PID
-	ref   grpcproc.Ref
-}
-
 // pending is a Checkpoint call waiting for a majority to hold its state.
 type pending struct {
 	seq uint64
@@ -316,20 +296,11 @@ func (e *elector) peersNow(now time.Time) {
 }
 
 // reconcile starts the singleton while this node leads, and stops it while
-// it does not, or runs for a term that is over.
+// it does not, or runs for a term that is over (see lifecycle). A hand-over
+// goes on once the singleton has stopped.
 func (e *elector) reconcile(now time.Time) {
-	lead := e.role == Leader && e.resign == nil
-	switch e.single.phase {
-	case idle:
-		if lead {
-			e.start(now)
-		}
-	case running:
-		if !lead || e.single.term != e.term {
-			e.single.phase = stopping
-			_ = e.p.Exit(e.single.pid, ReasonDemoted)
-		}
-	}
+	e.live(evReconcile, life{now: now})
+	e.handOver(now, false)
 }
 
 func (e *elector) handle(m grpcproc.Msg[proto.Message], now time.Time) {
@@ -790,69 +761,21 @@ func (e *elector) handOver(now time.Time, force bool) {
 	_ = r.m.Reply(&emptypb.Empty{}, err)
 }
 
-// start starts the singleton for this term, from a process of its own:
-// Confirm and the singleton's start may take their time, and heartbeats
-// must go on meanwhile. The term is saved first: a lease for a term this
-// node could lead again after a restart would be no fencing token.
-func (e *elector) start(now time.Time) {
-	if !e.save() {
-		return
-	}
-	build, err := e.build(e.term, e.state.GetValue())
-	if err != nil {
-		e.failed(now, err.Error())
-		return
-	}
-	term, top, confirm := e.term, e.p.Parent(), e.spec.Confirm
-	e.single = singleton{phase: starting, term: term}
-	// It fails only while the node stops.
-	_, _ = e.p.Spawn(func(h *grpcproc.Process[proto.Message]) error {
-		started := &leaderv1.Started{Term: term}
-		pid, err := startSingleton(h.Context(), h, top, term, confirm, build)
-		if err != nil {
-			started.Error = err.Error()
-		} else {
-			started.Pid = pid.Proto()
-		}
-		return h.SendTo(h.Parent(), started)
-	}, grpcproc.LinkParent(), grpcproc.WithLabel("leader starter"))
-}
-
-func startSingleton(ctx context.Context, from grpcproc.Caller, top grpcproc.PID, term uint64, confirm func(context.Context, uint64) error, build func() (actor.ChildSpec, error)) (grpcproc.PID, error) {
-	if confirm != nil {
-		if err := confirm(ctx, term); err != nil {
-			return grpcproc.PID{}, fmt.Errorf("leader: Confirm: %w", err)
-		}
-	}
-	child, err := build()
-	if err != nil {
-		return grpcproc.PID{}, fmt.Errorf("leader: Singleton: %w", err)
-	}
-	return actor.StartChild(ctx, from, top, child.WithRestart(actor.Temporary).WithSignificant(false))
-}
-
 func (e *elector) started(b *leaderv1.Started, now time.Time) {
 	if b.GetError() != "" {
-		e.single = singleton{}
-		e.failed(now, b.GetError())
+		e.live(evStartFailed, life{now: now, reason: b.GetError()})
 		return
 	}
-	pid := grpcproc.PIDFromProto(b.GetPid())
-	// reconcile stops it at once if the term it was started for is over.
-	e.single = singleton{phase: running, term: b.GetTerm(), pid: pid, ref: e.p.Monitor(pid)}
+	e.live(evStarted, life{now: now, term: b.GetTerm(), pid: grpcproc.PIDFromProto(b.GetPid())})
 }
 
 func (e *elector) down(d grpcproc.Down, now time.Time) {
-	switch {
-	case d.Ref == e.bridge:
+	switch d.Ref {
+	case e.bridge:
 		e.bridge, e.bridgeAt = grpcproc.Ref{}, now.Add(e.spec.GhostTTL)
 		e.p.Log().Warn("leader: the Membership watch ended; watching again later", "reason", d.Reason)
-	case d.Ref == e.single.ref && e.single.phase == running:
-		e.single = singleton{}
-		e.failed(now, "the singleton exited: "+d.Reason)
-	case d.Ref == e.single.ref:
-		e.single, e.fails = singleton{}, 0
-		e.handOver(now, false)
+	case e.single.ref:
+		e.live(evDown, life{now: now, reason: d.Reason})
 	}
 }
 

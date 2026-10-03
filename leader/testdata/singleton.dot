@@ -1,0 +1,15 @@
+digraph "singleton" {
+	rankdir=LR;
+	"__start" [shape=point];
+	"idle" [shape=box];
+	"starting" [shape=box];
+	"running" [shape=box];
+	"stopping" [shape=box];
+	"__start" -> "idle";
+	"idle" -> "starting" [label="reconcile\n[this node leads, and does not hand over]"];
+	"starting" -> "running" [label="started"];
+	"starting" -> "idle" [label="start failed"];
+	"running" -> "stopping" [label="reconcile\n[this node stopped leading, or its term is over]"];
+	"running" -> "idle" [label="down"];
+	"stopping" -> "idle" [label="down"];
+}
