@@ -1,6 +1,7 @@
 package grpcproc
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -20,7 +21,7 @@ import (
 )
 
 // Protocol version carried in the handshake. Bumped on incompatible change.
-const protoVersion = 1
+const protoVersion = 2
 
 // maxFrame is roughly how large a Frame the writer builds, well under gRPC's
 // default 4 MiB receive limit. An envelope larger than that goes alone.
@@ -30,6 +31,7 @@ const (
 	mdNode        = "grpcproc-node"
 	mdIncarnation = "grpcproc-incarnation"
 	mdVersion     = "grpcproc-version"
+	mdSession     = "grpcproc-session" // the dialer's count of ended sessions (see supersede)
 )
 
 // Topology: a node opens one Link stream to each peer it sends to and only
@@ -65,6 +67,10 @@ type outLink struct {
 	done    chan struct{}
 	once    sync.Once
 	closing atomic.Bool
+	// session is the peer's count of ended sessions, from its Hello (see
+	// supersede); wait, the backoff the dial came after (see outLost).
+	session uint64
+	wait    time.Duration
 	linkStats
 }
 
@@ -235,6 +241,9 @@ type dialOp struct {
 	l         *outLink
 	err       error
 	forgotten bool // Disconnect or Membership's Up came during the dial; guarded by n.mu
+	// disconnected is set when Disconnect came during the dial, which drops
+	// the link it makes; guarded by n.mu.
+	disconnected bool
 	// answers are replies and Downs that dispatch made while the dial was
 	// under way, written first once the link is up, and cut the inbound
 	// links they answer, to be cut if they cannot go; guarded by n.mu.
@@ -298,7 +307,8 @@ func (n *Node) dialFor(peer string) (*dialOp, error) {
 	return d, nil
 }
 
-// redial is a peer whose last dial failed: sends to it fail at once until at.
+// redial is a peer whose last dial failed, or whose link ended young: sends
+// to it fail at once until at.
 type redial struct {
 	at   time.Time
 	wait time.Duration // before jitter; the next failure doubles it
@@ -318,18 +328,22 @@ func (n *Node) backedOff(peer string) *redial {
 	return r
 }
 
-// failedDial backs off from peer after a dial to it failed. Called with n.mu
-// held.
-func (n *Node) failedDial(peer string, err error, why string) {
+// failedDial backs off from peer after a dial to it failed, or a link to it
+// ended young, which prev, the wait its dial came after, then doubles.
+// Called with n.mu held.
+func (n *Node) failedDial(peer string, err error, why string, prev time.Duration) {
 	limit := n.cfg.DialBackoff
 	if limit < 0 {
 		return
 	}
-	wait := limit / 32
 	if r := n.backedOff(peer); r != nil {
+		prev = r.wait
+	}
+	wait := limit / 32
+	if prev > 0 {
 		wait = limit
-		if r.wait <= limit/2 { // not 2*r.wait > limit, which overflows near the largest Duration
-			wait = 2 * r.wait
+		if prev <= limit/2 { // not 2*prev > limit, which overflows near the largest Duration
+			wait = 2 * prev
 		}
 	}
 	// Up to a fifth shorter, so that nodes that lost the same peer do not
@@ -361,19 +375,33 @@ func (n *Node) finishDial(peer string, d *dialOp) {
 	if err == nil {
 		// Judged while the dial still holds the peer's senders back: links
 		// with an older incarnation go before this one comes in.
-		if err = n.admit(l.peer); err != nil {
+		if err = n.admit(l.peer, l.session); err != nil {
 			discard, l, why, refused = l, nil, err.Error(), true
+		} else if d.disconnected {
+			// Disconnect drops this link too, before anything is sent on
+			// it: the peer may have ended its side already, and what went
+			// over it would be lost unseen.
+			discard, l, err = l, nil, errDisconnected
+		} else if l.session < n.epochs[peer] {
+			// This node ended its session with the peer while it dialed:
+			// the link was opened in that session, which the peer may still
+			// hold, watches and all. The next dial opens the new one.
+			discard, l, err = l, nil, errSessionEnded
 		}
 	}
 	delete(n.dialing, peer)
 	answers, cut := d.answers, d.cut
 	d.answers, d.cut = nil, nil
 	if err != nil {
-		if !n.stopped && !d.forgotten {
-			n.failedDial(peer, err, why)
+		if !n.stopped && !d.forgotten && err != errSessionEnded {
+			n.failedDial(peer, err, why, 0)
 		}
 		err = &LinkError{Peer: peer, Err: err, Unsent: true}
 	} else {
+		// A link that ends young doubles the wait this dial came after.
+		if r := n.backedOff(peer); r != nil {
+			l.wait = r.wait
+		}
 		delete(n.backoff, peer)
 		if n.stopped {
 			discard, l, err = l, nil, ErrNodeStopped
@@ -434,10 +462,14 @@ func (n *Node) dial(peer string) (*outLink, error) {
 	// The stream outlives n.ctx: processes exiting on Stop still need it to
 	// deliver their Down{shutdown}. Stop closes it after they are gone.
 	sctx, scancel := context.WithCancel(context.Background())
+	n.mu.RLock()
+	session := n.epochs[peer]
+	n.mu.RUnlock()
 	sctx = metadata.AppendToOutgoingContext(sctx,
 		mdNode, n.id.Name,
 		mdIncarnation, strconv.FormatUint(n.id.Incarnation, 10),
 		mdVersion, strconv.Itoa(protoVersion),
+		mdSession, strconv.FormatUint(session, 10),
 	)
 	// Opening the stream waits for a connection, and the handshake for the
 	// peer's Hello. Both wait on sctx, which outlives the dial, so the dial's
@@ -446,9 +478,9 @@ func (n *Node) dial(peer string) (*outLink, error) {
 	// WaitForReady, and the wait for the Hello forever.
 	stop := context.AfterFunc(ctx, scancel)
 	stream, err := grpcprocv1.NewNodeClient(cc).Link(sctx)
-	var inc uint64
+	var hello *grpcprocv1.Hello
 	if err == nil {
-		inc, err = handshake(peer, stream)
+		hello, err = handshake(peer, stream)
 	}
 	if !stop() {
 		// The deadline passed and cancelled the stream, whatever the dial
@@ -473,7 +505,8 @@ func (n *Node) dial(peer string) (*outLink, error) {
 	l := &outLink{
 		node:        n,
 		established: time.Now(),
-		peer:        NodeID{Name: peer, Incarnation: inc},
+		peer:        NodeID{Name: peer, Incarnation: hello.GetIncarnation()},
+		session:     hello.GetSession(),
 		cc:          cc,
 		stream:      stream,
 		cancel:      scancel,
@@ -485,25 +518,25 @@ func (n *Node) dial(peer string) (*outLink, error) {
 
 // handshake waits for the server's Hello and checks it names the peer we
 // meant to reach. The dial's deadline ends the wait by cancelling the stream.
-func handshake(peer string, stream grpc.BidiStreamingClient[grpcprocv1.Frame, grpcprocv1.Frame]) (uint64, error) {
+func handshake(peer string, stream grpc.BidiStreamingClient[grpcprocv1.Frame, grpcprocv1.Frame]) (*grpcprocv1.Hello, error) {
 	f, err := stream.Recv()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	var h *grpcprocv1.Hello
 	if envs := f.GetEnvelopes(); len(envs) == 1 && envs[0].GetKind() == grpcprocv1.Kind_KIND_HELLO {
 		h = envs[0].GetHello()
 	}
 	if h == nil {
-		return 0, errors.New("grpcproc: handshake: expected Hello")
+		return nil, errors.New("grpcproc: handshake: expected Hello")
 	}
 	if h.GetVersion() != protoVersion {
-		return 0, fmt.Errorf("grpcproc: handshake: peer speaks protocol %d, this node %d", h.GetVersion(), protoVersion)
+		return nil, fmt.Errorf("grpcproc: handshake: peer speaks protocol %d, this node %d", h.GetVersion(), protoVersion)
 	}
 	if h.GetNode() != peer {
-		return 0, fmt.Errorf("grpcproc: handshake: dialed %q but reached %q", peer, h.GetNode())
+		return nil, fmt.Errorf("grpcproc: handshake: dialed %q but reached %q", peer, h.GetNode())
 	}
-	return h.GetIncarnation(), nil
+	return h, nil
 }
 
 // ---------- inbound ----------
@@ -595,6 +628,7 @@ func (n *Node) serveLink(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcp
 	peer := NodeID{Name: first(md, mdNode)}
 	peer.Incarnation, _ = strconv.ParseUint(first(md, mdIncarnation), 10, 64)
 	version, _ := strconv.Atoi(first(md, mdVersion))
+	session, _ := strconv.ParseUint(first(md, mdSession), 10, 64)
 	switch {
 	case version != protoVersion:
 		return status.Errorf(codes.FailedPrecondition, "grpcproc: protocol version %d, this node speaks %d", version, protoVersion)
@@ -610,14 +644,20 @@ func (n *Node) serveLink(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcp
 		}
 	}
 	// Refused before the Hello, so that the peer's dial fails, and backs off.
+	// The Hello counts the sessions ended as the link will go in: the
+	// peer's count if it is larger, which this node takes (see supersede).
 	n.mu.RLock()
 	err := n.stale(peer)
+	ours := n.epochs[peer.Name]
+	if peer.Incarnation > n.newest[peer.Name] {
+		ours = 0 // a new incarnation counts from 0
+	}
 	n.mu.RUnlock()
 	if err != nil {
 		return n.refuse(peer, err)
 	}
 	if err := stream.Send(&grpcprocv1.Frame{Envelopes: []*grpcprocv1.Envelope{{Kind: grpcprocv1.Kind_KIND_HELLO, Hello: &grpcprocv1.Hello{
-		Node: n.id.Name, Incarnation: n.id.Incarnation, Version: protoVersion,
+		Node: n.id.Name, Incarnation: n.id.Incarnation, Version: protoVersion, Session: max(ours, session),
 	}}}}); err != nil {
 		return err
 	}
@@ -639,7 +679,7 @@ func (n *Node) serveLink(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcp
 			n.settled.Wait()
 			continue
 		}
-		dropped, err := n.supersede(peer, true)
+		dropped, err := n.supersede(peer, session, true)
 		if err != nil { // a newer incarnation came up since the Hello
 			n.mu.Unlock()
 			return n.refuse(peer, err)
@@ -732,22 +772,44 @@ func (n *Node) meet(peer NodeID) (why, stale error) {
 }
 
 // supersede makes way for a link with peer: it refuses a stale incarnation,
-// and drops the links with an older one, and, if replace is set, an inbound
-// link from the same one, which lost its session. It reports whether it
-// dropped any; it lets go of n.mu while it does, so the caller then judges
-// afresh. Called with n.mu held.
-func (n *Node) supersede(peer NodeID, replace bool) (dropped bool, err error) {
+// and drops the links with an older one; the links of a session the peer
+// says it ended, session being its count of ended sessions; and, if replace
+// is set, an inbound link from the same one, which lost its session. It
+// reports whether it dropped any; it lets go of n.mu while it does, so the
+// caller then judges afresh. Called with n.mu held.
+//
+// Each node counts, per peer, the sessions with it that ended (n.epochs):
+// one more each time it declares the peer down, and each link says how many,
+// the dialer in its metadata and the server in its Hello. The peer ends its
+// session when its link from this node ends, or it declares this node down
+// for another reason (Disconnect, Membership), and this node sees its links
+// end then too, unless it had none, or opened one the peer had ended by the
+// time it came up. Then only the count tells it: it takes the peer's, rather
+// than count one more, so that the two agree. It takes a new incarnation's
+// count too, whatever it is, once the links with the old one are gone. A
+// dialer that hears a smaller count than its own dialed in a session it
+// ended since, and drops the link (see finishDial).
+func (n *Node) supersede(peer NodeID, session uint64, replace bool) (dropped bool, err error) {
 	why, err := n.meet(peer)
 	if err != nil {
 		return false, err
 	}
-	if why == nil && replace && n.in[peer.Name] != nil {
+	restarted := why != nil
+	ended := !restarted && session > n.epochs[peer.Name]
+	switch {
+	case ended:
+		why = errors.New("it ended its session with " + n.id.Name)
+	case why == nil && replace && n.in[peer.Name] != nil:
 		why = errors.New("replaced by a new link")
 	}
 	var out *outLink
 	var in *inLink
 	if why != nil {
 		out, in = n.takeLinks(peer.Name)
+	}
+	if restarted || ended {
+		// Taken, not counted: a new incarnation counts its own, from 0.
+		n.epochs[peer.Name] = session
 	}
 	if out == nil && in == nil {
 		return false, nil
@@ -761,9 +823,9 @@ func (n *Node) supersede(peer NodeID, replace bool) (dropped bool, err error) {
 // admit judges the incarnation a dial reached, before its link goes in: the
 // links with an older one go first. Called with n.mu held, which it lets go
 // of while it drops links.
-func (n *Node) admit(peer NodeID) error {
+func (n *Node) admit(peer NodeID, session uint64) error {
 	for {
-		if dropped, err := n.supersede(peer, false); !dropped {
+		if dropped, err := n.supersede(peer, session, false); !dropped {
 			return err
 		}
 	}
@@ -776,17 +838,35 @@ func (n *Node) admit(peer NodeID) error {
 // The peer is therefore declared down only once the inbound link has ended
 // (everything it sent has then been dispatched, in order), or when there is
 // no inbound link at all. An outbound failure alone just drops that link; the
-// next send dials again.
+// next send dials again. A peer that ended the session itself, and dialed
+// again before this node saw its link from it end, says so in its Hello (see
+// supersede).
+//
+// A link that ends within DialTimeout of coming up counts as a dial that
+// failed (Config.DialBackoff): a path to the peer that keeps breaking then
+// fails sends at once for a while, rather than redial at every send.
 func (n *Node) outLost(l *outLink, err error) {
 	peer := l.peer.Name
+	young := time.Since(l.established) < n.cfg.DialTimeout
+	var ended error
+	var why string
+	if young {
+		ended = fmt.Errorf("its link ended %v after it came up: %w", time.Since(l.established).Round(time.Millisecond), cmp.Or(err, ErrNoConnection))
+		why = ended.Error()
+	}
 	n.mu.Lock()
 	current := n.out[peer] == l
 	in := n.in[peer]
 	down := current && in == nil
+	backOff := current && young && !n.stopped && n.cfg.DialBackoff >= 0
 	if current {
 		delete(n.out, peer)
 	}
+	if backOff {
+		n.failedDial(peer, ended, why, l.wait)
+	}
 	if down {
+		n.epochs[peer]++
 		n.settling[peer]++
 	}
 	n.mu.Unlock()
@@ -794,6 +874,9 @@ func (n *Node) outLost(l *outLink, err error) {
 		defer n.settle(peer)
 	}
 	l.close(err)
+	if backOff {
+		n.log.Warn("outbound link ended soon after it came up; backing off", "peer", peer, "err", err)
+	}
 	switch {
 	case down:
 		n.peerDown(l.peer, err)
@@ -821,14 +904,16 @@ func (n *Node) inLost(l *inLink, err error) {
 }
 
 // takeLinks removes both links with peer, in the critical section that
-// judged them. If it took any, the peer's links are settling until
-// linksLost has declared it down. Called with n.mu held.
+// judged them. If it took any, the session with the peer has ended (see
+// supersede), and the peer's links are settling until linksLost has
+// declared it down. Called with n.mu held.
 func (n *Node) takeLinks(peer string) (*outLink, *inLink) {
 	out, in := n.out[peer], n.in[peer]
 	if out != nil || in != nil {
 		delete(n.out, peer)
 		delete(n.in, peer)
 		n.settling[peer]++
+		n.epochs[peer]++
 	}
 	return out, in
 }

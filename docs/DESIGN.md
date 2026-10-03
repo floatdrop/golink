@@ -177,6 +177,23 @@ message Envelope {                                   // one flat message, decode
   `keepalive.ClientParameters`, server `keepalive.ServerParameters`) is what
   turns a silent partition into a stream error in seconds; the library does
   not set it, the application's gRPC configuration does.
+- **Both ends count the sessions that ended.** Declaring a peer down ends
+  the session with it: its watches on this node's processes are dropped,
+  this node's monitors of its processes fire. The peer learns of it when its
+  links from this node end, which they then do, except when it had none, or
+  it opened one that this node had ended by the time it came up: a dial
+  under way when this node declared it down, whose Hello was sent before.
+  The peer would then send a `Down` on a link this node no longer reads,
+  or wait for one from a watch this node no longer holds, for good. So each
+  node counts, per peer, the sessions that ended, and says how many on each
+  link: the dialer in its metadata, the server in its `Hello`, the larger
+  of its count and the dialer's. A node that hears a larger count than its
+  own ends the session it thought was current and takes the count, without
+  counting one more, so that the two agree; a dialer that hears a smaller
+  one dialed in a session that has ended since, and drops the link, without
+  backing off (the dial did not fail). `Node.Disconnect` drops a dial under
+  way outright. A new incarnation counts from 0. `LinkInfo.Sessions` shows
+  the count: one that keeps growing is a peer whose links keep breaking.
 - **A failed dial backs off.** `Config.DialTimeout` (5s by default) bounds a
   dial, and after one fails, everything routed to that peer fails at once
   with `ErrNoConnection` for a while, rather than each wait out a dial of its
@@ -188,7 +205,12 @@ message Envelope {                                   // one flat message, decode
   incarnation) ends the wait, and so does `Node.Disconnect`. A link the peer opens lets the next send dial at once but
   keeps the doubling: it shows the peer is up, not that this node can reach
   it, and in a one-way partition every reply would otherwise wait out a dial
-  again. `LinkInfo` shows the peer as a down outbound link with its
+  again. A link that ends within `DialTimeout` of coming up counts as a
+  dial that failed, after the wait its own dial came after, so the doubling
+  goes on: a path that lets a dial through and then breaks, a proxy cutting
+  streams, a peer cutting each link for the replies it cannot route back,
+  backs off as one that cannot be dialed does, rather than redial at every
+  send. `LinkInfo` shows the peer as a down outbound link with its
   `RetryAt`. Retries are not part of it, since delivery stays at-most-once.
 - **A link's queue can be bounded.** It is unbounded by default, as Erlang's
   distribution buffer is. `Config.MaxQueued` and `Config.MaxQueuedBytes`
@@ -575,9 +597,9 @@ func (n *Node) Process(pid PID) (ProcessInfo, bool)
 func (n *Node) Info() NodeInfo                   // name, incarnation, metadata, uptime, counts, Links []LinkInfo
 ```
 
-`LinkInfo` per peer: state, established at, reconnects, messages and bytes in
-and out, envelopes waiting to be written, last error, and when a peer whose
-dials fail is dialed again. Ergo's network charts are drawn from exactly
+`LinkInfo` per peer: state, established at, reconnects, sessions ended,
+messages and bytes in and out, envelopes waiting to be written, last error,
+and when a peer whose dials fail is dialed again. Ergo's network charts are drawn from exactly
 these.
 
 ### Self-inspection

@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"strconv"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -56,7 +57,7 @@ func TestLostStaleAndSendClosed(t *testing.T) {
 func TestLinkHandlerBranches(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		n := newTestNode(t, "a")
-		ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(mdNode, "b", mdIncarnation, "2", mdVersion, "1"))
+		ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(mdNode, "b", mdIncarnation, "2", mdVersion, strconv.Itoa(protoVersion)))
 		// Hello cannot be sent.
 		fs := &fakeStream{ctx: ctx, sendErr: io.ErrClosedPipe, recv: make(chan *grpcprocv1.Frame)}
 		if err := n.serveLink(fs); !errors.Is(err, io.ErrClosedPipe) {
@@ -86,7 +87,7 @@ func TestLinkHandlerBranches(t *testing.T) {
 func TestRecvGoroutineStopsWhenClosed(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		n := newTestNode(t, "a")
-		ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(mdNode, "b", mdIncarnation, "2", mdVersion, "1"))
+		ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(mdNode, "b", mdIncarnation, "2", mdVersion, strconv.Itoa(protoVersion)))
 		fs := &fakeStream{ctx: ctx, recvErr: io.EOF, recv: make(chan *grpcprocv1.Frame)}
 		done := make(chan error, 1)
 		go func() { done <- n.serveLink(fs) }()
@@ -461,7 +462,7 @@ func TestFailedDialBackoff(t *testing.T) {
 		}
 		fail := func() (r *redial) {
 			locked(func() {
-				n.failedDial("b", boom, "boom")
+				n.failedDial("b", boom, "boom", 0)
 				r = n.backoff["b"]
 			})
 			return r

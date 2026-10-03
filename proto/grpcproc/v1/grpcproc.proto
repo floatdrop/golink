@@ -97,6 +97,11 @@ message Hello {
   string node = 1;
   uint64 incarnation = 2;
   uint32 version = 3;
+  // How many sessions the server's links with the client's node have had
+  // end, as the server counts them, the client's count taken if larger. A
+  // client that counts fewer learns that the server ended its session with
+  // it; one that counts more dialed in a session that has ended since.
+  uint64 session = 4;
 }
 
 enum Status {

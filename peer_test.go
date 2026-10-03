@@ -34,6 +34,8 @@ type fakePeer struct {
 	hello *grpcprocv1.Frame
 	err   error
 	hang  bool
+	held  chan struct{} // if set, the Hello waits until it is closed
+	drop  chan struct{} // if set, the stream ends once it is closed
 }
 
 func (f *fakePeer) Link(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcprocv1.Frame]) error {
@@ -44,8 +46,15 @@ func (f *fakePeer) Link(stream grpc.BidiStreamingServer[grpcprocv1.Frame, grpcpr
 		<-stream.Context().Done()
 		return nil
 	}
+	if f.held != nil {
+		<-f.held
+	}
 	if err := stream.Send(f.hello); err != nil {
 		return err
+	}
+	if f.drop != nil {
+		<-f.drop
+		return nil
 	}
 	for {
 		if _, err := stream.Recv(); err != nil {
@@ -91,7 +100,7 @@ func TestHandshakeFailures(t *testing.T) {
 		{"not a hello", &fakePeer{hello: frame(&grpcprocv1.Envelope{Kind: grpcprocv1.Kind_KIND_EXIT})}, "expected Hello"},
 		{"empty frame", &fakePeer{hello: frame()}, "expected Hello"},
 		{"wrong version", &fakePeer{hello: hello("b", 99)}, "protocol 99"},
-		{"wrong node", &fakePeer{hello: hello("c", 1)}, `reached "c"`},
+		{"wrong node", &fakePeer{hello: hello("c", 2)}, `reached "c"`},
 		{"no hello", &fakePeer{hang: true}, "no Hello within DialTimeout (200ms): context canceled"},
 	}
 	for _, tc := range cases {
@@ -105,6 +114,73 @@ func TestHandshakeFailures(t *testing.T) {
 			})
 		})
 	}
+}
+
+// A Disconnect that comes while the node dials the peer drops the link the
+// dial makes, as it drops the links there are: what waits for the dial fails,
+// unsent, and nothing goes over a link the peer may have ended already.
+func TestDisconnectDropsADialUnderWay(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		held := make(chan struct{})
+		hello := &grpcprocv1.Frame{Envelopes: []*grpcprocv1.Envelope{{Kind: grpcprocv1.Kind_KIND_HELLO, Hello: &grpcprocv1.Hello{Node: "b", Incarnation: 1, Version: 2}}}}
+		n := nodeAgainst(t, &fakePeer{hello: hello, held: held}, time.Minute)
+		sent := make(chan error, 1)
+		go func() { sent <- n.SendTo(t.Context(), grpcproc.Named[*testpb.Ping]("b", "x"), &testpb.Ping{}) }()
+		synctest.Wait() // the dial waits for b's Hello
+		if n.Disconnect("b") {
+			t.Fatal("Disconnect found a link to drop")
+		}
+		close(held)
+		err := <-sent
+		if le, ok := errors.AsType[*grpcproc.LinkError](err); !ok || !le.Unsent || !strings.Contains(err.Error(), "disconnected") {
+			t.Fatalf("got %v", err)
+		}
+		if peers := n.Peers(); len(peers) != 0 {
+			t.Fatalf("the dial's link went in: %v", peers)
+		}
+	})
+}
+
+// sessionHello is b's Hello, counting ended sessions as given.
+func sessionHello(session uint64) *grpcprocv1.Frame {
+	return &grpcprocv1.Frame{Envelopes: []*grpcprocv1.Envelope{{Kind: grpcprocv1.Kind_KIND_HELLO, Hello: &grpcprocv1.Hello{Node: "b", Incarnation: 1, Version: 2, Session: session}}}}
+}
+
+// A Hello that counts more ended sessions than the node does tells it the
+// peer ended one it did not see end: the node takes the count, and LinkInfo
+// shows it.
+func TestHelloCountsMoreEndedSessions(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		n := nodeAgainst(t, &fakePeer{hello: sessionHello(5)}, time.Second)
+		if err := n.SendTo(t.Context(), grpcproc.Named[*testpb.Ping]("b", "x"), &testpb.Ping{}); err != nil {
+			t.Fatal(err)
+		}
+		if links := n.Info().Links; len(links) != 1 || links[0].Sessions != 5 {
+			t.Fatalf("links %+v", links)
+		}
+	})
+}
+
+// A Hello that counts fewer ended sessions than the node does answers a dial
+// made before the node ended its session with the peer: its link is dropped,
+// and the failure is not the peer's, so it does not back off.
+func TestHelloFromASessionThatEnded(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		drop := make(chan struct{})
+		n := nodeAgainst(t, &fakePeer{hello: sessionHello(0), drop: drop}, time.Second)
+		to := grpcproc.Named[*testpb.Ping]("b", "x")
+		if err := n.SendTo(t.Context(), to, &testpb.Ping{}); err != nil {
+			t.Fatal(err)
+		}
+		close(drop) // b ends the link, and the node its session with b
+		time.Sleep(time.Minute)
+		for range 2 {
+			err := n.SendTo(t.Context(), to, &testpb.Ping{})
+			if le, ok := errors.AsType[*grpcproc.LinkError](err); !ok || !le.Unsent || backedOff(err) || !strings.Contains(err.Error(), "the session it was dialed in ended") {
+				t.Fatalf("got %v", err)
+			}
+		}
+	})
 }
 
 // A dial that gets no answer ends at DialTimeout, for a node's send and a
@@ -301,17 +377,17 @@ func TestInboundRejections(t *testing.T) {
 		if err := open("grpcproc-version", "9", "grpcproc-node", "other"); status.Code(err) != codes.FailedPrecondition || !strings.Contains(err.Error(), "protocol version 9") {
 			t.Fatalf("protocol 9: %v", err)
 		}
-		if err := open("grpcproc-version", "1"); status.Code(err) != codes.InvalidArgument {
+		if err := open("grpcproc-version", "2"); status.Code(err) != codes.InvalidArgument {
 			t.Fatalf("no name: %v", err)
 		}
-		if err := open("grpcproc-version", "1", "grpcproc-node", "a"); status.Code(err) != codes.InvalidArgument {
+		if err := open("grpcproc-version", "2", "grpcproc-node", "a"); status.Code(err) != codes.InvalidArgument {
 			t.Fatalf("own name: %v", err)
 		}
-		if err := open("grpcproc-version", "1", "grpcproc-node", "z", "grpcproc-incarnation", "5"); err != nil {
+		if err := open("grpcproc-version", "2", "grpcproc-node", "z", "grpcproc-incarnation", "5"); err != nil {
 			t.Fatalf("good hello: %v", err)
 		}
 		// A second link from the same peer replaces the first, which is still open.
-		if err := open("grpcproc-version", "1", "grpcproc-node", "z", "grpcproc-incarnation", "6"); err != nil {
+		if err := open("grpcproc-version", "2", "grpcproc-node", "z", "grpcproc-incarnation", "6"); err != nil {
 			t.Fatalf("replacement: %v", err)
 		}
 		eventually(t, "the replacement link", func() bool {

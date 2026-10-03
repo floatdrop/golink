@@ -30,12 +30,18 @@ func withBackoff(limit time.Duration, more ...func(name string, cfg *grpcproc.Co
 // downLink is a's outbound link to b while dials to b are backed off.
 func downLink(t *testing.T, a *grpcproc.Node) grpcproc.LinkInfo {
 	t.Helper()
-	for _, l := range a.Info().Links {
-		if l.Peer.Name == "b" && l.Outbound && l.State == grpcproc.LinkDown {
+	return downLinkTo(t, a, "b")
+}
+
+// downLinkTo is n's outbound link to peer while dials to it are backed off.
+func downLinkTo(t *testing.T, n *grpcproc.Node, peer string) grpcproc.LinkInfo {
+	t.Helper()
+	for _, l := range n.Info().Links {
+		if l.Peer.Name == peer && l.Outbound && l.State == grpcproc.LinkDown {
 			return l
 		}
 	}
-	t.Fatalf("no down link to b in %+v", a.Info().Links)
+	t.Fatalf("no down link to %s in %+v", peer, n.Info().Links)
 	return grpcproc.LinkInfo{}
 }
 
@@ -335,7 +341,9 @@ func TestDisconnectForgetsADialUnderWay(t *testing.T) {
 
 // In a one-way partition the peer keeps reaching this node, and each time the
 // next send dials it at once; but the wait keeps doubling, so the peer's
-// reconnects do not turn every reply into a dial of its own.
+// reconnects do not turn every reply into a dial of its own. The peer's
+// links end as soon as they come up, cut for the replies that cannot go, so
+// it backs off too, rather than open one for every call.
 func TestDialBackoffInAOneWayPartition(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c := grpcproctest.NewWith(t, withBackoff(time.Hour, unreachable(nil)), "a", "b")
@@ -351,13 +359,20 @@ func TestDialBackoffInAOneWayPartition(t *testing.T) {
 		}, grpcproc.WithName("echo")); err != nil {
 			t.Fatal(err)
 		}
+		call := func() error {
+			_, err := grpcproc.Named[*testpb.Ping]("a", "echo").Call[*testpb.Ping](t.Context(), b, &testpb.Ping{})
+			return err
+		}
 		var waits []time.Duration
 		for range 2 {
-			_, err := grpcproc.Named[*testpb.Ping]("a", "echo").Call[*testpb.Ping](t.Context(), b, &testpb.Ping{})
-			if !errors.Is(err, grpcproc.ErrNoConnection) || !strings.Contains(err.Error(), "a cannot reach b back: no route to b") {
+			if err := call(); !errors.Is(err, grpcproc.ErrNoConnection) || !strings.Contains(err.Error(), "a cannot reach b back: no route to b") {
 				t.Fatalf("got %v", err)
 			}
 			waits = append(waits, time.Until(downLink(t, a).RetryAt))
+			if err := call(); !backedOff(err) || !strings.Contains(err.Error(), "after it came up: rpc error: code = Unavailable desc = grpcproc: a cannot reach b back") {
+				t.Fatalf("b must back off: %v", err)
+			}
+			time.Sleep(time.Until(downLinkTo(t, b, "a").RetryAt))
 		}
 		// A 32nd of an hour, less up to a fifth; then twice that.
 		if waits[0] > 113*time.Second || waits[1] < 150*time.Second {

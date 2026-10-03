@@ -89,6 +89,7 @@ func nodeInfoTo(n grpcproc.NodeInfo) *inspectv1.NodeInfo {
 			RetryAt:       timeTo(l.RetryAt),
 			Queued:        uint32(l.Queued),
 			QueuedBytes:   uint64(l.QueuedBytes),
+			Sessions:      l.Sessions,
 		})
 	}
 	return out
@@ -166,6 +167,7 @@ func NodeInfo(n *inspectv1.NodeInfo) grpcproc.NodeInfo {
 			RetryAt:       timeFrom(l.GetRetryAt()),
 			Queued:        int(l.GetQueued()),
 			QueuedBytes:   int(l.GetQueuedBytes()),
+			Sessions:      l.GetSessions(),
 		})
 	}
 	return out

@@ -2,6 +2,7 @@ package grpcproc
 
 import (
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -36,7 +37,7 @@ func TestDialRefusedWhenANewerIncarnationCameMeanwhile(t *testing.T) {
 			e.n.mu.Lock()
 			defer e.n.mu.Unlock()
 			e.n.newest["b"] = 1
-			admitted <- e.n.admit(NodeID{Name: "b", Incarnation: 2})
+			admitted <- e.n.admit(NodeID{Name: "b", Incarnation: 2}, 0)
 		}()
 		<-e.h.entered
 		e.n.memberEvent(MemberEvent{Member: Member{Name: "b", Incarnation: 3}, Up: true})
@@ -56,7 +57,7 @@ func TestLinkRefusedWhenANewerIncarnationCameMeanwhile(t *testing.T) {
 		disconnected := make(chan struct{})
 		go func() { e.n.Disconnect("b"); close(disconnected) }()
 		<-e.h.entered
-		ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(mdNode, "b", mdIncarnation, "3", mdVersion, "1"))
+		ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(mdNode, "b", mdIncarnation, "3", mdVersion, strconv.Itoa(protoVersion)))
 		fs := helloStream{&fakeStream{ctx: ctx, recvErr: io.EOF, recv: make(chan *grpcprocv1.Frame)}, make(chan struct{})}
 		served := make(chan error, 1)
 		go func() { served <- e.n.serveLink(fs) }()

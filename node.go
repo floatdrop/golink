@@ -173,7 +173,10 @@ type Config struct {
 	// again, and the others keep failing while it does. The first wait is a
 	// 32nd of DialBackoff, up to a fifth less for jitter. Each further failure
 	// doubles it, unless the peer was left alone for longer than DialBackoff,
-	// and a dial that succeeds starts over. A link the peer opens lets the
+	// and a dial that succeeds starts over. A link that ends within
+	// DialTimeout of coming up counts as a dial that failed, after the wait
+	// its dial came after: a path that keeps breaking backs off as one that
+	// cannot be dialed does. A link the peer opens lets the
 	// next send dial at once, without starting over, since it shows the peer
 	// is up but not that this node can reach it. Membership reporting the peer
 	// up (not as an older incarnation than this node has seen), or
@@ -238,6 +241,7 @@ type Node struct {
 	backoff  map[string]*redial // peers whose last dial failed
 	dials    map[string]uint64  // per peer, for LinkInfo.Reconnects
 	newest   map[string]uint64  // per peer, the newest incarnation seen (see meet)
+	epochs   map[string]uint64  // per peer, the sessions with it that ended (see supersede)
 	members  map[string]Member  // what Membership reports up, by name (see Members)
 	stopping bool               // Stop began: no new processes
 	stopped  bool               // links closed: no new links
@@ -324,6 +328,7 @@ func NewNode(cfg Config) (*Node, error) {
 		backoff:  map[string]*redial{},
 		dials:    map[string]uint64{},
 		newest:   map[string]uint64{},
+		epochs:   map[string]uint64{},
 		members:  map[string]Member{},
 		settling: map[string]int{},
 	}
@@ -492,6 +497,7 @@ func (n *Node) memberEvent(ev MemberEvent) {
 	peer := NodeID{Name: ev.Member.Name, Incarnation: ev.Member.Incarnation}
 	n.mu.Lock()
 	var cause error
+	restarted := false
 	switch newest := n.newest[peer.Name]; {
 	case !ev.Up:
 		// The links with a peer are with its newest incarnation.
@@ -509,6 +515,7 @@ func (n *Node) memberEvent(ev MemberEvent) {
 			return
 		}
 		n.forget(peer.Name) // it is back: dial it at once
+		restarted = cause != nil
 	}
 	// The links judged are the links dropped: taken in the same critical
 	// section, not one that may have replaced them since.
@@ -516,6 +523,9 @@ func (n *Node) memberEvent(ev MemberEvent) {
 	var in *inLink
 	if cause != nil {
 		out, in = n.takeLinks(peer.Name)
+	}
+	if restarted {
+		delete(n.epochs, peer.Name) // a new incarnation counts from 0
 	}
 	n.mu.Unlock()
 	if out != nil || in != nil {
@@ -706,18 +716,22 @@ func (n *Node) Info() NodeInfo {
 		info.StartedAt = time.Unix(0, s)
 	}
 	for _, l := range n.out {
-		info.Links = append(info.Links, l.info())
+		li := l.info()
+		li.Sessions = n.epochs[l.peer.Name]
+		info.Links = append(info.Links, li)
 	}
 	for peer := range n.backoff {
 		if r := n.backedOff(peer); r != nil {
 			info.Links = append(info.Links, LinkInfo{
 				Peer: NodeID{Name: peer}, Outbound: true, State: LinkDown,
-				Reconnects: n.dials[peer], LastError: r.why, RetryAt: r.at,
+				Reconnects: n.dials[peer], LastError: r.why, RetryAt: r.at, Sessions: n.epochs[peer],
 			})
 		}
 	}
 	for _, l := range n.in {
-		info.Links = append(info.Links, l.info())
+		li := l.info()
+		li.Sessions = n.epochs[l.peer.Name]
+		info.Links = append(info.Links, li)
 	}
 	n.mu.Unlock()
 	// Outbound links were collected first, so a stable sort by peer keeps
@@ -726,22 +740,33 @@ func (n *Node) Info() NodeInfo {
 	return info
 }
 
-// Disconnect drops every link with peer, as if the network had, and
-// forgets that dials to it failed (Config.DialBackoff) and which
-// incarnation of it this node has seen, so that none is refused (see
-// Config.Incarnation). Monitors across it fire Down{noconnection} and
-// pending calls fail; the next send dials again. It reports whether there
-// was a link to drop.
+var (
+	// errDisconnected is why Disconnect dropped a link, or a dial.
+	errDisconnected = errors.New("disconnected")
+	// errSessionEnded is why a dial's link was dropped: this node ended its
+	// session with the peer while it dialed (see finishDial).
+	errSessionEnded = errors.New("the session it was dialed in ended")
+)
+
+// Disconnect drops every link with peer, and a dial to it under way, as if
+// the network had, and forgets that dials to it failed (Config.DialBackoff)
+// and which incarnation of it this node has seen, so that none is refused
+// (see Config.Incarnation). Monitors across it fire Down{noconnection} and
+// pending calls fail, as do sends waiting for the dial; the next send dials
+// again. It reports whether there was a link to drop.
 func (n *Node) Disconnect(peer string) bool {
 	n.mu.Lock()
 	n.forget(peer)
+	if d := n.dialing[peer]; d != nil {
+		d.disconnected = true
+	}
 	delete(n.newest, peer)
 	out, in := n.takeLinks(peer)
 	n.mu.Unlock()
 	if out == nil && in == nil {
 		return false
 	}
-	n.linksLost(out, in, errors.New("disconnected"))
+	n.linksLost(out, in, errDisconnected)
 	return true
 }
 

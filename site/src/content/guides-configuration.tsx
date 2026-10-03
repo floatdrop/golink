@@ -128,7 +128,9 @@ export const guidesConfiguration: Doc = {
 						before dialing a peer again after dials to it failed; meanwhile everything routed to
 						the peer fails at once with <C>ErrNoConnection</C>, and a <C>Monitor</C> of a process
 						there gets <C>Down{'{'}noconnection{'}'}</C> at once. The first wait is a 32nd of it,
-						and each failure doubles it. Set it negative to dial again at once, which is what{' '}
+						and each failure doubles it. A link that ends within <C>DialTimeout</C> of coming up
+						counts as a failed dial, so a path that keeps breaking backs off too, rather than
+						redial at every send. Set it negative to dial again at once, which is what{' '}
 						<C>grpcproctest</C> does so that a test's call right after a heal reaches the peer.
 					</p>
 					<p>
