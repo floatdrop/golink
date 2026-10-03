@@ -2,8 +2,7 @@
 
 Leader election for [grpcproc](https://floatdrop.github.io/grpcproc/), and a
 singleton that runs on the leader only, carrying its state from one leader to
-the next. A separate module so it can be versioned on its own; it depends on
-grpcproc alone.
+the next. A package of grpcproc's, built on its public API alone.
 
 ```sh
 go get github.com/floatdrop/grpcproc/leader

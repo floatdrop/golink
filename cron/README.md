@@ -3,8 +3,8 @@
 Jobs on crontab schedules for [grpcproc](https://floatdrop.github.io/grpcproc/),
 in a process the application starts. Each run is a process of its own, so a
 run's exit reason is its result, an overlapping run can be skipped or
-replaced, and a slow one is told to exit. A separate module so it can be
-versioned on its own; it depends on grpcproc alone.
+replaced, and a slow one is told to exit. A package of grpcproc's, built
+on its public API alone.
 
 ```sh
 go get github.com/floatdrop/grpcproc/cron
