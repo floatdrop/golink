@@ -455,10 +455,15 @@ func (x *Envelope) GetWatchedId() uint64 {
 // Hello is the first envelope on a stream, sent by the server. It names the
 // node the client actually reached.
 type Hello struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Node          string                 `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
-	Incarnation   uint64                 `protobuf:"varint,2,opt,name=incarnation,proto3" json:"incarnation,omitempty"`
-	Version       uint32                 `protobuf:"varint,3,opt,name=version,proto3" json:"version,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Node        string                 `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
+	Incarnation uint64                 `protobuf:"varint,2,opt,name=incarnation,proto3" json:"incarnation,omitempty"`
+	Version     uint32                 `protobuf:"varint,3,opt,name=version,proto3" json:"version,omitempty"`
+	// How many sessions the server's links with the client's node have had
+	// end, as the server counts them, the client's count taken if larger. A
+	// client that counts fewer learns that the server ended its session with
+	// it; one that counts more dialed in a session that has ended since.
+	Session       uint64 `protobuf:"varint,4,opt,name=session,proto3" json:"session,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -514,6 +519,13 @@ func (x *Hello) GetVersion() uint32 {
 	return 0
 }
 
+func (x *Hello) GetSession() uint64 {
+	if x != nil {
+		return x.Session
+	}
+	return 0
+}
+
 var File_grpcproc_v1_grpcproc_proto protoreflect.FileDescriptor
 
 const file_grpcproc_v1_grpcproc_proto_rawDesc = "" +
@@ -546,11 +558,12 @@ const file_grpcproc_v1_grpcproc_proto_rawDesc = "" +
 	"watched_id\x18\x11 \x01(\x04R\twatchedId\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"W\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"q\n" +
 	"\x05Hello\x12\x12\n" +
 	"\x04node\x18\x01 \x01(\tR\x04node\x12 \n" +
 	"\vincarnation\x18\x02 \x01(\x04R\vincarnation\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\rR\aversion*\x9e\x01\n" +
+	"\aversion\x18\x03 \x01(\rR\aversion\x12\x18\n" +
+	"\asession\x18\x04 \x01(\x04R\asession*\x9e\x01\n" +
 	"\x04Kind\x12\x14\n" +
 	"\x10KIND_UNSPECIFIED\x10\x00\x12\x0e\n" +
 	"\n" +

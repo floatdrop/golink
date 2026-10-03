@@ -70,6 +70,9 @@ message Link {
   uint32 queued = 10;
   // Outbound: the bytes of their message bodies.
   uint64 queued_bytes = 11;
+  // How many sessions with the peer have ended: links lost, or the peer
+  // reporting it ended one.
+  uint64 sessions = 12;
 }
 
 message NodeInfo {

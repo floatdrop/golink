@@ -89,9 +89,15 @@ type LinkInfo struct {
 	Bytes         uint64 // message bodies carried, not counting framing
 	Queued        int    // outbound: envelopes waiting to be written
 	QueuedBytes   int    // outbound: their bodies' bytes, as Bytes counts them
-	LastError     string // why dials to the peer failed; set with RetryAt
+	LastError     string // why dials to the peer failed, or its link ended young; set with RetryAt
+	// Sessions counts the sessions with the peer that have ended: each time
+	// this node declared it down, or learned that the peer had declared this
+	// node down. One that keeps growing is a peer whose links keep breaking.
+	// It counts from 0 for each incarnation of the peer.
+	Sessions uint64
 	// RetryAt is set on an outbound link that is down because dials to the
-	// peer failed: sends to the peer fail at once until then, and the first
+	// peer failed, or its last link ended within DialTimeout of coming up:
+	// sends to the peer fail at once until then, and the first
 	// send after it dials again (Config.DialBackoff). It may be in the past:
 	// nothing has been sent since, or that dial is under way. Such a link's
 	// Peer has no Incarnation, which only a dial that succeeds learns.

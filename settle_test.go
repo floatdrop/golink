@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -84,7 +85,7 @@ func (e settleEnv) stream(t *testing.T, inc string) (*fakeStream, chan error) {
 // recovered, as a recovery interceptor would. The stream ends with the test,
 // as a real one does when its server stops.
 func serveStream(t *testing.T, n *Node, inc string) (*fakeStream, chan error) {
-	ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(mdNode, "b", mdIncarnation, inc, mdVersion, "1"))
+	ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(mdNode, "b", mdIncarnation, inc, mdVersion, strconv.Itoa(protoVersion)))
 	fs := &fakeStream{ctx: ctx, recvErr: io.EOF, recv: make(chan *grpcprocv1.Frame)}
 	t.Cleanup(fs.end)
 	served := make(chan error, 1)
