@@ -10,10 +10,9 @@ permissions:
 
 jobs:
   go:
-    # Every Go module in the repository, one job each: grpcproc itself; the
-    # adapters with dependencies grpcproc does not have; cron and leader,
-    # versioned on their own; the examples the README and the site embed;
-    # and the benchmarks. A module with a cover list must keep each of those
+    # Every Go module in the repository, one job each: grpcproc itself, cron
+    # and leader included; the adapters with dependencies grpcproc does not
+    # have; the examples the README and the site embed; and the benchmarks. A module with a cover list must keep each of those
     # packages at 100%.
     name: ${{ matrix.module == '.' && 'grpcproc' || matrix.module }}
     strategy:
@@ -21,17 +20,13 @@ jobs:
       matrix:
         include:
           - module: .
-            cover: . ./inspect ./actor ./pubsub
+            cover: . ./inspect ./actor ./pubsub ./cron ./leader
           - module: otel
             cover: .
           - module: etcd
             cover: .
           - module: tools
             cover: ./client ./dot ./cli ./mcpserver ./web
-          - module: cron
-            cover: .
-          - module: leader
-            cover: .
           - module: examples
           - module: benchmarks
     runs-on: ubuntu-latest

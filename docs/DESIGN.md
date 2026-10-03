@@ -68,11 +68,11 @@ grpcproc/grpcproctest            in-memory clusters over bufconn: Cluster, Parti
 grpcproc/inspect             grpcproc.inspect.v1.Inspector gRPC service (optional to register); its Go client is tools/client
 grpcproc/actor               optional helpers: handler loop, supervisor
 grpcproc/pubsub              optional: topics with a replay buffer, relayed once per node
+grpcproc/cron                optional: jobs on crontab schedules, every run a process
+grpcproc/leader              optional: leader election, and a singleton that runs on the leader with its state
 grpcproc/etcd     (nested module)   Resolver + Registrar + Membership on etcd leases
 grpcproc/otel     (nested module)   Hooks implementation: OTel metrics + trace propagation
 grpcproc/tools    (nested module)   grpcprocctl over the Inspector: CLI, Graphviz, MCP server, web UI
-grpcproc/cron     (nested module)   jobs on crontab schedules, every run a process
-grpcproc/leader   (nested module)   leader election, and a singleton that runs on the leader with its state
 grpcproc/examples (nested module)   runnable examples and the shop the site's tutorial builds
 grpcproc/benchmarks (nested module) grpcproc against GoAkt, Hollywood, Proto.Actor and Ergo
 site/                            the documentation site
@@ -947,11 +947,12 @@ has:
   call failed with, not the error that wraps it, so that it is that sentinel
   on the subscriber's side too.
 
-## Cron and leader election (nested modules)
+## Cron and leader election
 
-Both are built on the public API alone, as `actor` is, and are modules of
-their own so they can be versioned apart from the core; neither imports the
-other. They compose through `actor.ChildSpec`: a cron process is the
+Both are built on the public API alone, as `actor` is, and neither imports
+the other. They were nested modules, to be versioned apart from the core,
+until v0.6.0; needing nothing the core does not, they are its packages now,
+released with it. They compose through `actor.ChildSpec`: a cron process is the
 leader's singleton, and its state the singleton's.
 
 ### `grpcproc/cron`
