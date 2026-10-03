@@ -619,12 +619,11 @@ func TestRestForOneWithAddedChildren(t *testing.T) {
 		}
 		w, added := pidOf(t, n, "w"), pidOf(t, n, "added")
 		send(t, n, "w", -1)
-		restarted(t, n, "w", w)
-		restarted(t, n, "added", added)
-		old := pidOf(t, n, "w")
+		w = restarted(t, n, "w", w)
+		added = restarted(t, n, "added", added)
 		send(t, n, "added", -1)
-		restarted(t, n, "added", pidOf(t, n, "added"))
-		if pidOf(t, n, "w") != old {
+		restarted(t, n, "added", added)
+		if pidOf(t, n, "w") != w {
 			t.Fatal("a child before the crash was restarted")
 		}
 	})
