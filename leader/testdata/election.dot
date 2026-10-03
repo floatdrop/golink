@@ -28,7 +28,7 @@ digraph "election" {
 	"candidate" -> "leading" [label="vote quorum\n[a majority of the view voted for it]"];
 	"follower" -> "follower" [label="heartbeat\n[of this term]", style=dashed];
 	"leading" -> "handing over" [label="resign\n[a successor it may hand over to]"];
-	"handing over" -> "handing over" [label="resign\n[not handing over already]", style=dashed];
+	"handing over" -> "handing over" [label="resign\n[never: a hand-over is under way]", style=dashed];
 	"handing over" -> "follower" [label="handed over"];
 	"follower" -> "follower" [label="vote request", style=dashed];
 	"pre-candidate" -> "pre-candidate" [label="vote request", style=dashed];

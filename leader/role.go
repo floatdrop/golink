@@ -136,7 +136,7 @@ var election = fsm.MustNew("election",
 	fsm.From(leading).On(evResign).To(handingOver).
 		Guard("a successor it may hand over to", maySucceed),
 	fsm.From(handingOver).On(evResign).Stay().
-		Guard("not handing over already", func(context.Context, turn) error { return errResigningOnce }),
+		Guard("never: a hand-over is under way", func(context.Context, turn) error { return errResigningOnce }),
 	fsm.From(handingOver).On(evHandedOver).To(follower),
 	fsm.FromGroup(leader).On(evLostQuorum).To(follower),
 	fsm.FromGroup(leader).On(evSingletonFailed).To(follower),

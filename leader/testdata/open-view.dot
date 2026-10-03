@@ -23,7 +23,7 @@ digraph "open view" {
 	"away" -> "gone" [label="elector gone"];
 	"away" -> "gone" [label="link lost"];
 	"ghost" -> "gone" [label="ghost timeout\n[a ghost for GhostTTL, with no Membership]"];
-	"gone" -> "live" [label="heard from\n[Membership reports it up, or Peers named it, or there is no Membership]"];
+	"gone" -> "live" [label="heard from\n[named by Peers or reported up, and not reported down since, or there is no Membership]"];
 	"gone" -> "gone" [label="greet\n[named, and GhostTTL since the last greeting]", style=dashed];
 	"live" -> "away" [label="reported down"];
 	"ghost" -> "gone" [label="reported down"];

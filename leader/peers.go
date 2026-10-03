@@ -98,7 +98,7 @@ var openView = fsm.MustNew("open view",
 	fsm.From(ghost).On(evGhostTimeout).To(gone).
 		Guard("a ghost for GhostTTL, with no Membership", ghostExpired),
 	fsm.From(gone).On(evHeard).To(live).
-		Guard("Membership reports it up, or Peers named it, or there is no Membership", admissible),
+		Guard("named by Peers or reported up, and not reported down since, or there is no Membership", admissible),
 	fsm.From(gone).On(evGreetDue).Stay().
 		Guard("named, and GhostTTL since the last greeting", namedAndDue).Action(sendGreeting),
 

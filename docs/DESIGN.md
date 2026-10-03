@@ -1041,8 +1041,10 @@ leader's singleton, and its state the singleton's.
 
   The singleton's machine is a level-triggered controller: one `reconcile`
   event every turn, and guards that say whether to start or stop.
-  `leader/testdata/*.dot` are the machines' diagrams, which a test keeps
-  current, and asserts no state of any is a dead end.
+  `leader/testdata/*.dot` are the machines' diagrams, and `leader/README.md`
+  draws them again as Mermaid blocks, which GitHub renders; `TestDiagrams`
+  keeps both current, and `TestMachines` asserts no state of any is a dead
+  end.
 - **One relay process per peer.** A remote send or monitor waits for the
   dial (up to `DialTimeout`), and a heartbeat loop cannot. The elector sends
   locally to relays, which send on and monitor the peer's elector: a hung

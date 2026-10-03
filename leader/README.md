@@ -41,6 +41,30 @@ in place, make it an `actor.ChildSupervisor`.
 withholds leadership, with the same backoff. It is where leadership waits for
 an external lock.
 
+On each node the singleton is idle until the node leads, and is stopped once
+the node stops leading, hands over, or its term is over; one still starting is
+stopped once it has started:
+
+<!-- diagram: singleton -->
+```mermaid
+---
+title: "singleton"
+---
+stateDiagram-v2
+    direction LR
+    s0 : idle
+    s1 : starting
+    s2 : running
+    s3 : stopping
+    [*] --> s0
+    s0 --> s1 : reconcile<br>[this node leads, and does not hand over]
+    s1 --> s2 : started
+    s1 --> s0 : start failed
+    s2 --> s3 : reconcile<br>[this node stopped leading, or its term is over]
+    s2 --> s0 : down
+    s3 --> s0 : down
+```
+
 ## The election
 
 One elector process per node, registered as `leader/<cluster>`, under a
@@ -54,14 +78,83 @@ yours). It is Raft's election without the log:
   campaigns.
 - **Pre-votes** come first: a node asks whether it would win before it starts
   a term, so one cut off from the others does not raise its term alone and
-  depose the leader when it is back.
+  depose the leader when it is back. A candidate whose election times out
+  pre-votes again rather than start another term. The node a leader hands
+  over to (`Resign`, `Transfer`, or a `Cordon` of the leader) skips the
+  pre-vote, even one already pre-voting.
 - **A leader steps down** once it has not heard from a majority for two
   election timeouts; a leader cut off from the others stops acting as one.
 - **Followers stick** to a leader they heard from within an election timeout,
-  ignoring vote requests, unless the leader handed over (`Resign`).
+  ignoring vote requests, unless the leader handed over (`Resign`,
+  `Transfer`, `Cordon`).
 - **Sends go through a relay process per peer**, which also monitors the
   peer's elector: a send or monitor that waits for a dial to a node that does
   not answer holds that relay, never the elector and its heartbeats.
+
+The elector is three state machines, declared with
+[fsm](https://github.com/floatdrop/fsm): its stance in the election
+(`role.go`), the singleton's phase (`singleton.go`, drawn above), and each
+peer's standing in its view (`peers.go`, drawn below). The diagrams are drawn
+from those declarations, and a test keeps them current. A stance's own lines
+are the events it takes without moving: every stance answers vote requests,
+and a newer term makes any of them a follower. `Status` reports a
+pre-candidate as it reports a follower, and a leader handing over as the
+leader:
+
+<!-- diagram: election -->
+```mermaid
+---
+title: "election"
+---
+stateDiagram-v2
+    direction LR
+    state "any stance" as g0 {
+        state "not leading" as g1 {
+            s0
+            s1
+            s2
+        }
+        state "leader" as g2 {
+            s3
+            s4
+        }
+    }
+    s0 : follower
+    s0 : heartbeat [of this term]
+    s0 : vote request
+    s1 : pre-candidate
+    s1 : pre-vote [for the term it would begin]
+    s1 : vote request
+    s2 : candidate
+    s2 : vote [of this term]
+    s2 : vote request
+    s3 : leading
+    s3 : vote request
+    s3 : ack [of this term]
+    s4 : handing over
+    s4 : resign [never#58; a hand-over is under way]
+    s4 : vote request
+    s4 : ack [of this term]
+    [*] --> s0
+    s1 --> s2 : pre-vote quorum<br>[a majority of the view would elect it]
+    s0 --> s2 : timeout now<br>[sent by this term's leader, to a node not cordoned]
+    s1 --> s2 : timeout now<br>[sent by this term's leader, to a node not cordoned]
+    s2 --> s3 : vote quorum<br>[a majority of the view voted for it]
+    s3 --> s4 : resign<br>[a successor it may hand over to]
+    s4 --> s0 : handed over
+    s0 --> s0 : newer term
+    s1 --> s0 : newer term
+    s2 --> s0 : newer term
+    s3 --> s0 : newer term
+    s4 --> s0 : newer term
+    s0 --> s1 : election timeout<br>[no backoff, not cordoned, the view may elect]
+    s1 --> s1 : election timeout<br>[no backoff, not cordoned, the view may elect]
+    s2 --> s1 : election timeout<br>[no backoff, not cordoned, the view may elect]
+    s1 --> s0 : heartbeat<br>[of this term]
+    s2 --> s0 : heartbeat<br>[of this term]
+    g2 --> s0 : lost quorum
+    g2 --> s0 : singleton failed
+```
 
 ### Who votes
 
@@ -79,10 +172,84 @@ node that talks to this one). Left unset, `Membership` is the node's own
 | --- | --- |
 | exits (`shutdown`, a crash) or never ran (`noproc`) | leaves the view at once |
 | cannot be reached (`noconnection`) | stays, as a ghost, until `Membership` reports it gone, or for `GhostTTL` (5s) without `Membership` |
-| is heard from again | is back |
+| is heard from again | is back, unless `Membership` reported it down: then only its report of it up brings it back |
 
 A dynamic view trades safety for availability: nodes whose views differ can
 each count a majority of their own.
+
+In the elector, a peer in the view is live, a ghost (out of reach) or silent
+(running no elector this node can see), and one out of it is away (reported
+down by `Membership`, still watched) or gone. With `Voters` no peer leaves the
+view:
+
+<!-- diagram: fixed view -->
+```mermaid
+---
+title: "fixed view"
+---
+stateDiagram-v2
+    direction LR
+    state "unwatched" as g0 {
+        s1
+        s2
+    }
+    s0 : live
+    s0 : heard from
+    s1 : ghost
+    s1 : greet [GhostTTL since the last greeting]
+    s2 : silent
+    s2 : greet [GhostTTL since the last greeting]
+    [*] --> s0
+    s1 --> s0 : heard from
+    s2 --> s0 : heard from
+    s0 --> s1 : link lost
+    s0 --> s2 : elector gone
+```
+
+Without `Voters`:
+
+<!-- diagram: open view -->
+```mermaid
+---
+title: "open view"
+---
+stateDiagram-v2
+    direction LR
+    state "view" as g0 {
+        s0
+        s1
+        s2
+    }
+    %% group unwatched overlaps another without containing it, so it is not drawn as a composite state
+    s0 : live
+    s0 : heard from
+    s0 : reported up
+    s1 : ghost
+    s1 : greet [GhostTTL since the last greeting]
+    s1 : reported up
+    s2 : silent
+    s2 : greet [GhostTTL since the last greeting]
+    s2 : reported up
+    s3 : gone
+    s3 : greet [named, and GhostTTL since the last greeting]
+    s3 : reported down
+    s4 : away
+    s4 : reported down
+    [*] --> s0
+    s1 --> s0 : heard from
+    s2 --> s0 : heard from
+    s0 --> s1 : link lost
+    s0 --> s3 : elector gone
+    s4 --> s3 : elector gone
+    s4 --> s3 : link lost
+    s1 --> s3 : ghost timeout<br>[a ghost for GhostTTL, with no Membership]
+    s3 --> s0 : heard from<br>[named by Peers or reported up, and not reported down since, or there is no Membership]
+    s0 --> s4 : reported down
+    s1 --> s3 : reported down
+    s2 --> s3 : reported down
+    s4 --> s0 : reported up
+    s3 --> s2 : reported up
+```
 
 A leader's elector that exits (its node stops gracefully) is seen by every
 follower's monitor at once, and they campaign without waiting out a timeout.
