@@ -110,7 +110,8 @@ your `*grpc.Server` next to your other services, start and stop.
 ## What is in the box
 
 - **Processes** with typed mailboxes, `Send` and `Call`, monitors and
-  links, exit reasons: the core, which depends on gRPC and protobuf only.
+  links, exit reasons: the core, which depends on gRPC and protobuf, and on
+  fsm, which has no dependencies of its own.
   [Concepts](https://floatdrop.github.io/grpcproc/concepts/actors/)
 - **Actors and supervision trees** in `grpcproc/actor`: a struct with a
   method per kind of message, restarted by a supervisor when it fails, and

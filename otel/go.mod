@@ -1,5 +1,5 @@
-// Separate module, so grpcproc itself depends on grpc and protobuf only:
-// OpenTelemetry is a dependency of this adapter alone. It requires a
+// Separate module, so that OpenTelemetry is a dependency of this adapter
+// alone, not of grpcproc itself. It requires a
 // published grpcproc rather than a replace, because a replace is ignored by
 // whoever imports this module; bumping the requirement below is how this
 // adapter picks up a library change. For local work on both at once, use a

@@ -1,4 +1,4 @@
-// Separate module, so grpcproc itself depends on grpc and protobuf only: the
+// Separate module, so grpcproc itself does not depend on etcd: the
 // etcd client (and, for tests, an embedded etcd server) are dependencies of
 // this adapter alone. It requires a published grpcproc rather than a replace,
 // because a replace is ignored by whoever imports this module. For local

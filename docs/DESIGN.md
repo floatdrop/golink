@@ -1000,6 +1000,19 @@ leader's singleton, and its state the singleton's.
   (check-quorum); followers that heard from a leader lately ignore vote
   requests (stickiness); and pre-votes, so a node cut off from the others
   does not raise its term and depose the leader when it is back.
+- **Two state machines, on `github.com/floatdrop/fsm`.** `election`
+  (`role.go`) is where a node stands (follower, pre-candidate, candidate,
+  leader) and what moves it; `lifecycle` (`singleton.go`) is the
+  singleton's phase (idle, starting, running, stopping). Guards name the
+  conditions ("no backoff, not cordoned, the view may elect"), entry and
+  exit hooks do what a stance or phase begins and ends with, and the
+  elector's loop fires the events. What moves no state stays plain code:
+  granting and counting votes, a follower's heartbeat, terms and quorums,
+  and persistence, which happens where messages leave rather than on any
+  transition. The singleton's machine is a level-triggered controller: one
+  `reconcile` event every turn, and guards that say whether to start or
+  stop. `leader/testdata/*.dot` are the machines' diagrams, which a test
+  keeps current, and asserts no stance or phase is a dead end.
 - **One relay process per peer.** A remote send or monitor waits for the
   dial (up to `DialTimeout`), and a heartbeat loop cannot. The elector sends
   locally to relays, which send on and monitor the peer's elector: a hung

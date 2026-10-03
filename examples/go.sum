@@ -1,3 +1,5 @@
+github.com/floatdrop/fsm v0.6.0 h1:lL3Vmh80t9Pum9D2de1aQC0lYZ3L1fgs8YxV77xZ2I4=
+github.com/floatdrop/fsm v0.6.0/go.mod h1:omx7JkDDk097D1d1WkBuafEi8sDEJq+15cR++gnuyS4=
 github.com/golang/protobuf v1.5.4 h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=
 github.com/golang/protobuf v1.5.4/go.mod h1:lnTiLA8Wa4RWRcIUkrtSVa5nRhsEGBg48fD6rSs7xps=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=

@@ -99,7 +99,7 @@ export const landing: Doc = {
 							<strong>It is a library, not a runtime.</strong> Your application brings its{' '}
 							<C>*grpc.Server</C>, credentials, discovery, logger and lifecycle; grpcproc registers one
 							gRPC service on that server and starts no goroutine outside <C>Start</C> and <C>Stop</C>.
-							The core depends on gRPC and protobuf only.
+							The core depends on gRPC, protobuf and a dependency-free state machine library.
 						</li>
 						<li>
 							<strong>Mailboxes are typed.</strong> An address carries the message type its process
