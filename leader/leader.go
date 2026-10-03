@@ -144,6 +144,29 @@ func Child[S proto.Message](name string, spec Spec[S], opts ...grpcproc.SpawnOpt
 	return actor.ChildSupervisor(name, sup, opts...), nil
 }
 
+// config is what the elector reads of a Spec: all of it but the Singleton,
+// which alone depends on S (see electors.build).
+type config struct {
+	Cluster           string
+	Voters, Peers     []string
+	Membership        grpcproc.Membership
+	MinClusterSize    int
+	ElectionTimeout   time.Duration
+	HeartbeatInterval time.Duration
+	GhostTTL          time.Duration
+	Store             Store
+	Confirm           func(ctx context.Context, term uint64) error
+}
+
+func (s Spec[S]) config() config {
+	return config{
+		Cluster: s.Cluster, Voters: s.Voters, Peers: s.Peers, Membership: s.Membership,
+		MinClusterSize: s.MinClusterSize, ElectionTimeout: s.ElectionTimeout,
+		HeartbeatInterval: s.HeartbeatInterval, GhostTTL: s.GhostTTL,
+		Store: s.Store, Confirm: s.Confirm,
+	}
+}
+
 // supervisor checks s, fills in its defaults, and describes the supervisor
 // that runs its elector.
 func (s Spec[S]) supervisor() (actor.Spec, error) {

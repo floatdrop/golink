@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/floatdrop/grpcproc"
@@ -28,14 +29,15 @@ type electors[S proto.Message] struct {
 	spec Spec[S]
 	// cur is the running elector, for inspect, which grpcproc runs on the
 	// elector's own goroutine.
-	cur *elector[S]
+	cur *elector
 }
 
 func (es *electors[S]) inspect() map[string]string { return es.cur.inspect() }
 
 func (es *electors[S]) run(p *grpcproc.Process[proto.Message]) error {
-	e := &elector[S]{
-		spec:  es.spec,
+	e := &elector{
+		spec:  es.spec.config(),
+		build: es.build(p),
 		p:     p,
 		self:  p.Node().Name(),
 		name:  ElectorName(es.spec.Cluster),
@@ -110,10 +112,24 @@ type resignation struct {
 	deadline time.Time
 }
 
+// build returns what the singleton is to be for term, from the state's
+// value: the one thing about the election that depends on S.
+func (es *electors[S]) build(p *grpcproc.Process[proto.Message]) func(term uint64, value *anypb.Any) (func() (actor.ChildSpec, error), error) {
+	return func(term uint64, value *anypb.Any) (func() (actor.ChildSpec, error), error) {
+		state, err := decode[S](value)
+		if err != nil {
+			return nil, err
+		}
+		lease := &Lease[S]{n: p.Node(), elector: p.PID(), term: term, log: p.Log()}
+		return func() (actor.ChildSpec, error) { return es.spec.Singleton(lease, state) }, nil
+	}
+}
+
 // elector is one node's part in an election. It is touched by its own
 // goroutine only.
-type elector[S proto.Message] struct {
-	spec       Spec[S]
+type elector struct {
+	spec       config
+	build      func(term uint64, value *anypb.Any) (func() (actor.ChildSpec, error), error)
 	p          *grpcproc.Process[proto.Message]
 	self, name string
 
@@ -151,9 +167,9 @@ type saved struct {
 	votedFor                  string
 }
 
-func (e *elector[S]) static() bool { return len(e.spec.Voters) > 0 }
+func (e *elector) static() bool { return len(e.spec.Voters) > 0 }
 
-func (e *elector[S]) loop() error {
+func (e *elector) loop() error {
 	if e.static() && !slices.Contains(e.spec.Voters, e.self) {
 		return fmt.Errorf("leader: %s is not among the Voters", e.self)
 	}
@@ -195,7 +211,7 @@ func (e *elector[S]) loop() error {
 
 // load starts the elector from what its Store holds, and reports whether
 // it held anything.
-func (e *elector[S]) load() (bool, error) {
+func (e *elector) load() (bool, error) {
 	if e.spec.Store == nil {
 		return false, nil
 	}
@@ -213,7 +229,7 @@ func (e *elector[S]) load() (bool, error) {
 }
 
 // saving is what the Store is to hold.
-func (e *elector[S]) saving() saved {
+func (e *elector) saving() saved {
 	v := e.state.GetVersion()
 	return saved{term: e.term, stateTerm: v.GetTerm(), stateSeq: v.GetSeq(), votedFor: e.votedFor}
 }
@@ -223,7 +239,7 @@ func (e *elector[S]) saving() saved {
 // that tells of them (a message to a peer, the answer to a checkpoint, a
 // lease) leaves the elector before they are saved; once a Save has failed,
 // nothing leaves it at all, and the loop ends with the error.
-func (e *elector[S]) save() bool {
+func (e *elector) save() bool {
 	s := e.saving()
 	if e.spec.Store == nil || e.err != nil || s == e.saved {
 		return e.err == nil
@@ -241,14 +257,14 @@ func (e *elector[S]) save() bool {
 }
 
 // timeout is a random election timeout.
-func (e *elector[S]) timeout() time.Duration {
+func (e *elector) timeout() time.Duration {
 	return e.spec.ElectionTimeout + rand.N(e.spec.ElectionTimeout)
 }
 
 // wake is when the elector has something to do next, at the latest a
 // heartbeat interval from now: ghosts, greetings and hand-overs are
 // looked at then.
-func (e *elector[S]) wake(now time.Time) time.Time {
+func (e *elector) wake(now time.Time) time.Time {
 	t := e.electionAt
 	if e.role == Leader {
 		t = e.heartbeatAt
@@ -259,7 +275,7 @@ func (e *elector[S]) wake(now time.Time) time.Time {
 	return t
 }
 
-func (e *elector[S]) timers(now time.Time) {
+func (e *elector) timers(now time.Time) {
 	e.peersNow(now)
 	if e.role == Leader {
 		if e.cordoned(e.self) && e.resign == nil {
@@ -282,7 +298,7 @@ func (e *elector[S]) timers(now time.Time) {
 // peersNow looks after the peers: in a dynamic view ghosts leave it, and
 // peers lost, or named but out of the view, are greeted every GhostTTL, to
 // hear from them once they are back.
-func (e *elector[S]) peersNow(now time.Time) {
+func (e *elector) peersNow(now time.Time) {
 	for _, p := range e.peers {
 		if !e.static() && p.inView && e.spec.Membership == nil && !p.ghostSince.IsZero() && now.Sub(p.ghostSince) >= e.spec.GhostTTL {
 			p.inView = false
@@ -301,7 +317,7 @@ func (e *elector[S]) peersNow(now time.Time) {
 
 // reconcile starts the singleton while this node leads, and stops it while
 // it does not, or runs for a term that is over.
-func (e *elector[S]) reconcile(now time.Time) {
+func (e *elector) reconcile(now time.Time) {
 	lead := e.role == Leader && e.resign == nil
 	switch e.single.phase {
 	case idle:
@@ -316,7 +332,7 @@ func (e *elector[S]) reconcile(now time.Time) {
 	}
 }
 
-func (e *elector[S]) handle(m grpcproc.Msg[proto.Message], now time.Time) {
+func (e *elector) handle(m grpcproc.Msg[proto.Message], now time.Time) {
 	if m.Down != nil {
 		e.down(*m.Down, now)
 		return
@@ -354,7 +370,7 @@ func (e *elector[S]) handle(m grpcproc.Msg[proto.Message], now time.Time) {
 }
 
 // canResign says why this node cannot hand over to, if it cannot.
-func (e *elector[S]) canResign(to string) error {
+func (e *elector) canResign(to string) error {
 	switch p := e.peers[to]; {
 	case e.role != Leader:
 		return ErrNotLeader
@@ -373,13 +389,13 @@ func (e *elector[S]) canResign(to string) error {
 }
 
 // cordoned reports whether node may not lead.
-func (e *elector[S]) cordoned(node string) bool {
+func (e *elector) cordoned(node string) bool {
 	return slices.Contains(e.state.GetCordoned(), node)
 }
 
 // cordon changes who may lead, as a new version of the state, and answers
 // once a majority holds it.
-func (e *elector[S]) cordon(m grpcproc.Msg[proto.Message], c *leaderv1.Cordon, now time.Time) {
+func (e *elector) cordon(m grpcproc.Msg[proto.Message], c *leaderv1.Cordon, now time.Time) {
 	node, on := c.GetNode(), !c.GetOff()
 	if e.role != Leader {
 		_ = m.Reply(nil, ErrNotLeader)
@@ -407,7 +423,7 @@ func (e *elector[S]) cordon(m grpcproc.Msg[proto.Message], c *leaderv1.Cordon, n
 
 // change makes st, stamped with a new version, the state, and replicates
 // it. A call is answered once a majority holds it.
-func (e *elector[S]) change(m grpcproc.Msg[proto.Message], st *leaderv1.State, now time.Time) {
+func (e *elector) change(m grpcproc.Msg[proto.Message], st *leaderv1.State, now time.Time) {
 	seq := e.state.GetVersion().GetSeq() + 1
 	st.Version = &leaderv1.Version{Term: e.term, Seq: seq}
 	e.state = st
@@ -419,7 +435,7 @@ func (e *elector[S]) change(m grpcproc.Msg[proto.Message], st *leaderv1.State, n
 }
 
 // add starts knowing node, with a relay to its elector.
-func (e *elector[S]) add(node string) *peer {
+func (e *elector) add(node string) *peer {
 	p := &peer{node: node, inView: true, lastAck: time.Now()}
 	// It fails only while the node stops.
 	p.relay, _ = e.p.Spawn(relay(node, e.name), grpcproc.LinkParent(), grpcproc.WithLabel("leader relay"))
@@ -430,7 +446,7 @@ func (e *elector[S]) add(node string) *peer {
 	return p
 }
 
-func (e *elector[S]) greet(p *peer, now time.Time, reply bool) {
+func (e *elector) greet(p *peer, now time.Time, reply bool) {
 	if !reply {
 		p.greetAt = now.Add(e.spec.GhostTTL)
 	}
@@ -438,7 +454,7 @@ func (e *elector[S]) greet(p *peer, now time.Time, reply bool) {
 }
 
 // send sends m to p's elector, once what it may tell of is saved.
-func (e *elector[S]) send(p *peer, m *leaderv1.Peer) {
+func (e *elector) send(p *peer, m *leaderv1.Peer) {
 	if e.save() {
 		_ = p.relay.Send(e.p.Context(), e.p, m)
 	}
@@ -446,7 +462,7 @@ func (e *elector[S]) send(p *peer, m *leaderv1.Peer) {
 
 // view is the nodes whose majority elects a leader, this one included,
 // sorted.
-func (e *elector[S]) view() []string {
+func (e *elector) view() []string {
 	v := []string{e.self}
 	for node, p := range e.peers {
 		if p.inView {
@@ -457,10 +473,10 @@ func (e *elector[S]) view() []string {
 	return v
 }
 
-func (e *elector[S]) quorum() int { return len(e.view())/2 + 1 }
+func (e *elector) quorum() int { return len(e.view())/2 + 1 }
 
 // inView is the peers of the view, in order.
-func (e *elector[S]) inView() []*peer {
+func (e *elector) inView() []*peer {
 	var ps []*peer
 	for _, node := range e.view() {
 		if node != e.self {
@@ -471,7 +487,7 @@ func (e *elector[S]) inView() []*peer {
 }
 
 // peer handles a message from another node's elector.
-func (e *elector[S]) peer(from string, m *leaderv1.Peer, now time.Time) {
+func (e *elector) peer(from string, m *leaderv1.Peer, now time.Time) {
 	p := e.admit(from, m, now)
 	if p == nil {
 		return
@@ -530,7 +546,7 @@ func (e *elector[S]) peer(from string, m *leaderv1.Peer, now time.Time) {
 // admit is the peer from, which it has just heard from, or nil if it is not
 // one to listen to: a node that is not a voter, or, with Membership, one
 // that Membership has not reported up (nor Peers named).
-func (e *elector[S]) admit(from string, m *leaderv1.Peer, now time.Time) *peer {
+func (e *elector) admit(from string, m *leaderv1.Peer, now time.Time) *peer {
 	p := e.peers[from]
 	switch {
 	case p == nil && (e.static() || e.spec.Membership != nil):
@@ -555,11 +571,11 @@ func (e *elector[S]) admit(from string, m *leaderv1.Peer, now time.Time) *peer {
 
 // leading reports whether this node is the leader, or heard from one within
 // an election timeout.
-func (e *elector[S]) leading(now time.Time) bool {
+func (e *elector) leading(now time.Time) bool {
 	return e.role == Leader || e.leader != "" && now.Sub(e.heard) < e.spec.ElectionTimeout
 }
 
-func (e *elector[S]) vote(p *peer, term uint64, rv *leaderv1.RequestVote, now time.Time) {
+func (e *elector) vote(p *peer, term uint64, rv *leaderv1.RequestVote, now time.Time) {
 	behind := older(rv.GetVersion(), e.state.GetVersion())
 	eligible := !behind && !e.cordoned(p.node)
 	v := &leaderv1.Vote{Pre: rv.GetPre()}
@@ -585,7 +601,7 @@ func (e *elector[S]) vote(p *peer, term uint64, rv *leaderv1.RequestVote, now ti
 	e.send(p, &leaderv1.Peer{Term: e.term, Kind: &leaderv1.Peer_Vote{Vote: v}})
 }
 
-func (e *elector[S]) heartbeat(p *peer, term uint64, hb *leaderv1.Heartbeat, now time.Time) {
+func (e *elector) heartbeat(p *peer, term uint64, hb *leaderv1.Heartbeat, now time.Time) {
 	if term == e.term && e.role != Leader {
 		e.role, e.leader, e.heard, e.preVotes = Follower, p.node, now, nil
 		e.electionAt = now.Add(e.timeout())
@@ -615,7 +631,7 @@ func counted(view []string, votes map[string]bool) int {
 
 // preVote asks the view whether it would elect this node, before it
 // campaigns: see RequestVote.pre.
-func (e *elector[S]) preVote(now time.Time) {
+func (e *elector) preVote(now time.Time) {
 	e.preVotes = map[string]bool{e.self: true}
 	if counted(e.view(), e.preVotes) >= e.quorum() {
 		e.campaign(now, false)
@@ -627,7 +643,7 @@ func (e *elector[S]) preVote(now time.Time) {
 	}
 }
 
-func (e *elector[S]) campaign(now time.Time, transfer bool) {
+func (e *elector) campaign(now time.Time, transfer bool) {
 	e.term++
 	e.votedFor, e.role, e.leader, e.preVotes = e.self, Candidate, "", nil
 	e.votes = map[string]bool{e.self: true}
@@ -642,7 +658,7 @@ func (e *elector[S]) campaign(now time.Time, transfer bool) {
 	}
 }
 
-func (e *elector[S]) becomeLeader(now time.Time) {
+func (e *elector) becomeLeader(now time.Time) {
 	e.role, e.leader, e.votes = Leader, e.self, nil
 	// The state is this term's now, newer than any an older leader made
 	// and a follower might still hold: they all take it.
@@ -657,7 +673,7 @@ func (e *elector[S]) becomeLeader(now time.Time) {
 // tick is a leader's heartbeat: it steps down if it has not heard from a
 // majority lately, and asserts itself otherwise, sending the state to the
 // followers that do not hold it.
-func (e *elector[S]) tick(now time.Time) {
+func (e *elector) tick(now time.Time) {
 	e.heartbeatAt = now.Add(e.spec.HeartbeatInterval)
 	stale := 2 * e.spec.ElectionTimeout
 	reached := 1
@@ -685,7 +701,7 @@ func (e *elector[S]) tick(now time.Time) {
 
 // stepDown makes a leader a follower: its checkpoints still waiting fail,
 // and a Resign waiting is answered, as leadership moved on.
-func (e *elector[S]) stepDown(now time.Time, why string) {
+func (e *elector) stepDown(now time.Time, why string) {
 	e.role, e.leader = Follower, ""
 	e.electionAt = now.Add(e.timeout())
 	for _, pc := range e.pending {
@@ -702,7 +718,7 @@ func (e *elector[S]) stepDown(now time.Time, why string) {
 // failed gives up leadership after the singleton could not start or exited
 // by itself, and holds off campaigning for a backoff that doubles with each
 // failure in a row.
-func (e *elector[S]) failed(now time.Time, reason string) {
+func (e *elector) failed(now time.Time, reason string) {
 	e.fails++
 	backoff := e.spec.ElectionTimeout << min(e.fails, 6)
 	e.backoffUntil = now.Add(backoff)
@@ -714,7 +730,7 @@ func (e *elector[S]) failed(now time.Time, reason string) {
 
 // commit answers the checkpoints a majority now holds. The leader's own
 // copy counts once it is saved.
-func (e *elector[S]) commit() {
+func (e *elector) commit() {
 	if !e.save() {
 		return
 	}
@@ -735,7 +751,7 @@ func (e *elector[S]) commit() {
 	}
 }
 
-func (e *elector[S]) checkpoint(m grpcproc.Msg[proto.Message], c *leaderv1.Checkpoint, now time.Time) {
+func (e *elector) checkpoint(m grpcproc.Msg[proto.Message], c *leaderv1.Checkpoint, now time.Time) {
 	if e.role != Leader || c.GetTerm() != e.term {
 		if m.IsCall() {
 			_ = m.Reply(nil, ErrNotLeader)
@@ -748,7 +764,7 @@ func (e *elector[S]) checkpoint(m grpcproc.Msg[proto.Message], c *leaderv1.Check
 // handOver goes on with a Resign: once the singleton has stopped, and the
 // follower with the latest state holds this leader's (or force says not to
 // wait any longer), it tells the follower to campaign, and steps down.
-func (e *elector[S]) handOver(now time.Time, force bool) {
+func (e *elector) handOver(now time.Time, force bool) {
 	r := e.resign
 	if r == nil || e.single.phase != idle && !force {
 		return
@@ -778,23 +794,21 @@ func (e *elector[S]) handOver(now time.Time, force bool) {
 // Confirm and the singleton's start may take their time, and heartbeats
 // must go on meanwhile. The term is saved first: a lease for a term this
 // node could lead again after a restart would be no fencing token.
-func (e *elector[S]) start(now time.Time) {
+func (e *elector) start(now time.Time) {
 	if !e.save() {
 		return
 	}
-	state, err := decode[S](e.state.GetValue())
+	build, err := e.build(e.term, e.state.GetValue())
 	if err != nil {
 		e.failed(now, err.Error())
 		return
 	}
-	term, n, top := e.term, e.p.Node(), e.p.Parent()
-	lease := &Lease[S]{n: n, elector: e.p.PID(), term: term, log: e.p.Log()}
-	confirm, build := e.spec.Confirm, e.spec.Singleton
+	term, top, confirm := e.term, e.p.Parent(), e.spec.Confirm
 	e.single = singleton{phase: starting, term: term}
 	// It fails only while the node stops.
 	_, _ = e.p.Spawn(func(h *grpcproc.Process[proto.Message]) error {
 		started := &leaderv1.Started{Term: term}
-		pid, err := startSingleton(h.Context(), h, top, term, confirm, func() (actor.ChildSpec, error) { return build(lease, state) })
+		pid, err := startSingleton(h.Context(), h, top, term, confirm, build)
 		if err != nil {
 			started.Error = err.Error()
 		} else {
@@ -817,7 +831,7 @@ func startSingleton(ctx context.Context, from grpcproc.Caller, top grpcproc.PID,
 	return actor.StartChild(ctx, from, top, child.WithRestart(actor.Temporary).WithSignificant(false))
 }
 
-func (e *elector[S]) started(b *leaderv1.Started, now time.Time) {
+func (e *elector) started(b *leaderv1.Started, now time.Time) {
 	if b.GetError() != "" {
 		e.single = singleton{}
 		e.failed(now, b.GetError())
@@ -828,7 +842,7 @@ func (e *elector[S]) started(b *leaderv1.Started, now time.Time) {
 	e.single = singleton{phase: running, term: b.GetTerm(), pid: pid, ref: e.p.Monitor(pid)}
 }
 
-func (e *elector[S]) down(d grpcproc.Down, now time.Time) {
+func (e *elector) down(d grpcproc.Down, now time.Time) {
 	switch {
 	case d.Ref == e.bridge:
 		e.bridge, e.bridgeAt = grpcproc.Ref{}, now.Add(e.spec.GhostTTL)
@@ -843,7 +857,7 @@ func (e *elector[S]) down(d grpcproc.Down, now time.Time) {
 }
 
 // peerDown handles a relay's news that its peer's elector is gone.
-func (e *elector[S]) peerDown(b *leaderv1.PeerDown, now time.Time) {
+func (e *elector) peerDown(b *leaderv1.PeerDown, now time.Time) {
 	p := e.peers[b.GetNode()]
 	if p == nil {
 		return // not from a relay of this elector's
@@ -867,7 +881,7 @@ func (e *elector[S]) peerDown(b *leaderv1.PeerDown, now time.Time) {
 	}
 }
 
-func (e *elector[S]) member(b *leaderv1.MemberEvent, now time.Time) {
+func (e *elector) member(b *leaderv1.MemberEvent, now time.Time) {
 	if b.GetNode() == e.self {
 		return
 	}
@@ -890,14 +904,14 @@ func (e *elector[S]) member(b *leaderv1.MemberEvent, now time.Time) {
 
 // shown is the role to report: Unclustered for a follower whose view is too
 // small to elect anyone.
-func (e *elector[S]) shown() Role {
+func (e *elector) shown() Role {
 	if e.role == Follower && !e.static() && len(e.view()) < e.spec.MinClusterSize {
 		return Unclustered
 	}
 	return e.role
 }
 
-func (e *elector[S]) status() *leaderv1.Status {
+func (e *elector) status() *leaderv1.Status {
 	st := &leaderv1.Status{
 		Role:     e.shown().String(),
 		Term:     e.term,
@@ -916,7 +930,7 @@ func (e *elector[S]) status() *leaderv1.Status {
 // inspect publishes what the elector believes: its role and term, the
 // leader, the view and who in it cannot be reached, the state's version,
 // and the singleton.
-func (e *elector[S]) inspect() map[string]string {
+func (e *elector) inspect() map[string]string {
 	v := e.state.GetVersion()
 	out := map[string]string{
 		"role":      e.shown().String(),
