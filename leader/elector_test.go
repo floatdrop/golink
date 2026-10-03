@@ -375,6 +375,24 @@ func TestLeaderStopsGracefully(t *testing.T) {
 }
 
 // A leader that hears of a newer term steps down.
+// A TimeoutNow from a node that is not the leader is no hand-over: the
+// follower that gets it does not campaign.
+func TestTimeoutNowFromAnotherFollower(t *testing.T) {
+	cluster(t, spec, func(t *testing.T, c *grpcproctest.Cluster, j *journal) {
+		settle(2 * time.Second)
+		first, term := elected(t, c, "a", "b", "c")
+		f, g := others(first)[0], others(first)[1]
+		msg := &leaderv1.Peer{Term: term, Kind: &leaderv1.Peer_TimeoutNow{TimeoutNow: &leaderv1.TimeoutNow{}}}
+		if err := c.Node(g).SendTo(t.Context(), grpcproc.Name{Node: f, Name: leader.ElectorName("test")}, msg); err != nil {
+			t.Fatal(err)
+		}
+		settle(time.Second)
+		if lead, term2 := elected(t, c, "a", "b", "c"); lead != first || term2 != term {
+			t.Errorf("%s leads in term %d, after %s in %d", lead, term2, first, term)
+		}
+	})
+}
+
 func TestNewerTerm(t *testing.T) {
 	cluster(t, spec, func(t *testing.T, c *grpcproctest.Cluster, j *journal) {
 		settle(2 * time.Second)

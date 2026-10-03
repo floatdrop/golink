@@ -1,0 +1,29 @@
+digraph "election" {
+	rankdir=LR;
+	compound=true;
+	"__start" [shape=point];
+	subgraph "cluster_not leading" {
+		label="not leading";
+		style=rounded;
+		"follower" [shape=box];
+		"pre-candidate" [shape=box];
+		"candidate" [shape=box];
+	}
+	"leader" [shape=box];
+	"__start" -> "follower";
+	"pre-candidate" -> "candidate" [label="pre-vote quorum"];
+	"follower" -> "candidate" [label="timeout now\n[sent by this term's leader, to a node not cordoned]"];
+	"candidate" -> "leader" [label="vote quorum"];
+	"pre-candidate" -> "follower" [label="heartbeat of this term"];
+	"candidate" -> "follower" [label="heartbeat of this term"];
+	"leader" -> "follower" [label="lost quorum"];
+	"leader" -> "follower" [label="singleton failed"];
+	"leader" -> "follower" [label="handed over"];
+	"leader" -> "follower" [label="newer term"];
+	"follower" -> "pre-candidate" [label="election timeout\n[no backoff, not cordoned, the view may elect]"];
+	"pre-candidate" -> "pre-candidate" [label="election timeout\n[no backoff, not cordoned, the view may elect]"];
+	"candidate" -> "pre-candidate" [label="election timeout\n[no backoff, not cordoned, the view may elect]"];
+	"follower" -> "follower" [label="newer term"];
+	"pre-candidate" -> "follower" [label="newer term"];
+	"candidate" -> "follower" [label="newer term"];
+}

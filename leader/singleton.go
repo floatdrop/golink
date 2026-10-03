@@ -109,7 +109,7 @@ func (e *elector) live(ev fsm.Event[life], l life) {
 
 // holds reports whether this node leads and means to go on: it does not
 // hand over.
-func (e *elector) holds() bool { return e.role == Leader && e.resign == nil }
+func (e *elector) holds() bool { return e.role == leading && e.resign == nil }
 
 func leads(_ context.Context, l life) error {
 	if !l.e.holds() {

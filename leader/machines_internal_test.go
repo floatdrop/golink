@@ -9,10 +9,22 @@ import (
 
 var update = flag.Bool("update", false, "rewrite testdata/*.dot from the machines")
 
-// The singleton's machine has no state it can get stuck in, and reaches
-// every state from idle; its diagram is testdata/singleton.dot, which this
-// test keeps current (go test -run Machines -update).
+// Neither machine has a state it can get stuck in, and each reaches every
+// state from its initial one. Their diagrams are testdata/election.dot and
+// testdata/singleton.dot, which this test keeps current (go test -run
+// Machines -update).
 func TestMachines(t *testing.T) {
+	if got := election.Terminals(); len(got) != 0 {
+		t.Errorf("terminal stances %v: an elector would stay there for good", got)
+	}
+	if got := election.Unreachable(follower); len(got) != 0 {
+		t.Errorf("unreachable stances %v", got)
+	}
+	if got, want := election.States(), []stance{follower, preCandidate, candidate, leading}; !slices.Equal(got, want) {
+		t.Errorf("stances %v, want %v", got, want)
+	}
+	golden(t, "testdata/election.dot", election.DOT())
+
 	if got := lifecycle.Terminals(); len(got) != 0 {
 		t.Errorf("terminal phases %v: a singleton would stay there for good", got)
 	}

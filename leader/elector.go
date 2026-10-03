@@ -42,7 +42,7 @@ func (es *electors[S]) run(p *grpcproc.Process[proto.Message]) error {
 		self:  p.Node().Name(),
 		name:  ElectorName(es.spec.Cluster),
 		peers: map[string]*peer{},
-		role:  Follower,
+		role:  follower,
 		state: &leaderv1.State{Version: &leaderv1.Version{}},
 	}
 	if len(e.spec.Voters) == 0 && e.spec.Membership == nil {
@@ -115,7 +115,7 @@ type elector struct {
 
 	term     uint64
 	votedFor string
-	role     Role // Follower, Candidate or Leader
+	role     stance // see election
 	leader   string
 	votes    map[string]bool // a candidate's
 	preVotes map[string]bool // a follower's, while it asks whether it would win
@@ -246,7 +246,7 @@ func (e *elector) timeout() time.Duration {
 // looked at then.
 func (e *elector) wake(now time.Time) time.Time {
 	t := e.electionAt
-	if e.role == Leader {
+	if e.role == leading {
 		t = e.heartbeatAt
 	}
 	if limit := now.Add(e.spec.HeartbeatInterval); limit.Before(t) {
@@ -257,7 +257,7 @@ func (e *elector) wake(now time.Time) time.Time {
 
 func (e *elector) timers(now time.Time) {
 	e.peersNow(now)
-	if e.role == Leader {
+	if e.role == leading {
 		if e.cordoned(e.self) && e.resign == nil {
 			e.resign = &resignation{deadline: now.Add(4 * e.spec.ElectionTimeout)}
 		}
@@ -266,9 +266,7 @@ func (e *elector) timers(now time.Time) {
 		}
 	} else if !now.Before(e.electionAt) {
 		e.electionAt = now.Add(e.timeout())
-		if !now.Before(e.backoffUntil) && !e.cordoned(e.self) && (e.static() || len(e.view()) >= e.spec.MinClusterSize) {
-			e.preVote(now)
-		}
+		e.move(evElectionTimeout, turn{now: now})
 	}
 	if e.resign != nil && !now.Before(e.resign.deadline) {
 		e.handOver(now, true)
@@ -343,7 +341,7 @@ func (e *elector) handle(m grpcproc.Msg[proto.Message], now time.Time) {
 // canResign says why this node cannot hand over to, if it cannot.
 func (e *elector) canResign(to string) error {
 	switch p := e.peers[to]; {
-	case e.role != Leader:
+	case e.role != leading:
 		return ErrNotLeader
 	case e.resign != nil:
 		return errors.New("leader: already resigning")
@@ -368,7 +366,7 @@ func (e *elector) cordoned(node string) bool {
 // once a majority holds it.
 func (e *elector) cordon(m grpcproc.Msg[proto.Message], c *leaderv1.Cordon, now time.Time) {
 	node, on := c.GetNode(), !c.GetOff()
-	if e.role != Leader {
+	if e.role != leading {
 		_ = m.Reply(nil, ErrNotLeader)
 		return
 	}
@@ -474,43 +472,38 @@ func (e *elector) peer(from string, m *leaderv1.Peer, now time.Time) {
 	// begun; a refused pre-vote carries its voter's term.
 	pre := m.GetRequestVote().GetPre() || m.GetVote().GetPre() && m.GetVote().GetGranted()
 	if m.GetTerm() > e.term && !pre {
-		if e.role == Leader {
-			e.stepDown(now, "a newer term began")
-		}
-		e.term, e.votedFor, e.role, e.leader, e.preVotes = m.GetTerm(), "", Follower, "", nil
+		e.move(evNewerTerm, turn{now: now, term: m.GetTerm(), why: "a newer term began"})
 	}
 	switch k := m.GetKind().(type) {
 	case *leaderv1.Peer_RequestVote:
 		e.vote(p, m.GetTerm(), k.RequestVote, now)
 	case *leaderv1.Peer_Vote:
-		if st := k.Vote.GetState(); st != nil && e.role != Leader && older(e.state.GetVersion(), st.GetVersion()) {
+		if st := k.Vote.GetState(); st != nil && e.role != leading && older(e.state.GetVersion(), st.GetVersion()) {
 			e.state = st // refused for holding older state: now it does not
 		}
 		switch {
 		case !k.Vote.GetGranted():
-		case pre && e.preVotes != nil && m.GetTerm() == e.term+1:
+		case pre && e.role == preCandidate && m.GetTerm() == e.term+1:
 			e.preVotes[from] = true
 			if counted(e.view(), e.preVotes) >= e.quorum() {
-				e.campaign(now, false)
+				e.move(evPreVoteQuorum, turn{now: now})
 			}
-		case !pre && e.role == Candidate && m.GetTerm() == e.term:
+		case !pre && e.role == candidate && m.GetTerm() == e.term:
 			e.votes[from] = true
 			if counted(e.view(), e.votes) >= e.quorum() {
-				e.becomeLeader(now)
+				e.move(evVoteQuorum, turn{now: now})
 			}
 		}
 	case *leaderv1.Peer_Heartbeat:
 		e.heartbeat(p, m.GetTerm(), k.Heartbeat, now)
 	case *leaderv1.Peer_Ack:
-		if e.role == Leader && m.GetTerm() == e.term {
+		if e.role == leading && m.GetTerm() == e.term {
 			p.lastAck, p.acked = now, k.Ack.GetVersion()
 			e.commit()
 			e.handOver(now, false)
 		}
 	case *leaderv1.Peer_TimeoutNow:
-		if m.GetTerm() == e.term && from == e.leader && e.role == Follower && !e.cordoned(e.self) {
-			e.campaign(now, true)
-		}
+		e.move(evTimeoutNow, turn{now: now, term: m.GetTerm(), from: from, transfer: true})
 	}
 }
 
@@ -543,7 +536,7 @@ func (e *elector) admit(from string, m *leaderv1.Peer, now time.Time) *peer {
 // leading reports whether this node is the leader, or heard from one within
 // an election timeout.
 func (e *elector) leading(now time.Time) bool {
-	return e.role == Leader || e.leader != "" && now.Sub(e.heard) < e.spec.ElectionTimeout
+	return e.role == leading || e.leader != "" && now.Sub(e.heard) < e.spec.ElectionTimeout
 }
 
 func (e *elector) vote(p *peer, term uint64, rv *leaderv1.RequestVote, now time.Time) {
@@ -573,12 +566,13 @@ func (e *elector) vote(p *peer, term uint64, rv *leaderv1.RequestVote, now time.
 }
 
 func (e *elector) heartbeat(p *peer, term uint64, hb *leaderv1.Heartbeat, now time.Time) {
-	if term == e.term && e.role != Leader {
-		e.role, e.leader, e.heard, e.preVotes = Follower, p.node, now, nil
+	if term == e.term && e.role != leading {
+		e.leader, e.heard = p.node, now
 		e.electionAt = now.Add(e.timeout())
 		if st := hb.GetState(); st != nil {
 			e.state = st
 		}
+		e.move(evLeaderOfTerm, turn{now: now})
 	}
 	// An older term's leader learns of this one from the answer.
 	e.send(p, &leaderv1.Peer{Term: e.term, Kind: &leaderv1.Peer_Ack{Ack: &leaderv1.Ack{Version: e.state.GetVersion()}}})
@@ -600,47 +594,6 @@ func counted(view []string, votes map[string]bool) int {
 	return n
 }
 
-// preVote asks the view whether it would elect this node, before it
-// campaigns: see RequestVote.pre.
-func (e *elector) preVote(now time.Time) {
-	e.preVotes = map[string]bool{e.self: true}
-	if counted(e.view(), e.preVotes) >= e.quorum() {
-		e.campaign(now, false)
-		return
-	}
-	rv := &leaderv1.RequestVote{Version: e.state.GetVersion(), Pre: true}
-	for _, p := range e.inView() {
-		e.send(p, &leaderv1.Peer{Term: e.term + 1, Kind: &leaderv1.Peer_RequestVote{RequestVote: rv}})
-	}
-}
-
-func (e *elector) campaign(now time.Time, transfer bool) {
-	e.term++
-	e.votedFor, e.role, e.leader, e.preVotes = e.self, Candidate, "", nil
-	e.votes = map[string]bool{e.self: true}
-	e.electionAt = now.Add(e.timeout())
-	if counted(e.view(), e.votes) >= e.quorum() {
-		e.becomeLeader(now)
-		return
-	}
-	rv := &leaderv1.RequestVote{Version: e.state.GetVersion(), Transfer: transfer}
-	for _, p := range e.inView() {
-		e.send(p, &leaderv1.Peer{Term: e.term, Kind: &leaderv1.Peer_RequestVote{RequestVote: rv}})
-	}
-}
-
-func (e *elector) becomeLeader(now time.Time) {
-	e.role, e.leader, e.votes = Leader, e.self, nil
-	// The state is this term's now, newer than any an older leader made
-	// and a follower might still hold: they all take it.
-	e.state = &leaderv1.State{Version: &leaderv1.Version{Term: e.term, Seq: e.state.GetVersion().GetSeq() + 1}, Value: e.state.GetValue(), Cordoned: e.state.GetCordoned()}
-	for _, p := range e.peers {
-		p.lastAck, p.acked, p.sentVersion = now, nil, nil
-	}
-	e.p.Log().Info("leader: elected", "cluster", e.spec.Cluster, "term", e.term)
-	e.tick(now)
-}
-
 // tick is a leader's heartbeat: it steps down if it has not heard from a
 // majority lately, and asserts itself otherwise, sending the state to the
 // followers that do not hold it.
@@ -655,10 +608,10 @@ func (e *elector) tick(now time.Time) {
 	}
 	switch {
 	case !e.static() && len(e.view()) < e.spec.MinClusterSize:
-		e.stepDown(now, "the view is smaller than MinClusterSize")
+		e.move(evLostQuorum, turn{now: now, why: "the view is smaller than MinClusterSize"})
 		return
 	case reached < e.quorum():
-		e.stepDown(now, "a majority has not answered")
+		e.move(evLostQuorum, turn{now: now, why: "a majority has not answered"})
 		return
 	}
 	for _, p := range e.inView() {
@@ -670,22 +623,6 @@ func (e *elector) tick(now time.Time) {
 	}
 }
 
-// stepDown makes a leader a follower: its checkpoints still waiting fail,
-// and a Resign waiting is answered, as leadership moved on.
-func (e *elector) stepDown(now time.Time, why string) {
-	e.role, e.leader = Follower, ""
-	e.electionAt = now.Add(e.timeout())
-	for _, pc := range e.pending {
-		_ = pc.m.Reply(nil, ErrNotLeader)
-	}
-	e.pending = nil
-	if r := e.resign; r != nil {
-		e.resign = nil
-		_ = r.m.Reply(&emptypb.Empty{}, nil)
-	}
-	e.p.Log().Info("leader: stepped down", "cluster", e.spec.Cluster, "term", e.term, "why", why)
-}
-
 // failed gives up leadership after the singleton could not start or exited
 // by itself, and holds off campaigning for a backoff that doubles with each
 // failure in a row.
@@ -694,9 +631,7 @@ func (e *elector) failed(now time.Time, reason string) {
 	backoff := e.spec.ElectionTimeout << min(e.fails, 6)
 	e.backoffUntil = now.Add(backoff)
 	e.p.Log().Warn("leader: the singleton failed", "cluster", e.spec.Cluster, "term", e.term, "reason", reason, "backoff", backoff)
-	if e.role == Leader {
-		e.stepDown(now, "the singleton failed")
-	}
+	e.move(evSingletonFailed, turn{now: now, why: "the singleton failed"})
 }
 
 // commit answers the checkpoints a majority now holds. The leader's own
@@ -723,7 +658,7 @@ func (e *elector) commit() {
 }
 
 func (e *elector) checkpoint(m grpcproc.Msg[proto.Message], c *leaderv1.Checkpoint, now time.Time) {
-	if e.role != Leader || c.GetTerm() != e.term {
+	if e.role != leading || c.GetTerm() != e.term {
 		if m.IsCall() {
 			_ = m.Reply(nil, ErrNotLeader)
 		}
@@ -757,7 +692,7 @@ func (e *elector) handOver(now time.Time, force bool) {
 	} else {
 		e.send(next, &leaderv1.Peer{Term: e.term, Kind: &leaderv1.Peer_TimeoutNow{TimeoutNow: &leaderv1.TimeoutNow{}}})
 	}
-	e.stepDown(now, "resigned")
+	e.move(evHandedOver, turn{now: now, why: "resigned"})
 	_ = r.m.Reply(&emptypb.Empty{}, err)
 }
 
@@ -828,10 +763,10 @@ func (e *elector) member(b *leaderv1.MemberEvent, now time.Time) {
 // shown is the role to report: Unclustered for a follower whose view is too
 // small to elect anyone.
 func (e *elector) shown() Role {
-	if e.role == Follower && !e.static() && len(e.view()) < e.spec.MinClusterSize {
+	if e.role.role() == Follower && !e.static() && len(e.view()) < e.spec.MinClusterSize {
 		return Unclustered
 	}
-	return e.role
+	return e.role.role()
 }
 
 func (e *elector) status() *leaderv1.Status {
